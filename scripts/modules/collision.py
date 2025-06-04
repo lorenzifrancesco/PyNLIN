@@ -3,7 +3,7 @@ from pynlin.nlin import m_th_time_integral_general
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 import os
-from modules.beta_utils import beta2rms, beta2rms_complementary, beta2avg, beta2avg_complementary
+from scripts.modules.beta_utils import beta2rms, beta2rms_complementary, beta2avg, beta2avg_complementary
 from pynlin.pulses import NyquistPulse, GaussianPulse
 
 formatter = ScalarFormatter()

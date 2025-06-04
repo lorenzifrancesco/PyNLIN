@@ -9,17 +9,17 @@ Generates figs:
 
 """
 import pynlin.fiber
-from scripts.modules.time_integrals import do_time_integrals
-from scripts.modules.load_fiber_values import *
 import pynlin.fiber
 import pynlin.wdm
 import pynlin.pulses
+from scripts.modules import cfg
+from scripts.modules.time_integrals import do_time_integrals
+from scripts.modules.load_fiber_values import *
 from scripts.modules.load_fiber_values import load_group_delay
-from modules import cfg
 from scripts.modules.collision import plot_illustrative, plot_dispersion_analysis
 from scripts.modules.threshold import get_fig2_raman, get_fig2
 from scripts.modules.dgd_nlin import noise_plot, noise_histogram
- 
+
 cf = cfg.load_toml_to_struct("./input/config_collision.toml")
 oi_fit = np.load('results/oi_fit.npy')
 oi_avg = np.load('results/oi_avg.npy')
@@ -53,7 +53,7 @@ l_freq = 3e8 / l_limit
 delta = (s_freq - l_freq) * 1e-12
 avg = ((s_freq + l_freq) * 1e-12 / 2)
 
-fig_to_generate = [2]
+fig_to_generate = [3, 4]
 if -1 in fig_to_generate:
   plot_dispersion_analysis(fiber, 
                     wdm, 
@@ -80,6 +80,13 @@ if 3 in fig_to_generate:
              use_fB=True,
              use_dBm_scale=True,
              use_plot_without_x_mode=False)
+  
+  noise_plot(dgd_threshold=3e-15,
+             use_kappa=False,
+             use_smf=False,
+             use_fB=False,
+             use_dBm_scale=False,
+             use_plot_without_x_mode=True)
 
 if 4 in fig_to_generate:
   noise_histogram(dgd_threshold=3e-15, 

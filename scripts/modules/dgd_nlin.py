@@ -30,7 +30,7 @@ def get_nlin(cf,
              use_fB = False,
              use_x_mode_interactions = True):
   oi_fit = np.load('results/oi_fit.npy')
-  print("WARN: the kappa for the LP01-LP01 should be 1.0, but it is not.") 
+  # print("WARN: the kappa for the LP01-LP01 should be 1.0, but it is not.") 
   kappa = np.loadtxt('input/kappa.csv', delimiter=',')
   kappa /= kappa[0, 0]
   if not use_x_mode_interactions:
@@ -122,7 +122,7 @@ def get_nlin(cf,
   for i in modes:
       for j in range(len(freqs)):
         if use_kappa:
-          print("WARN: we are neglecting the fact that the kappa matrix is not symmetric.")
+          # print("WARN: we are neglecting the fact that the kappa matrix is not symmetric.")
           weighted_nlin = np.matmul(kappa, pair_noise(np.abs(beta1 - beta1[i, j])))
           # print(weighted_nlin.shape)
           nlin[i, j] = np.sum(weighted_nlin[i])
