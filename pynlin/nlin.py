@@ -1,7 +1,6 @@
 import functools
 import math
 from typing import Tuple, List
-from numba import jit
 
 import h5py
 import numpy as np

@@ -17,7 +17,7 @@ import pynlin.pulses
 from scripts.modules.load_fiber_values import load_group_delay
 from modules import cfg
 from scripts.modules.collision import plot_illustrative, plot_dispersion_analysis
-from scripts.modules.threshold import get_fig2_raman
+from scripts.modules.threshold import get_fig2_raman, get_fig2
 from scripts.modules.dgd_nlin import noise_plot, noise_histogram
  
 cf = cfg.load_toml_to_struct("./input/config_collision.toml")
@@ -58,18 +58,22 @@ if -1 in fig_to_generate:
   plot_dispersion_analysis(fiber, 
                     wdm, 
                     cf,
-                    recompute=True)
+                    recompute=False)
   
 if 1 in fig_to_generate:
+  # the plot of Marco
   plot_illustrative(fiber, 
                     wdm, 
                     cf,
                     recompute=True)
 
 if 2 in fig_to_generate:
+  get_fig2(recompute=False)
   get_fig2_raman(recompute=False)
 
 if 3 in fig_to_generate:
+  # TODO May 2025 
+  # Plot of the total noise (final)
   noise_plot(dgd_threshold=3e-15, 
              use_kappa=True, 
              use_smf=True,

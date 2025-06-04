@@ -39,6 +39,8 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
       beta2b = -50e-27
       # beta2bar = beta2rms(beta2a, beta2b)
       LDbar = 1/(pulse.baud_rate**2 * np.abs(beta2a))
+      LW = 1/(pulse.baud_rate * np.abs(dgd_hi))
+      print(f"LDbar = {LDbar:.2e} | LW/LDbar = {LW/LDbar:.2e}") 
       z = np.linspace(0, fiber.length, 1000)
       
       # 1. the two pulses
@@ -165,7 +167,7 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
     ls = ["-", "--"]
     names = ["gaussian", "nyquist"]
     for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
-      z = np.linspace(0, fiber.length*3, 1000)
+      z = np.linspace(0, fiber.length*10, 1000)
       # 3. case of very low DGD (almost zero)
       def compute_I_low(pulse, fiber, wdm, z, beta2a, beta2b):
         I_low = np.real(m_th_time_integral_general(
@@ -184,9 +186,9 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
         ]) / cf.baud_rate
         np.save(f"results/I_low_{names[ipulse]}.npy", I_low_values)
       I_low_values = np.load(f"results/I_low_{names[ipulse]}.npy")
-      plt.figure(figsize=(3.5, 3))
-      contour      = plt.contourf(beta2a_values/beta20, beta2b_values/beta20, I_low_values, levels=20, cmap='viridis')
-      contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, I_low_values, levels=10, colors="w")
+      plt.figure(figsize=(2, 2.3))
+      contour      = plt.contourf(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.091), levels=100, cmap='viridis')
+      contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.091), levels=20, colors="w")
       plt.clabel(contour_lines, inline=True, fontsize=8)
 
       plt.xlabel(r'$|\beta_{2A}/\beta_{20}|$')

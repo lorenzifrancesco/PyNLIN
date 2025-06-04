@@ -229,7 +229,7 @@ plt.plot(dgds_analytic * 1e12, fB_integral_min**2 * np.ones_like(dgds_analytic) 
 # # Fra Series
 # plt.plot(dgds_analytic * 1e12, np.ones_like(dgds_analytic) * (LD_eff/ (T * np.sqrt(2 * np.pi))
 #          * np.arcsinh(L / LD_eff))**2 * 1e-30, color='blue', ls=":", label=r'$N^>$')
-# plt.plot(dgds_analytic * 1e12, np.ones_like(dgds_analytic) * 0.406, color='green', ls="--", lw=1, label='Marco')
+# plt.plot(dgds_analytic * 1e12, np.ones_like(dgds_analytic) * 4/9, color='green', ls="--", lw=1, label='Marco')
 # plt.scatter(dgds_numeric_g * 1e12, partial_nlin_gaussian * 1e-30,
 #             color='green', label='Gaussian', marker="x")
 

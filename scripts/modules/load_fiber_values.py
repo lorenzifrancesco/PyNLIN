@@ -14,6 +14,21 @@ def convert_coefficients(p1, p2, p3):
     p3_new = 3 * (avg**2) / (std**3) * p1 - 2 * p2 * avg / (std**2) + p3 / std
     return [p1_new * (2 * np.pi)**2, p2_new * 2 * np.pi, p3_new]
 
+def convert_coefficients_for_beta0(p1, p2, p3):
+    beta_file = './results/fitBeta.mat'
+    std = scipy.io.loadmat(beta_file)['omega_std'][0][0]
+    avg = scipy.io.loadmat(beta_file)['omega_mean'][0][0]
+    p1_new = p1 / (std**2)
+    p2_new = p2 / std
+    p3_new = p3 / std
+    return [p1_new * (2 * np.pi)**2, p2_new * 2 * np.pi, p3_new]
+
+def load_phase_delay() -> np.array:
+    beta_file = './results/fitBeta.mat'
+    mat = scipy.io.loadmat(beta_file)['fitParams']
+    for i in range(4):
+      mat[i, :] = convert_coefficients_for_beta0(mat[i, 0], mat[i, 1], mat[i, 2])
+    return mat
 
 def load_group_delay() -> np.array:
     beta_file = './results/fitBeta.mat'
@@ -22,22 +37,19 @@ def load_group_delay() -> np.array:
       mat[i, :] = convert_coefficients(mat[i, 0], mat[i, 1], mat[i, 2])
     return mat
 
-
 def load_dummy_group_delay() -> np.ndarray:
   mat = np.zeros((4, 3))
   for i in range(4):
     mat[i, :] = [0.0, -1.1770516856235059e-26, (5.0255297044767565+0.0001*i)*1e-09]
   return mat
 
-
 def load_gvd() -> np.array:
     beta_file = './results/fitBeta.mat'
     mat = scipy.io.loadmat(beta_file)['fitParams'] * 1.0
-
+    assert(False)
     for i in range(4):
         mat[:, i] = convert_coefficients
     return mat
-
 
 def load_oi() -> np.array:
     oi_file = 'oi.mat'

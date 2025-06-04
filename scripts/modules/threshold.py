@@ -17,10 +17,13 @@ import scripts.modules.cfg as cfg
 from scipy.interpolate import interp1d
 from pynlin.collisions import get_m_values, get_collision_location
 import matplotlib.colors as mcolors
+from scipy.optimize import curve_fit
+
 
 def adjust_luminosity(color, factor):
     rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB
     return np.clip(rgb * factor, 0, 1)  # Scale and clip values
+
 
 def get_space_integrals(m, z, I):
     '''
@@ -74,12 +77,13 @@ def get_nlin_threshold(
     gvds = [-35e-27]
     #
     print(
-        f"Computing the channel-pair NLIN coefficient insides [{dgd1*1e12:.1e}, {dgd2g*1e12:.1e}] ps/m ")
+        f"Computing the channel-pair NLIN coefficient insides [{dgd1 * 1e12:.1e}, {dgd2g * 1e12:.1e}] ps/m ")
     #
     if use_fB:
-        modes = ["min", "max"] 
-        solutions = np.load("results/ct_solution-2_gain_0.0.npy", allow_pickle=True).item()
-        signal_powers = solutions['signal_sol'] 
+        modes = ["min", "max"]
+        solutions = np.load("results/ct_solution-2_gain_0.0.npy",
+                            allow_pickle=True).item()
+        signal_powers = solutions['signal_sol']
         signal_powers = np.swapaxes(signal_powers, 1, 2)
         print(np.shape(signal_powers))
         fB_max = np.max(signal_powers, axis=(1, 2))
@@ -97,7 +101,7 @@ def get_nlin_threshold(
 
         fB2_antonio_max = np.sum(fB_max**2) * dz / dummy_fiber.length
         fB2_antonio_min = np.sum(fB_min**2) * dz / dummy_fiber.length
-        
+
         def fB_max_function(z):
             return np.polyval(coeffs_max, z)
 
@@ -105,12 +109,13 @@ def get_nlin_threshold(
             return np.polyval(coeffs_min, z)
     else:
         modes = ["perfect"]
+
         def fB_max_function(z):
             return 1.0
 
         def fB_min_function(z):
             return 1.0
-          
+
     def get_space_integrals_max(m, z, I):
         X0mm = X0mm_space_integral(z, I, amplification_function=fB_max_function)
         return X0mm
@@ -159,10 +164,9 @@ def get_nlin_threshold(
             # 6e-9 for our fiber
             dgds_numeric = np.logspace(
                 np.log10(dgd1), np.log10(dgd2), n_samples_numeric)
-            print(dgds_numeric)
             dgds_analytic = np.linspace(dgd1, dgd2, n_samples_analytic)
-            
-            partial_nlin     = np.zeros(n_samples_numeric)
+
+            partial_nlin = np.zeros(n_samples_numeric)
             partial_nlin_min = np.zeros(n_samples_numeric)
             partial_nlin_max = np.zeros(n_samples_numeric)
             a_chan = (1, 1)
@@ -175,10 +179,10 @@ def get_nlin_threshold(
                     X0mm_min = get_space_integrals_min(m, z, I)
                     X0mm_max = get_space_integrals_max(m, z, I)
                     X0mm = get_space_integrals(m, z, I)
-                    partial_nlin[id]     = np.sum(X0mm**2)
+                    partial_nlin[id] = np.sum(X0mm**2)
                     partial_nlin_min[id] = np.sum(X0mm_min**2)
                     partial_nlin_max[id] = np.sum(X0mm_max**2)
-                
+
                 if px == 0:
                     np.save("results/partial_nlin_gaussian_perfect" +
                             str(gvd) + "B2.npy", partial_nlin)
@@ -203,8 +207,8 @@ def get_nlin_threshold(
     nlin_analytic_max = np.zeros_like(dgds_analytic)
     nlin_analytic_min = np.zeros_like(dgds_analytic)
     for ix, i in enumerate(dgds_analytic):
-      nlin_analytic_max[ix] = antonio_rescale_max(i)/(i**2)
-      nlin_analytic_min[ix] = antonio_rescale_min(i)/(i**2)
+        nlin_analytic_max[ix] = antonio_rescale_max(i) / (i**2)
+        nlin_analytic_min[ix] = antonio_rescale_min(i) / (i**2)
 
     analytic_nlin[analytic_nlin > 1e30] = np.nan
     dgds_numeric_g = np.logspace(np.log10(dgd1), np.log10(dgd2g), n_samples_numeric_g)
@@ -215,164 +219,220 @@ def get_nlin_threshold(
 
     dpi = 300
     grid = False
+
+    ### plotting the threshold
     plt.figure(figsize=(3.6, 3))
-    color_modes = [adjust_luminosity('magenta', 0.8), adjust_luminosity('cyan', 0.8),  'green']
+    color_modes = [adjust_luminosity('magenta', 0.8),
+                   adjust_luminosity('cyan', 0.8), 'green']
     for im, mode in enumerate(modes):
-      # antonio_function = antonio_rescale_max if mode == "max" else antonio_rescale_min
-      # analytic_nlin = np.zeros_like(dgds_numeric_g)
-      # for ix, i in enumerate(dgds_numeric_g):
-      #   analytic_nlin[ix] = antonio_function(i)/(i**2)
-        
-      analytic_nlin = L / (T * dgds_numeric_g)
-      if mode == "max":
-        analytic_nlin = analytic_nlin * fB2_antonio_max
-      elif mode == "min":
-        analytic_nlin = analytic_nlin * fB2_antonio_min
-        
-      gauss   = np.ones_like(dgds_analytic) * np.sqrt(np.pi) * (LD_eff / (T * np.sqrt(2 * np.pi))
-                                                    * np.arcsinh(L / LD_eff))**2
-      nyquist = np.ones_like(dgds_analytic) * 0.406 / y_norm  # 0.444=4/9 instead of 0.406
-      if mode == "max":
-        gauss   *= fB_integral_max**2
-        nyquist *= fB_integral_max**2
-      elif mode == "min":
-        gauss   *= fB_integral_min**2
-        nyquist *= fB_integral_min**2
-      
-      plt.plot(dgds_numeric_g * x_norm,
-              analytic_nlin * y_norm,
-              lw=1,
-              color=adjust_luminosity('orange', 0.9))
-      plt.plot(dgds_analytic * x_norm,
-              gauss * y_norm,
-              color=color_modes[im],
-              lw=1,
-              ls=":",
-              label=r'$N^>$')
-      plt.plot(dgds_analytic * x_norm,
-              nyquist * y_norm,
-              color=color_modes[im],
-              ls="--",
-              lw=1,
-              label='Marco')
-      lowest_dgd = 0.0
-      lw = 1
-      ss = 20
-      for ix, gvd in enumerate(gvds):
-          partial_B2g = (np.load("results/partial_nlin_gaussian_"+ mode + str(gvd) + "B2.npy"))
-          partial_B2n = (np.load("results/partial_nlin_nyquist_" + mode + str(gvd) + "B2.npy"))
-          if ix == 0:
-              lowest_dgd = partial_B2g[0]
-          print(partial_B2g)
-          plt.scatter(dgds_numeric_g * x_norm,
-                      partial_B2g * y_norm,
-                      label='Gauss.' + str(gvd),
-                      color=color_modes[im],
-                      marker="x",
-                      s=ss,
-                      lw=lw
-                      )
-          plt.scatter(dgds_numeric_n * x_norm,
-                      partial_B2n * y_norm,
-                      label='Nyq.' + str(gvd),
-                      color=color_modes[im],
-                      marker="*",
-                      s=ss,
-                      lw=lw
-                      )
+        # antonio_function = antonio_rescale_max if mode == "max" else antonio_rescale_min
+        # analytic_nlin = np.zeros_like(dgds_numeric_g)
+        # for ix, i in enumerate(dgds_numeric_g):
+        #   analytic_nlin[ix] = antonio_function(i)/(i**2)
 
-      print(
-          f"DGD low. num = {lowest_dgd:.3e}, ra < = {(L/ (T * np.sqrt(2 * np.pi)))**2:.3e}")
-      # plt.legend()
-      plt.yscale('log')
-      ymin, ymax = plt.ylim()
-      plt.ylim(ymin, 1.0)
-      plt.ylim([0.5e-3, 0.15])
-      plt.xscale('log')
-      plt.xlabel(r'$L_W/L$')
-      plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
-      plt.tight_layout()
-      if use_fB:
-          plt.savefig(f"media/2-threshold_raman.pdf", dpi=dpi)
-      else:
-          plt.savefig(f"media/2-threshold.pdf", dpi=dpi)
+        na_nlin = L / (T * dgds_numeric_g)
+        if mode == "max":
+            na_nlin = na_nlin * fB2_antonio_max
+        elif mode == "min":
+            na_nlin = na_nlin * fB2_antonio_min
 
-      if not use_fB:
-          plt.clf()
-          plt.figure(figsize=(3.6, 2))
-          lowest_dgd = 0.0
-          lw = 1
-          ss = 5
-          skip_g = n_samples_analytic // n_samples_numeric_g
-          skip_n = n_samples_analytic // n_samples_numeric_n
+        gauss = np.ones_like(dgds_analytic) * np.sqrt(np.pi) * (LD_eff / (T * np.sqrt(2 * np.pi))
+                                                                * np.arcsinh(L / LD_eff))**2
+        nyquist = np.ones_like(dgds_analytic) * 4/9 / \
+            y_norm  # 0.444=4/9 instead of 0.406
+        if mode == "max":
+            gauss *= fB_integral_max**2
+            nyquist *= fB_integral_max**2
+        elif mode == "min":
+            gauss *= fB_integral_min**2
+            nyquist *= fB_integral_min**2
 
-          interp_g = interp1d(dgds_analytic, gauss, kind='cubic')
-          interp_n = interp1d(dgds_analytic, nyquist, kind='cubic')
-          interp_a = interp1d(dgds_analytic, analytic_nlin, kind='linear')
+        plt.plot(dgds_numeric_g * x_norm,
+                 na_nlin * y_norm,
+                 lw=1,
+                 color=adjust_luminosity('orange', 0.9))
+        plt.plot(dgds_analytic * x_norm,
+                 gauss * y_norm,
+                 color=color_modes[im],
+                 lw=1,
+                 ls=":",
+                 label=r'$N^>$')
+        plt.plot(dgds_analytic * x_norm,
+                 nyquist * y_norm,
+                 color=color_modes[im],
+                 ls="--",
+                 lw=1,
+                 label='Marco')
+        lowest_dgd = 0.0
+        lw = 1
+        ss = 20
 
-          gauss_sampled = interp_g(dgds_numeric_g)
-          nyquist_sampled = interp_n(dgds_numeric_n)
-          analytic_nlin_sampled = interp_a(dgds_numeric_g)
-          for ix, gvd in enumerate(gvds):
-              partial_B2g = (
-                  np.load("results/partial_nlin_gaussian" + str(gvd) + "B2.npy"))
-              if ix == 0:
-                  lowest_dgd = partial_B2g[0]
-              plt.plot(dgds_numeric_g * x_norm,
-                      np.abs(partial_B2g - gauss_sampled) / gauss_sampled,
-                      label='Gauss.' + str(gvd),
-                      color="blue",
-                      marker="x",
-                      markersize=ss,
-                      lw=lw
-                      )
-              plt.plot(dgds_numeric_g * x_norm,
-                      np.abs(partial_B2g - analytic_nlin_sampled) /
-                      analytic_nlin_sampled,
-                      label='Gauss.' + str(gvd),
-                      color="blue",
-                      marker="x",
-                      markersize=ss,
-                      lw=lw,
-                      ls="-."
-                      )
-              partial_B2n = (
-                  np.load("results/partial_nlin_nyquist" + str(gvd) + "B2.npy"))
-              plt.plot(dgds_numeric_n * x_norm,
-                      np.abs(partial_B2n - nyquist_sampled) / nyquist_sampled,
-                      label='Nyq.' + str(gvd),
-                      color="green",
-                      marker="*",
-                      markersize=ss,
-                      lw=lw
-                      )
-              plt.plot(dgds_numeric_n * x_norm,
-                      np.abs(partial_B2n - analytic_nlin_sampled) /
-                      analytic_nlin_sampled,
-                      label='Nyq.' + str(gvd),
-                      color="green",
-                      marker="*",
-                      markersize=ss,
-                      lw=lw,
-                      ls="-.",
-                      )
-          print(y_norm * partial_B2g)
-          print(y_norm * gauss_sampled)
-          print("*" * 30)
-          print(y_norm * partial_B2n)
-          print(y_norm * nyquist_sampled)
-          print("*" * 30)
-          print(y_norm * analytic_nlin_sampled)
-          print(
-              f"DGD low. num = {lowest_dgd:.3e}, ra < = {(L/ (T * np.sqrt(2 * np.pi)))**2:.3e}")
-          # plt.legend()
-          # plt.yscale('log')
-          plt.xscale('log')
-          plt.ylim([0, 0.3])
-          plt.xlabel(r'$L_W/L$')
-          plt.ylabel(r'$\varepsilon$')
-          plt.tight_layout()
-          plt.savefig(f"media/2-error.pdf", dpi=dpi)
+        def softplus2(x, a, b, c):
+            return a * (1 + (x/b)**(1 / c))**(-c)
+
+
+        for ix, gvd in enumerate(gvds):
+            partial_B2g = (np.load("results/partial_nlin_gaussian_" +
+                           mode + str(gvd) + "B2.npy"))
+            partial_B2n = (np.load("results/partial_nlin_nyquist_" +
+                           mode + str(gvd) + "B2.npy"))
+            p0 = [0.2, 4.5, 0.5]
+            poptN, pcov = curve_fit(softplus2, dgds_numeric_n * x_norm,
+                               partial_B2n * y_norm, p0=p0)
+            # p0 = [partial_B2g[0], 0.4, 0.5]
+            poptG, pcov = curve_fit(softplus2, dgds_numeric_g * x_norm,
+                               partial_B2g * y_norm, p0=p0)
+            print("OPT-G", poptG)
+            print("OPT-N", poptN)
+            if ix == 0:
+                lowest_dgd = partial_B2g[0]
+            plt.plot(dgds_analytic * x_norm,
+                     softplus2(dgds_analytic * x_norm, *poptG),
+                     color="gray",
+                     lw=0.6,
+                    #  ls="-."
+                     )
+            plt.plot(dgds_analytic * x_norm,
+                     softplus2(dgds_analytic * x_norm, *poptN),
+                     color="gray",
+                     lw=0.6,
+                    #  ls="-."
+                     )
+            plt.scatter(dgds_numeric_g * x_norm,
+                        partial_B2g * y_norm,
+                        label='Gauss.' + str(gvd),
+                        color=color_modes[im],
+                        marker="x",
+                        s=ss,
+                        lw=lw
+                        )
+            plt.scatter(dgds_numeric_n * x_norm,
+                        partial_B2n * y_norm,
+                        label='Nyq.' + str(gvd),
+                        color=color_modes[im],
+                        marker="*",
+                        s=ss,
+                        lw=lw
+                        )
+
+        print(
+            f"DGD low. num = {lowest_dgd:.3e}, ra < = {(L / (T * np.sqrt(2 * np.pi)))**2:.3e}")
+        # plt.legend()
+        plt.xscale('log')
+        plt.yscale('log')
+        ymin, ymax = plt.ylim()
+        plt.ylim(ymin, 1.0)
+        if use_fB:
+            plt.ylim([0.5e-3, 0.1])
+        else:
+            plt.ylim([0.7e-2, 1])
+        plt.xlabel(r'$L_W/L$')
+        plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
+        plt.tight_layout()
+        if use_fB:
+            plt.savefig(f"media/2-threshold_raman.pdf", dpi=dpi)
+            print(
+                f"Saving the figure in media/2-threshold_raman.pdf, dpi={dpi}")
+        else:
+            plt.savefig(f"media/2-threshold.pdf", dpi=dpi)
+            print(
+                f"Saving the figure in media/2-threshold.pdf, dpi={dpi}")
+            
+        ### plotting the error
+        if not use_fB:
+            plt.clf()
+            plt.figure(figsize=(3.6, 2))
+            lowest_dgd = 0.0
+            lw = 1
+            ss = 5
+            skip_g = n_samples_analytic // n_samples_numeric_g
+            skip_n = n_samples_analytic // n_samples_numeric_n
+
+            interp_g = interp1d(dgds_analytic, gauss, kind='cubic')
+            interp_n = interp1d(dgds_analytic, nyquist, kind='cubic')
+            interp_a = interp1d(dgds_analytic, analytic_nlin, kind='linear')
+
+            gauss_sampled = interp_g(dgds_numeric_g)
+            nyquist_sampled = interp_n(dgds_numeric_n)
+            analytic_nlin_sampled = interp_a(dgds_numeric_g)
+            for ix, gvd in enumerate(gvds):
+                partial_B2g = (
+                    np.load("results/partial_nlin_gaussian" + str(gvd) + "B2.npy"))
+                if ix == 0:
+                    lowest_dgd = partial_B2g[0]
+                plt.plot(dgds_numeric_g * x_norm,
+                         np.abs(partial_B2g - gauss_sampled) / gauss_sampled,
+                         label='Gauss.' + str(gvd),
+                         color="blue",
+                         marker="x",
+                         markersize=ss,
+                         lw=lw
+                         )
+                plt.plot(dgds_numeric_g * x_norm,
+                         np.abs(partial_B2g - analytic_nlin_sampled) /
+                         analytic_nlin_sampled,
+                         label='Gauss.' + str(gvd),
+                         color="blue",
+                         marker="x",
+                         markersize=ss,
+                         lw=lw,
+                         ls="-."
+                         )
+                print(partial_B2g[:10]*y_norm)
+                print(softplus2(dgds_numeric_g * x_norm, *poptG)[:10])
+                plt.plot(dgds_numeric_n * x_norm,
+                         np.abs(partial_B2g*y_norm - softplus2(dgds_numeric_g * x_norm, *poptG)) /
+                           softplus2(dgds_numeric_g * x_norm, *poptG),
+                           color="gray",
+                           ls=":",
+                           lw=lw,
+                           marker="x", markerfacecolor='none', markersize=ss
+                           )
+                partial_B2n = (
+                    np.load("results/partial_nlin_nyquist" + str(gvd) + "B2.npy"))
+                plt.plot(dgds_numeric_n * x_norm,
+                         np.abs(partial_B2n - nyquist_sampled) / nyquist_sampled,
+                         label='Nyq.' + str(gvd),
+                         color="green",
+                         marker="*",
+                         markersize=ss,
+                         lw=lw
+                         )
+                plt.plot(dgds_numeric_n * x_norm,
+                         np.abs(partial_B2n - analytic_nlin_sampled) /
+                         analytic_nlin_sampled,
+                         label='Nyq.' + str(gvd),
+                         color="green",
+                         marker="*",
+                         markersize=ss,
+                         lw=lw,
+                         ls="-.",
+                         )
+                plt.plot(dgds_numeric_n * x_norm,
+                         np.abs(partial_B2n*y_norm - softplus2(dgds_numeric_n * x_norm, *poptN)) /
+                           softplus2(dgds_numeric_n * x_norm, *poptN),
+                           color="gray", 
+                           lw=lw,
+                           ls=":",
+                           marker="*", markerfacecolor='none', markersize=ss)
+            # print(y_norm * partial_B2g)
+            # print(y_norm * gauss_sampled)
+            # print("*" * 30)
+            # print(y_norm * partial_B2n)
+            # print(y_norm * nyquist_sampled)
+            # print("*" * 30)
+            # print(y_norm * analytic_nlin_sampled)
+            print(
+                f"DGD low. num = {lowest_dgd:.3e}, ra < = {(L / (T * np.sqrt(2 * np.pi)))**2:.3e}")
+            # plt.legend()
+            # plt.yscale('log')
+            plt.xscale('log')
+            plt.ylim([-0.05, 0.3])
+            plt.xlabel(r'$L_W/L$')
+            plt.ylabel(r'$\varepsilon$')
+            plt.tight_layout()
+            plt.savefig(f"media/2-error.pdf", dpi=dpi)
+            print(f"Saving the figure in media/2-error.pdf, dpi={dpi}")
 
 def get_fig2(recompute=False):
     return get_nlin_threshold(recompute=recompute, use_fB=False)
@@ -380,3 +440,7 @@ def get_fig2(recompute=False):
 
 def get_fig2_raman(recompute=False):
     return get_nlin_threshold(recompute=recompute, use_fB=True)
+
+if __name__ == "__main__":
+    get_fig2(recompute=False)
+    # get_fig2_raman(recompute=False)

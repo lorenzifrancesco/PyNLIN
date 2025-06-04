@@ -14,6 +14,8 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import ScalarFormatter
 import scripts.modules.cfg as cfg
 from pynlin.utils import watt2dBm, dBm2watt
+from scipy.optimize import curve_fit
+
 
 def get_nlin_prefactor(cf):
   gamma = 1.3e-3
@@ -357,4 +359,3 @@ def noise_histogram(dgd_threshold = 3e-15,
   # plt.ylim([2e-2, 1e0])
   plt.savefig(f"media/6-noise.pdf", dpi=dpi)
   print("The figure is saved as media/6-noise.pdf")
- 
