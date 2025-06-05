@@ -8,7 +8,7 @@ from matplotlib import rc
 import pynlin.wdm
 from pynlin.utils import nu2lambda
 from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay
-from scripts.modules.threshold import get_nlin_threshold, softplus2
+from scripts.modules.threshold import get_raman_corrections, get_fit_coefficients, softplus2
 from numpy import polyval
 from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec
@@ -32,6 +32,11 @@ def get_nlin(cf,
              use_kappa=False,
              use_fB=False,
              use_x_mode_interactions=True):
+    nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
+    T = 1 / cf.baud_rate
+    L = cf.fiber_length
+    x_norm = L / T
+    y_norm = x_norm**(-2)
     oi_fit = np.load('results/oi_fit.npy')
     # print("WARN: the kappa for the LP01-LP01 should be 1.0, but it is not.")
     kappa = np.loadtxt('input/kappa.csv', delimiter=',')
@@ -111,37 +116,38 @@ def get_nlin(cf,
     nlin = np.zeros((len(modes), len(freqs)))
     # only flat up to this point
 
-    # TODO implemen the fitting of the Gaussian noise
     if dgd_threshold <= 0:
         raise NotImplementedError(
             "The dgd_threshold must be greater than 0 to compute the noise.")
-    # TODO also implement different procedure for Gaussian and Nyquist
-    fBlo_plus, fBlo_minus, fBhi_plus, fBhi_minus, poptG, poptN = get_nlin_threshold(
-        recompute=False,
-        use_fB=True,
-        plotting=False
-    )
-    popt = poptG if cf.pulse_shape == 'Gaussian' else poptN
-    lincomb_lo = (low_dgd_fB - fBlo_minus) / (fBlo_plus - fBlo_minus)
-    lincomb_hi = (high_dgd_fB - fBhi_minus) / (fBhi_plus - fBhi_minus)
-    print(f"Using the following parameters for the noise threshold: {popt}")
-    print(
-        f"Using the following linear combinations for the noise threshold: {lincomb_lo}, {lincomb_hi}")
-    exit()
-    ############################
-    # GAUSSIAN NOISE\
+    f_lo_plus, f_lo_minus, f_hi_plus, f_hi_minus = get_raman_corrections()
+    ps_g, ps_n = get_fit_coefficients()
+    ps = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
+    lincomb_lo = (low_dgd_fB - f_lo_minus) / (f_lo_plus - f_lo_minus)
+    lincomb_hi = (high_dgd_fB - f_hi_minus) / (f_hi_plus - f_hi_minus)
+    d_min = nc.dgd1
+    d_max = nc.dgd2_g
+    d_span = d_max - d_min
+    assert (nc.dgd2_n == nc.dgd2_g)
+
+    lc = lambda d: 1/d_span * ((d_max-d) * lincomb_lo + (d-d_min) * lincomb_hi)
+    # Strategy 1) lincomb of the lincombs LOL but effective - difficult to implement
+    # Strategy 2) just take the average lincomb for  
+
+    # beware, we have a mixed unit system here, so we need to be careful
+    lc_softplus = lambda d: (lc(d) * softplus2(d * x_norm, *ps[0, :]) + (1-lc(d)) * softplus2(d*x_norm, *ps[1, :])) / y_norm
 
     def pair_noise(dgd):
-        nlin_vec = np.where(
-            dgd > dgd_threshold,  # this needs to be set carefully
-            L / (T * dgd) * high_dgd_fB,
-            np.sqrt(np.pi) * (L / (T * np.sqrt(2 * np.pi)))**2 * low_dgd_fB
-        )
-        nlin_vec = np.where(
-            dgd == 0,
-            0,
-            nlin_vec
-        )
+        nlin_vec = lc_softplus(dgd)
+        # nlin_vec = np.where(
+        #     dgd > dgd_threshold,  # this needs to be set carefully
+        #     L / (T * dgd) * high_dgd_fB,
+        #     np.sqrt(np.pi) * (L / (T * np.sqrt(2 * np.pi)))**2 * low_dgd_fB
+        # )
+        # nlin_vec = np.where(
+        #     dgd == 0,
+        #     0,
+        #     nlin_vec
+        # )
         return nlin_vec
     #
     for i in modes:
