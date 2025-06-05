@@ -51,9 +51,10 @@ l_freq = 3e8 / l_limit
 # print(s_freq * 1e-12)
 # print(l_freq * 1e-12)
 delta = (s_freq - l_freq) * 1e-12
-avg = ((s_freq + l_freq) * 1e-12 / 2)
+avg = ((s_freq + l_freq) * 1e-12 / 2) 
 
-fig_to_generate = [3, 4]
+###########
+fig_to_generate = [3]
 if -1 in fig_to_generate:
   plot_dispersion_analysis(fiber, 
                     wdm, 
@@ -74,19 +75,31 @@ if 2 in fig_to_generate:
 if 3 in fig_to_generate:
   # TODO May 2025 
   # Plot of the total noise (final)
-  noise_plot(dgd_threshold=3e-15, 
-             use_kappa=True, 
+  # noise_plot(dgd_threshold=3e-15, 
+  #            use_kappa=True, 
+  #            use_smf=True,
+  #            use_fB=True,
+  #            use_dBm_scale=True,
+  #            use_plot_without_x_mode=False)
+  
+  # This plots the same results as in the paper, but about 2dB lower
+  # OK, it seems that the issue is that we were using -1.5dBm launch power for the prefactor
+
+  noise_plot(dgd_threshold=3e-15,
+             use_kappa=True,
              use_smf=True,
              use_fB=True,
              use_dBm_scale=True,
              use_plot_without_x_mode=False)
   
-  noise_plot(dgd_threshold=3e-15,
-             use_kappa=False,
-             use_smf=False,
-             use_fB=False,
-             use_dBm_scale=False,
-             use_plot_without_x_mode=True)
+  noise_plot(dgd_threshold=-1,
+             use_kappa=True,
+             use_smf=True,
+             use_fB=True,
+             use_dBm_scale=True,
+             use_plot_without_x_mode=False)
+  
+  
 
 if 4 in fig_to_generate:
   noise_histogram(dgd_threshold=3e-15, 

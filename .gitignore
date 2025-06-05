@@ -2,6 +2,7 @@
 /input
 /run
 /additional
+*.bak
 INSTRUCTIONS.md
 
 # Byte-compiled / optimized / DLL files

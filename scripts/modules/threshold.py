@@ -3,8 +3,6 @@ import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rc
-import plotly.graph_objects as go
-import seaborn as sns
 import pynlin.wdm
 from pynlin.utils import nu2lambda
 from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay
@@ -101,6 +99,11 @@ def get_nlin_threshold(
 
         fB2_antonio_max = np.sum(fB_max**2) * dz / dummy_fiber.length
         fB2_antonio_min = np.sum(fB_min**2) * dz / dummy_fiber.length
+
+        np.save("results/fits/fB_integral_max.npy", fB_integral_max)
+        np.save("results/fits/fB_integral_min.npy", fB_integral_min)
+        np.save("results/fits/fB2_antonio_max.npy", fB2_antonio_max)
+        np.save("results/fits/fB2_antonio_min.npy", fB2_antonio_min)
 
         def fB_max_function(z):
             return np.polyval(coeffs_max, z)
@@ -282,6 +285,9 @@ def get_nlin_threshold(
             # p0 = [partial_B2g[0], 0.4, 0.5]
             poptG, pcov = curve_fit(softplus2, dgds_numeric_g * x_norm,
                                partial_B2g * y_norm, p0=p0)
+            
+            np.save("results/popt_nyquist_" + mode + ".npy", poptN)
+            np.save("results/popt_gaussian_" + mode + ".npy", poptG)
             print("OPT-G", poptG)
             print("OPT-N", poptN)
             if ix == 0:
@@ -442,5 +448,5 @@ def get_fig2_raman(recompute=False):
     return get_nlin_threshold(recompute=recompute, use_fB=True)
 
 if __name__ == "__main__":
-    get_fig2(recompute=False)
-    # get_fig2_raman(recompute=False)
+    # get_fig2(recompute=False)
+    get_fig2_raman(recompute=False)

@@ -40,7 +40,9 @@ def plot_profiles(signal_wavelengths,
     # plt.legend()
     plt.tight_layout()
     plt.grid(False)
-    plt.savefig(get_next_filename("media/optimization/signal_ase_profile", "pdf", use_active_naming=True))
+    name = get_next_filename("media/optimization/signal_ase_profile", "pdf", use_active_naming=True)
+    plt.savefig(name)
+    print(f"Plot saved as {name}")
     plt.clf()
     #
     plt.figure(figsize=(4, 3))
@@ -55,7 +57,9 @@ def plot_profiles(signal_wavelengths,
     plt.xlabel(r"$z$ [km]")
     # plt.legend()
     plt.tight_layout()
-    plt.savefig(get_next_filename("media/optimization/pump_profile", "pdf", use_active_naming=True))
+    name = get_next_filename("media/optimization/pump_profile", "pdf", use_active_naming=True)
+    plt.savefig(name)
+    print(f"Plot saved as {name}")
     #
     loss = -0.2e-3 * cf.fiber_length
     on_off_gain = -loss + cf.raman_gain
@@ -71,8 +75,9 @@ def plot_profiles(signal_wavelengths,
     plt.xlabel(r"Channel Wavelength [$\mu$ m]")
     plt.ylabel("On Off Gain [dB]")
     plt.tight_layout()
-    plt.savefig(get_next_filename("media/optimization/flatness", "pdf", use_active_naming=True))
-    print(f"Plot saved.")
+    name = get_next_filename("media/optimization/flatness", "pdf", use_active_naming=True)
+    plt.savefig(name)
+    print(f"Plot saved as {name}")
     return
 
 

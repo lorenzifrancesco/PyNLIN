@@ -3,11 +3,12 @@ import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rc
-import plotly.graph_objects as go
-import seaborn as sns
+# import plotly.graph_objects as go
+# import seaborn as sns
 import pynlin.wdm
 from pynlin.utils import nu2lambda
 from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay
+from scripts.modules.threshold import get_nlin_threshold, softplus2
 from numpy import polyval
 from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec
@@ -18,6 +19,7 @@ from scipy.optimize import curve_fit
 
 
 def get_nlin_prefactor(cf):
+  print("Computing the NLIN prefactor for the MMF.")
   gamma = 1.3e-3
   P_in = dBm2watt(-1.5)
   constellation_factor = 0.32
@@ -104,6 +106,21 @@ def get_nlin(cf,
   nlin = np.zeros((len(modes), len(freqs)))
   # only flat up to this point
 
+  ### TODO implemen the fitting of the Gaussian noise
+  if dgd_threshold <= 0:
+     raise NotImplementedError("The dgd_threshold must be greater than 0 to compute the noise.")
+  # TODO also implement different procedure for Gaussian and Nyquist
+  fBlo_plus, fBlo_minus, fBhi_plus, fBhi_minus, poptG, poptN = get_nlin_threshold(
+      recompute=False,
+      use_fB=True,
+      plotting=False
+  )
+  popt = poptG if cf.pulse_shape == 'Gaussian' else poptN
+  lincomb_lo = (low_dgd_fB - fBlo_minus)/(fBlo_plus - fBlo_minus)
+  lincomb_hi = (high_dgd_fB - fBhi_minus)/(fBhi_plus - fBhi_minus)
+  print(f"Using the following parameters for the noise threshold: {popt}")
+  print(f"Using the following linear combinations for the noise threshold: {lincomb_lo}, {lincomb_hi}")
+  exit()
   ############################
   # GAUSSIAN NOISE\
   def pair_noise(dgd):
@@ -173,7 +190,8 @@ def noise_plot(dgd_threshold = 3e-15,
                       dgd_threshold=dgd_threshold, 
                       use_kappa=use_kappa,
                       use_fB=use_fB,
-                      use_x_mode_interactions=True)
+                      use_x_mode_interactions=True, 
+                      ) 
   nlin_mmf_noninteracting = get_nlin(cf_mmf, 
                       dgd_threshold=dgd_threshold, 
                       use_kappa=use_kappa,
