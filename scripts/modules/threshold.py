@@ -400,7 +400,7 @@ def get_nlin_threshold(
             plt.ylim([0.5e-3, 0.1])
         else:
             plt.ylim([0.7e-2, 1])
-        plt.xlabel(r'$L_W/L$')
+        plt.xlabel(r'$L/L_W$')
         plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
         plt.tight_layout()
         if use_fB:
@@ -492,7 +492,7 @@ def get_nlin_threshold(
             # print(                f"DGD low. num = {lowest_dgd:.3e}, ra < = {(L / (T * np.sqrt(2 * np.pi)))**2:.3e}")
             plt.xscale('log')
             plt.ylim([-0.05, 0.3])
-            plt.xlabel(r'$L_W/L$')
+            plt.xlabel(r'$L/L_W$')
             plt.ylabel(r'$\varepsilon$')
             plt.tight_layout()
             plt.savefig(f"media/2-error.pdf", dpi=dpi)
