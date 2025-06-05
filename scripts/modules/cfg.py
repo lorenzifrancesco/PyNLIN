@@ -18,13 +18,22 @@ class Config(BaseModel):
   collision_margin : int
   n_pumps          : int 
 
+class NumericalConfig(BaseModel):
+   gvd             : float
+   dgd1            : float
+   dgd2_g          : float
+   dgd2_n          : float
+   n_samples_numeric_g : int
+   n_samples_numeric_n : int
 
 # Deserialize TOML file into a Pydantic model
 def load_toml_to_struct(filepath: str) -> Config:
-    # with open(filepath, "rb") as f:
     data = toml.load(filepath)
-    # print(data)
     return Config(**data)
+
+def load_nc_toml_to_struct(filepath: str) -> NumericalConfig:
+    data = toml.load(filepath)
+    return NumericalConfig(**data)
 
 # Serialize a Pydantic model into a TOML file
 def save_struct_to_toml(filepath: str, config: Config):

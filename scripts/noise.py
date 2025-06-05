@@ -29,18 +29,18 @@ beta2 = -pynlin.utils.dispersion_to_beta2(
 )
 
 wdm = pynlin.wdm.WDM(
-    spacing=cf.channel_spacing, 
+    spacing=cf.channel_spacing,
     num_channels=cf.n_channels,
     center_frequency=cf.center_frequency
 )
 
 fiber = pynlin.fiber.MMFiber(
-      effective_area=80e-12,
-      overlap_integrals = oi_fit,
-      group_delay = load_group_delay(),
-      length=cf.fiber_length,
-      n_modes = 4
-  )
+    effective_area=80e-12,
+    overlap_integrals=oi_fit,
+    group_delay=load_group_delay(),
+    length=cf.fiber_length,
+    n_modes=4
+)
 freqs = wdm.frequency_grid()
 
 s_limit = 1460e-9
@@ -51,59 +51,58 @@ l_freq = 3e8 / l_limit
 # print(s_freq * 1e-12)
 # print(l_freq * 1e-12)
 delta = (s_freq - l_freq) * 1e-12
-avg = ((s_freq + l_freq) * 1e-12 / 2) 
+avg = ((s_freq + l_freq) * 1e-12 / 2)
 
 ###########
 fig_to_generate = [3]
 if -1 in fig_to_generate:
-  plot_dispersion_analysis(fiber, 
-                    wdm, 
-                    cf,
-                    recompute=False)
-  
+    plot_dispersion_analysis(fiber,
+                             wdm,
+                             cf,
+                             recompute=False)
+
 if 1 in fig_to_generate:
-  # the plot of Marco
-  plot_illustrative(fiber, 
-                    wdm, 
-                    cf,
-                    recompute=True)
+    # the plot of Marco
+    plot_illustrative(fiber,
+                      wdm,
+                      cf,
+                      recompute=True)
 
 if 2 in fig_to_generate:
-  get_fig2(recompute=False)
-  get_fig2_raman(recompute=False)
+    get_fig2(recompute=False)
+    get_fig2_raman(recompute=False)
 
 if 3 in fig_to_generate:
-  # TODO May 2025 
-  # Plot of the total noise (final)
-  # noise_plot(dgd_threshold=3e-15, 
-  #            use_kappa=True, 
-  #            use_smf=True,
-  #            use_fB=True,
-  #            use_dBm_scale=True,
-  #            use_plot_without_x_mode=False)
-  
-  # This plots the same results as in the paper, but about 2dB lower
-  # OK, it seems that the issue is that we were using -1.5dBm launch power for the prefactor
+    # TODO May 2025
+    # Plot of the total noise (final)
+    # noise_plot(dgd_threshold=3e-15,
+    #            use_kappa=True,
+    #            use_smf=True,
+    #            use_fB=True,
+    #            use_dBm_scale=True,
+    #            use_plot_without_x_mode=False)
 
-  noise_plot(dgd_threshold=3e-15,
-             use_kappa=True,
-             use_smf=True,
-             use_fB=True,
-             use_dBm_scale=True,
-             use_plot_without_x_mode=False)
-  
-  noise_plot(dgd_threshold=-1,
-             use_kappa=True,
-             use_smf=True,
-             use_fB=True,
-             use_dBm_scale=True,
-             use_plot_without_x_mode=False)
-  
-  
+    # This plots the same results as in the paper, but about 2dB lower
+    # OK, it seems that the issue is that we were using -1.5dBm launch power for the prefactor
+
+    noise_plot(dgd_threshold=3e-15,
+               use_kappa=True,
+               use_smf=True,
+               use_fB=True,
+               use_dBm_scale=True,
+               use_plot_without_x_mode=False)
+
+    noise_plot(dgd_threshold=-1,
+               use_kappa=True,
+               use_smf=True,
+               use_fB=True,
+               use_dBm_scale=True,
+               use_plot_without_x_mode=False)
+
 
 if 4 in fig_to_generate:
-  noise_histogram(dgd_threshold=3e-15, 
-             use_kappa=True, 
-             use_smf=True,
-             use_fB=True,
-             use_dBm_scale=True)
+    noise_histogram(dgd_threshold=3e-15,
+                    use_kappa=True,
+                    use_smf=True,
+                    use_fB=True,
+                    use_dBm_scale=True)
