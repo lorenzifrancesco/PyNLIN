@@ -20,9 +20,12 @@ from scipy.optimize import curve_fit
 
 def get_nlin_prefactor(cf):
     print("Computing the NLIN prefactor for the MMF.")
-    gamma = 1.3e-3
-    P_in = dBm2watt(-1.5)
-    constellation_factor = 0.32
+    cf = cfg.load_toml_to_struct("input/mmf.toml")
+    nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
+    raise NotImplementedError("check the correct effective area")
+    gamma = 0.0
+    P_in = dBm2watt(cf.launch_power)
+    constellation_factor = 0.32 # QAM-16
     nlin_prefactor = P_in**3 * gamma**2 * constellation_factor / (cf.baud_rate**2)
     return nlin_prefactor
 
@@ -119,17 +122,26 @@ def get_nlin(cf,
     if dgd_threshold <= 0:
         raise NotImplementedError(
             "The dgd_threshold must be greater than 0 to compute the noise.")
-    f_lo_plus, f_lo_minus, f_hi_plus, f_hi_minus = get_raman_corrections()
-    ps_g, ps_n = get_fit_coefficients()
-    ps = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
-    lincomb_lo = (low_dgd_fB - f_lo_minus) / (f_lo_plus - f_lo_minus)
-    lincomb_hi = (high_dgd_fB - f_hi_minus) / (f_hi_plus - f_hi_minus)
+    
     d_min = nc.dgd1
     d_max = nc.dgd2_g
     d_span = d_max - d_min
-    assert (nc.dgd2_n == nc.dgd2_g)
+    if use_fB:
+        f_lo_plus, f_lo_minus, f_hi_plus, f_hi_minus = get_raman_corrections()
+        lincomb_lo = (low_dgd_fB - f_lo_minus) / (f_lo_plus - f_lo_minus)
+        lincomb_hi = (high_dgd_fB - f_hi_minus) / (f_hi_plus - f_hi_minus)
+        assert (nc.dgd2_n == nc.dgd2_g)
+        lc = lambda d: 1/d_span * ((d_max-d) * lincomb_lo + (d-d_min) * lincomb_hi)
+    else:
+        f_lo_plus = 1.0
+        f_lo_minus = 1.0
+        f_hi_plus = 1.0
+        f_hi_minus = 1.0
+        lc = lambda d: 1.0
 
-    lc = lambda d: 1/d_span * ((d_max-d) * lincomb_lo + (d-d_min) * lincomb_hi)
+    ps_g, ps_n = get_fit_coefficients()
+    ps = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
+
     # Strategy 1) lincomb of the lincombs LOL but effective - difficult to implement
     # Strategy 2) just take the average lincomb for  
 
@@ -269,8 +281,8 @@ def noise_plot(dgd_threshold=3e-15,
     plt.grid(grid)
     plt.tight_layout()
     # plt.ylim([2e-2, 1e0])
-    plt.savefig(f"media/nlin.pdf", dpi=dpi)
-    print("The figure is saved as media/nlin.pdf")
+    plt.savefig(f"media/nlin"+name+".pdf", dpi=dpi)
+    print("The figure is saved as media/nlin"+name+".pdf")
 
     functions = [np.mean, np.median, np.max, np.min]
     function_names = ["mean  ", "median", "max   ", "min   "]
@@ -406,9 +418,17 @@ if __name__ == "__main__":
     #            use_fB=True,
     #            use_dBm_scale=True,
     #            use_plot_without_x_mode=False)
-    noise_plot(dgd_threshold=3e-15,
-               use_kappa=True,
-               use_smf=True,
-               use_fB=True,
-               use_dBm_scale=True,
-               use_plot_without_x_mode=False)
+    # plot-theoretical 
+    realistic = False
+    for realistic in [True, False]:
+        if realistic: 
+            name = "realistic"
+        else:
+            name = "idealized"
+        noise_plot(dgd_threshold=3e-15,
+               use_kappa=realistic,
+               use_smf=realistic,
+               use_fB=realistic,
+               use_dBm_scale=realistic,
+               use_plot_without_x_mode=not realistic, 
+               name = name)
