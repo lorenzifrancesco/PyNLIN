@@ -94,4 +94,3 @@ for f in flagged:
     norm = np.sqrt(a**2 + b**2 + c**2)
     print(norm)
     distances = np.abs(a * X + b * Y + c * Z + d) / norm
-    # print(distances)

@@ -186,7 +186,7 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
         ]) / cf.baud_rate
         np.save(f"results/I_low_{names[ipulse]}.npy", I_low_values)
       I_low_values = np.load(f"results/I_low_{names[ipulse]}.npy")
-      plt.figure(figsize=(2, 2.3))
+      plt.figure(figsize=(10, 10.3))
       contour      = plt.contourf(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.091), levels=100, cmap='viridis')
       contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.091), levels=20, colors="w")
       plt.clabel(contour_lines, inline=True, fontsize=8)
@@ -197,3 +197,4 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
       plt.gca().set_aspect('equal')
       plt.tight_layout()
       plt.savefig("media/differential_dispersion_"+names[ipulse]+".pdf")
+      print(f"Saved dispersion in media/differential_dispersion_{names[ipulse]}.pdf")

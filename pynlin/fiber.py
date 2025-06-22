@@ -171,7 +171,7 @@ class MMFiber(Fiber):
                          gamma=gamma,
                          n_modes=n_modes,
                          length=length)
-        self.raman_efficiency = self.raman_coefficient / self.effective_area
+        self.raman_efficiency = self.raman_coefficient / self.effective_area # FIXME 01
 
         # Structure of the overlap integrals
         # overlap_integrals[i, j] = [a1, b1, a2, b2, x, c]
