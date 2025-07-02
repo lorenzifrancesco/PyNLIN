@@ -18,35 +18,37 @@ from pynlin.utils import watt2dBm, dBm2watt
 from scipy.optimize import curve_fit
 from scipy.constants import c
 
-ns = [1, 2, 2, 1]
+ns = np.array([1, 2, 2, 1])
 
-# as a function of the modes
+# SMF
 def get_nlin_prefactor_smf(cf):
     n2 = 2.6e-20 # constant of SiO2 # FIXME offload
     omega_0 = 2 * np.pi * cf.center_frequency # Hz
     gamma = n2 * omega_0/ (cf.effective_area * c) # WDM band center approximation
     print("Using gamma = ", gamma)
     P_in = dBm2watt(cf.launch_power)
-    constellation_factor = 0.32 # QAM-16
+    constellation_factor = 0.32 * 1.19 # 64-QAM
     nlin_prefactor = (P_in)**3 * gamma**2 * constellation_factor / (cf.baud_rate**2)
-
+    print("nlin prefactor", nlin_prefactor)
     return nlin_prefactor
 
+# MMF
 def get_nlin_prefactor_mmf(cf, mode_a, mode_b):
     n2 = 2.6e-20
     omega_0 = 2 * np.pi * cf.center_frequency
     gamma = n2 * omega_0 / (cf.effective_area * c)
     P_in = dBm2watt(cf.launch_power)
     ns[mode_a]
-    kappa = np.loadtxt('input/kappa.csv', delimiter=',')
-    constellation_factor = 0.32 # QAM-16
+    constellation_factor = 0.32 * 1.19 # 64-QAM
     var = 0
-    if mode_a == 0 and mode_b == 0:
+    if mode_a == mode_b:
         var = (constellation_factor + 1) * (2*ns[mode_a]+3)-4
     else:
         var = constellation_factor
-    nlin_prefactor = (P_in/(2*ns[mode_a]))**3 * gamma**2 * kappa[mode_a, mode_b]**2 * var / (cf.baud_rate**2)
+    nlin_prefactor = (P_in)**3 * gamma**2 * var / (cf.baud_rate**2)
+    # print("denom", (2*ns[mode_a])**3)
     return nlin_prefactor
+
 
 def get_nlin(cf,
              dgd_threshold=3e-15,
@@ -62,10 +64,11 @@ def get_nlin(cf,
     oi_fit = np.load('results/oi_fit.npy')
     # print("WARN: the kappa for the LP01-LP01 should be 1.0, but it is not.")
     kappa = np.loadtxt('input/kappa.csv', delimiter=',')
-    kappa /= kappa[0, 0]
+    # kappa *= (8/9)/ kappa[0, 0]
+    kappa = kappa**2
     if not use_x_mode_interactions:
         switchoff_matrix = np.eye(cf.n_modes)
-        kappa = np.multiply(kappa, switchoff_matrix)  # Hadamard product
+        kappa = np.multiply(kappa, switchoff_matrix)
 
     if cf.n_modes == 1:
         solutions = np.load("results/ct_solution-2_gain_0.0_SMF.npy",
@@ -112,12 +115,13 @@ def get_nlin(cf,
     )
 
     beta1 = np.zeros((len(modes), len(freqs)))
-    modes_a = np.array([
-        [1, 2, 3, 4],
-        [1, 2, 3, 4],
-        [1, 2, 3, 4]
-    ])
-    modes_b = modes_a.transpose()
+    mode_number_rescaling = np.array([
+    [6,   8,   8,  4],
+    [8,  20,  16,  8],
+    [8,  16,  20,  8],
+    [4,   8,   8,  6]
+    ]) # used to find the correct values of kappa from the wrong ones
+
     for i in modes:
         beta1[i, :] = fiber.group_delay.evaluate_beta1(i, freqs)
     beta2 = np.zeros((len(modes), len(freqs)))
@@ -195,19 +199,19 @@ def get_nlin(cf,
     for i in modes:
         for j in range(len(freqs)):
             if use_kappa:
-                # print("WARN: we are neglecting the fact that the kappa matrix is not symmetric.")
+                print("WARN: we are neglecting the fact that the kappa matrix is not symmetric.")
                 weighted_nlin = np.matmul(
                     kappa, pair_noise(np.abs(beta1 - beta1[i, j]), 1, 1))
                 # print(weighted_nlin.shape)
                 nlin[i, j] = np.sum(weighted_nlin[i])
             elif not use_x_mode_interactions:
+                # FIXME beware here 
                 weighted_nlin = np.matmul(
                     switchoff_matrix, pair_noise(np.abs(beta1 - beta1[i, j]), 1, 1))
                 nlin[i, j] = np.sum(weighted_nlin[i])
             else:
                 nlin[i, j] = np.sum(pair_noise(np.abs(beta1 - beta1[i, j]), 1, 1))
     return nlin
-
 
 def noise_plot(dgd_threshold=3e-15,
                use_kappa=False,
@@ -245,7 +249,10 @@ def noise_plot(dgd_threshold=3e-15,
         center_frequency=cf_mmf.center_frequency
     )
     freqs_mmf = wdm.frequency_grid()
-
+    print("MMF", get_nlin_prefactor_mmf(cf_mmf, 1, 1))
+    print("SMF", get_nlin_prefactor_smf(cf_smf))
+    print("aeff1/2", (cf_smf.effective_area/cf_mmf.effective_area)**2)
+    # exit()
     nlin_mmf                = get_nlin(cf_mmf,
                                        dgd_threshold=dgd_threshold,
                                        use_kappa=use_kappa,
@@ -264,7 +271,7 @@ def noise_plot(dgd_threshold=3e-15,
                                        use_kappa=False,
                                        use_fB=use_fB,
                                        use_x_mode_interactions=True,
-                                       use_dBm_scale=use_dBm_scale,)
+                                       use_dBm_scale=False,)
     # for each channel, we compute the total number of collisions that
     # needs to be computed for evaluating the total noise on that channel.
     T = 1 / cf_mmf.baud_rate
@@ -333,7 +340,7 @@ def noise_plot(dgd_threshold=3e-15,
         print("-" * 20)
 
 """
-        
+
 """
 def noise_histogram(dgd_threshold=3e-15,
                     use_kappa=False,
