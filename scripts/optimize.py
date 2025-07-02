@@ -1,10 +1,7 @@
 """
 Optimize the pumps and calculate signal and ASE power evolution
-
 Generates figs: 
-
 - Power profiles
-
 """
 import os
 import tqdm
@@ -208,11 +205,11 @@ def repropagate_numpy(fiber,
 if __name__ == "__main__":    
     # Configuration
     recompute   = False
+    set_improper_power = True
     repropagate = True
     use_smf     = False
     use_avg_oi  = False
-    signal_powers = [-5]
-    signal_powers = [-2]
+    
     # -10 -> true
     # -5  -> true OI
     # 0   -> true OI
@@ -225,6 +222,8 @@ if __name__ == "__main__":
       cf = cfg.load_toml_to_struct("./input/smf.toml")
     else:
       cf = cfg.load_toml_to_struct("./input/mmf.toml")
+    
+    signal_powers = [cf.launch_power] # in dBm
     num_original_modes = oi_avg[0].shape[0]
     matrix_avg = oi_avg
     matrix_zeros = np.tile(np.zeros((num_original_modes, num_original_modes))[
@@ -255,10 +254,14 @@ if __name__ == "__main__":
           agg = "_SMF"
         else:
           agg=""
-        output_file = f"results/ct_solution{signal_power}_gain_{cf.raman_gain}"+agg+".npy"
+        print("WARN overriding")
+        if set_improper_power:
+            sigp = -2
+        else:
+            sigp = signal_power
+        output_file = f"results/ct_solution{int(round(sigp))}_gain_{cf.raman_gain}"+agg+".npy"
   
         signal_wavelengths = wdm.wavelength_grid()
-        
         if not os.path.exists(output_file) or recompute:
             raise("DO NOT OVERWRITE!!")
             # assert(cf.n_modes == 1)

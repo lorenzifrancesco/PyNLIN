@@ -15,7 +15,8 @@ def plot_profiles(signal_wavelengths,
                   pump_wavelengths,
                   pump_solution,
                   pump_powers,
-                  cf: Config):
+                  cf: Config,
+                  wallpaper_mode=False):
     plt.clf()
     plt.figure(figsize=(2.5, 2))
     cmap = viridis
@@ -23,17 +24,24 @@ def plot_profiles(signal_wavelengths,
     # lss = ["-", "--", "-.", ":", "-"]
     mode_labels = ["LP01", "LP11", "LP21", "LP02"]
     for i in range(cf.n_modes):
-        plt.plot(z_plot,
-                 watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.3)
+        if wallpaper_mode:
+          plt.plot(z_plot,
+                   watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes), alpha=0.9, lw=0.01)
+        else:
+           plt.plot(z_plot,
+                   watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes+0.2), alpha=0.5)
         # try:
         #   plt.plot(z_plot,
         #          watt2dBm(ase_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.7, ls="-")
         # except:
         #   print(f"got data without ASE.")
     
-
-    plt.plot(z_plot, watt2dBm(np.max(signal_solution, axis=(1, 2))), color=adjust_luminosity("cyan", 0.8),    lw = 3, ls ="-.")
-    plt.plot(z_plot, watt2dBm(np.min(signal_solution, axis=(1, 2))), color=adjust_luminosity("magenta", 0.8), lw = 3, ls ="-.")
+    if wallpaper_mode:
+       lww = 1
+    else:
+       lww = 3
+    plt.plot(z_plot, watt2dBm(np.max(signal_solution, axis=(1, 2))), color=adjust_luminosity("cyan", 0.8),    lw = lww, ls ="-.")
+    plt.plot(z_plot, watt2dBm(np.min(signal_solution, axis=(1, 2))), color=adjust_luminosity("magenta", 0.8), lw = lww, ls ="-.")
     pass
     plt.ylabel(r"$P$ [dBm]")
     plt.xlabel(r"$z$ [km]")

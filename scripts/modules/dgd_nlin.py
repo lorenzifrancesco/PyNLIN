@@ -235,7 +235,11 @@ def noise_plot(dgd_threshold=3e-15,
         f"Loading a ITU-T standardized WDM grid \n [spacing: {cf_smf.channel_spacing * 1e-9:.3e}GHz, center: {cf_smf.center_frequency * 1e-12:.3e}THz] \n")
     assert (cf_smf.fiber_length == cf_mmf.fiber_length)
     assert (cf_smf.baud_rate == cf_mmf.baud_rate)
-    assert (cf_smf.n_channels == cf_mmf.n_channels * cf_mmf.n_modes)
+    if (cf_smf.n_channels == cf_mmf.n_channels * cf_mmf.n_modes):
+        print("We are comparing the same total rate")
+    else:
+        print(
+            f"Warning: the number of channels is different: {cf_smf.n_channels} vs {cf_mmf.n_channels * cf_mmf.n_modes}")
     assert (cf_smf.center_frequency == cf_mmf.center_frequency)
     wdm = pynlin.wdm.WDM(
         spacing=cf_smf.channel_spacing,

@@ -1,5 +1,5 @@
 /addons
-/input
+/input*
 /run
 /additional
 *.bak
@@ -141,8 +141,8 @@ tests/reports/
 *.mat 
 
 # results and media folders
-results 
-media
+/results* 
+/media
 
 Pipfile
 Pipfile.lock
