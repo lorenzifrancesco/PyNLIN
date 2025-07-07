@@ -29,7 +29,7 @@ def plot_profiles(signal_wavelengths,
                    watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes), alpha=0.9, lw=0.01)
         else:
            plt.plot(z_plot,
-                   watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes+0.2), alpha=0.5)
+                   watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.3), alpha=0.1, lw=0.1)
         # try:
         #   plt.plot(z_plot,
         #          watt2dBm(ase_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.7, ls="-")
@@ -59,7 +59,7 @@ def plot_profiles(signal_wavelengths,
     #
     for i in range(cf.n_modes):
         plt.plot(z_plot,
-                 watt2dBm(pump_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.3)
+                 watt2dBm(pump_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.2)
     plt.grid(False)
     plt.ylabel(r"$P$ [dBm]")
     plt.xlabel(r"$z$ [km]")
