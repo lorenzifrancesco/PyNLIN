@@ -40,19 +40,21 @@ def arity_coefficient():
                        np.mean(np.abs(qam_symbols)**2) ** 2 - 1)
 
     # normalized to 16-QAM variance
-    var_16_QAM = var_QAM[1]
+    var_QAM = np.array(var_QAM)
+    var_PSK = np.array(var_PSK)
+    var_16_QAM = 1.0
     plt.semilogx(m_QAM, var_QAM / var_16_QAM, color='black', base=2,
                  linestyle="none", marker="x", markersize=13, label="QAM")
     plt.semilogx(m_PSK, var_PSK / var_16_QAM, color='black', base=2,
                  linestyle="none", marker="o", markersize=10, label="PSK")
     plt.annotate("{:1.3f}".format(
-        var_QAM[1] / var_16_QAM), (16, var_QAM[1] / var_16_QAM - 0.15))
+        var_QAM[1] / var_16_QAM), (16, var_QAM[1] / var_16_QAM - 0.05))
     plt.annotate("{:1.3f}".format(
-        var_QAM[2] / var_16_QAM), (64, var_QAM[2] / var_16_QAM - 0.15))
+        var_QAM[2] / var_16_QAM), (64, var_QAM[2] / var_16_QAM - 0.05))
     plt.annotate("{:1.3f}".format(var_QAM[3] / var_16_QAM),
-                 (256 - 70, var_QAM[3] / var_16_QAM - 0.15))
+                 (256 - 70, var_QAM[3] / var_16_QAM - 0.05))
     plt.annotate("{:1.3f}".format(var_QAM[4] / var_16_QAM),
-                 (1024 - 390, var_QAM[4] / var_16_QAM - 0.15))
+                 (1024 - 390, var_QAM[4] / var_16_QAM - 0.05))
 
     plt.grid()
     plt.xlabel("Modulation order")
@@ -64,7 +66,7 @@ def arity_coefficient():
     plt.minorticks_on()
 
     fig_arity.tight_layout()
-    fig_arity.savefig("modulation_order_noise.pdf")
+    fig_arity.savefig("media/modulation_order_noise.pdf")
 
 
 def constellation_statistics():
@@ -92,21 +94,20 @@ def constellation_statistics():
     fig_arity = plt.figure(figsize=(8, 9))
 
     # normalized to 16-QAM variance
-    plt.loglog(arity_list, constellation_variance / constellation_variance[0],
+    plt.loglog(arity_list, constellation_variance,
                marker='x', markersize=10, color='black')
     plt.minorticks_off()
     plt.grid()
     plt.xlabel("Modulation order")
     plt.xticks(ticks=arity_list, labels=arity_list)
     plt.ylabel(r"variance scale factor")
-    plt.yticks(ticks=constellation_variance /
-               constellation_variance[0], labels=["1.0", "1.190", "1.235"])
+    plt.yticks(ticks=constellation_variance, labels=["1.0", "1.190", "1.235"])
     plt.subplots_adjust(wspace=0.0, hspace=0, right=9.8 / 10, bottom=-1)
 
     fig_arity.tight_layout()
-    fig_arity.savefig("order_noise.pdf")
+    fig_arity.savefig("media/order_noise.pdf")
 
 if __name__ == "__main__":
     arity_coefficient()
     constellation_statistics()
-    plt.show()
+    # plt.show()
