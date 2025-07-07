@@ -16,50 +16,56 @@ from scipy.interpolate import interp1d
 from pynlin.collisions import get_m_values, get_collision_location
 import matplotlib.colors as mcolors
 from scipy.optimize import curve_fit
-
+from typing import Tuple
 
 def softplus2(x, a, b, c):
     return a * (1 + (x / b)**(1 / c))**(-c)
 
 
-def get_raman_corrections():
+def get_raman_corrections(smf=False) -> Tuple[float, float, float, float]:
     '''
     Given the optimized signal profiles, calculate max and min asymptotic values 
     for the correction coefficients f_B
-    requires:  results/oi_fit.npy
-            input/config_collision.toml
+    requires:  
+            results/oi_fit.npy
+            input/mmf.toml \ smf.toml
             results/ct_solution-2_gain_0.0.npy
 
-    Choice is fixed to input power 2.0 dBm, and gain 0.0 dB.
+    Choice is fixed to input power -6.0 dBm, and gain 0.0 dB.
     '''
-    cf = cfg.load_toml_to_struct("./input/config_collision.toml")
-    beta1_params = load_group_delay()
-    oi_fit = np.load('results/oi_fit.npy')
-    fiber = MMFiber(
-        effective_area=cf.effective_area,
-        overlap_integrals=oi_fit,
-        group_delay=beta1_params,
-        length=cf.fiber_length,
-        n_modes=cf.n_modes
-    )
-    assert (cf.launch_power == -2.0 and cf.raman_gain == 0.0)
-    solutions = np.load("results/ct_solution-2_gain_0.0.npy", allow_pickle=True).item()
+    if smf:
+        cf = cfg.load_toml_to_struct("./input/smf.toml")
+        select_string = "_SMF"
+    else:
+        cf = cfg.load_toml_to_struct("./input/mmf.toml")
+        select_string = ""
+    assert (cf.launch_power == -6.0 and cf.raman_gain == 0.0)
+    solutions = np.load("results/ct_solution-6_gain_0.0"+select_string+".npy", allow_pickle=True).item()
     signal_powers = solutions['signal_sol']
-    signal_powers = np.swapaxes(signal_powers, 1, 2)
-
-    fB_max = np.max(signal_powers, axis=(1, 2))
-    fB_min = np.min(signal_powers, axis=(1, 2))
-    fB_max /= fB_max[0]
-    fB_min /= fB_min[0]
-
-    z_axis = np.linspace(0, fiber.length, len(fB_max))
+    signal_powers_swp = np.swapaxes(signal_powers, 1, 2)
+    initial_powers = signal_powers_swp[0, :, :]
+    fB = np.divide(signal_powers_swp, initial_powers)
+    print(fB.shape)
+    assert((fB>=0).all())
+    fB_max = np.max(fB, axis=(1, 2))
+    fB_min = np.min(fB, axis=(1, 2))
+    print(fB_min.shape)
+    assert((fB_min<=fB_max).all())
+    # assert(len(fB_max) == fB.shape.0)
+    z_axis = np.linspace(0, cf.fiber_length, len(fB_max))
     dz = z_axis[1] - z_axis[0]
-    f_lo_plus = np.sum(fB_max) * dz / fiber.length
-    f_lo_minus = np.sum(fB_min) * dz / fiber.length
-    f_hi_plus = np.sum(fB_max**2) * dz / fiber.length
-    f_hi_minus = np.sum(fB_min**2) * dz / fiber.length
-
-    return f_lo_plus, f_lo_minus, f_hi_plus, f_hi_minus
+    assert(fB.shape[0] == len(z_axis))
+    f_minus_min  = (np.sum(fB_min)    * dz / cf.fiber_length)**2
+    f_minus_max  = (np.sum(fB_max)    * dz / cf.fiber_length)**2
+    f_plus_min   = np.sum(fB_min**2)  * dz / cf.fiber_length
+    f_plus_max   = np.sum(fB_max**2)  * dz / cf.fiber_length
+    f_plus =       np.sum(fB**2, axis = 0) * dz / cf.fiber_length
+    f_minus =      (np.sum(fB, axis = 0) * dz / cf.fiber_length)**2
+    assert((f_plus >= f_plus_min-1e-15).all())
+    assert((f_plus <= f_plus_max+1e-15).all())
+    assert((f_minus>=f_minus_min-1e-15).all())
+    assert((f_minus<=f_minus_max+1e-15).all())
+    return f_minus_min, f_minus_max, f_plus_min, f_plus_max
 
 
 def get_fit_coefficients():
@@ -141,7 +147,6 @@ def get_nlin_threshold(
     freqs = wdm.frequency_grid()
     mode_idx = [0, 1, 2, 3]
     mode_names = ['LP01', 'LP11', 'LP21', 'LP02']
-    #
     #
     beta1 = np.zeros((len(mode_idx), len(freqs)))
     for i in mode_idx:
