@@ -33,12 +33,12 @@ def beta2avg_complementary(beta2avg, beta2a):
     return beta2avg - beta2a
 
 
-def fig3_fig4():
+def fig3_fig4(cf_file="./input/mmf.toml"):
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
 
-    cf = cfg.load_toml_to_struct("./input/config_mine.toml")
+    cf = cfg.load_toml_to_struct("./input/mmf.toml")
     oi_fit = np.load('results/oi_fit.npy')
     oi_avg = np.load('results/oi_avg.npy')
     use_avg_oi = False
@@ -240,8 +240,8 @@ def fig3_fig4():
     # plt.savefig(f"media/dispersion/beta2.png", dpi=300)
 
 
-def get_fig4():
-    cf = cfg.load_toml_to_struct("./input/config_mine.toml")
+def get_fig4(cf_file = "./input/mmf.toml"):
+    cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,
         num_channels=cf.n_channels,
