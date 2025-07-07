@@ -87,7 +87,9 @@ def ct_solver(fiber,
         except:
             print("The precomputed values misbehave...")
     #
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("is cuda available? ", torch.cuda.is_available())
+    device = "cpu"
     #
     ## trivial initializaiton
     initial_pump_wavelengths = nu2lambda(initial_pump_frequencies[:cf.n_pumps])
@@ -121,8 +123,8 @@ def ct_solver(fiber,
     print(initial_pump_wavelengths.shape)
     print(initial_pump_powers.shape)
     # adapt to torch
-    initial_pump_wavelengths_tensor = torch.from_numpy(initial_pump_wavelengths).to(device)
-    initial_pump_powers_tensor =           torch.from_numpy(initial_pump_powers).to(device)
+    initial_pump_wavelengths_tensor = torch.from_numpy(initial_pump_wavelengths).to(device, dtype=torch.float32)
+    initial_pump_powers_tensor =           torch.from_numpy(initial_pump_powers).to(device, dtype=torch.float32)
     #
     optimizer = GainOptimizer(
         torch_amplifier_ct,
@@ -205,7 +207,7 @@ def repropagate_numpy(fiber,
 if __name__ == "__main__":    
     # Configuration
     recompute   = False
-    set_improper_power = True
+    set_improper_power = False
     repropagate = True
     use_smf     = False
     use_avg_oi  = False
@@ -262,23 +264,33 @@ if __name__ == "__main__":
         output_file = f"results/ct_solution{int(round(sigp))}_gain_{cf.raman_gain}"+agg+".npy"
   
         signal_wavelengths = wdm.wavelength_grid()
-        if not os.path.exists(output_file) or recompute:
-            raise("DO NOT OVERWRITE!!")
-            # assert(cf.n_modes == 1)
+        if recompute:
+            # raise("DO NOT OVERWRITE!!")
+            assert(cf.n_modes == 1)
             pump_sol, signal_sol, ase_sol, pump_wavelengths, pump_powers = ct_solver(
                 fiber,
-                wdm, 
-                power_per_pump   = -20,
+                wdm,
+                power_per_pump   = -5,
                 pump_band_a      = 1385e-9,
                 pump_band_b      = 1465e-9,
                 learning_rate    = 5e-2,
-                epochs           = 5000,
-                lock_wavelengths = 2000,
+                epochs           = 1500,
+                lock_wavelengths = 1000,
                 batch_size       = 1,
                 use_precomputed  = False,
-                optimize         = True, 
+                optimize         = True,
                 use_avg_oi       = False
             )
+            print("Pump w : ", pump_wavelengths)
+            print("Pump p : ", pump_powers) 
+            # shortcutting
+            # pump_wavelengths = np.array([1.3844928, 1.3975118 ,1.4131243, 1.4286948, 1.4559689, 1.4575429])
+            # pump_powers = np.array([-12.056175 ,  -9.558269 ,  -9.226123,   -6.7145286,  -8.507724 ,  -0.8452828])
+            # pump_wavelengths = np.array([1.3844928, 1.3975118 ,1.4131243, 1.4286948 ,1.4559689, 1.4575429]) 
+            # pump_powers = (np.array([-16.159014 , -11.170283 ,  -7.531067,   -3.777939,   -1.8362951 ,  5.908841 ]))
+            # pump_sol = 0.0
+            # signal_sol = 0.0
+            # ase_sol = 0.0
             variables_dict = {
                 name: value 
                 for name, value in locals().items() 
@@ -289,7 +301,10 @@ if __name__ == "__main__":
         else:
             print(f"File {output_file} already exists. Loading data...")
         
+        # load pump paramters from the other file 
         variables_dict = np.load(output_file, allow_pickle=True).item() 
+        # set the new filename for repropagation
+        output_file = f"results/ct_solution{int(round(signal_power))}_gain_{cf.raman_gain}"+agg+".npy"
         if repropagate:
           repropagate_numpy(
             fiber              = fiber,

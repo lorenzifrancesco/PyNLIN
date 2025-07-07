@@ -534,7 +534,7 @@ class MMFRamanAmplifier(torch.nn.Module):
         dPdz = (
             (
                 -losses.view(batch_size, -1, 1)
-                + torch.matmul(gain_matrix, P.view(batch_size, -1, 1))
+                + torch.matmul(gain_matrix, P.view(batch_size, -1, 1).to(dtype=torch.float32))
             )
             * P.view(batch_size, -1, 1)
         ).view(batch_size, -1)
@@ -648,7 +648,7 @@ class MMFRamanAmplifier(torch.nn.Module):
         ).float()
 
         oi = self.fiber.torch_oi.evaluate_oi_tensor(total_wavelenghts)
-        G = gain * oi
+        G = (gain * oi)
        
         raw_solution = torch_rk4(
             MMFRamanAmplifier.ode, total_power, self.z, losses, G, self.direction,
