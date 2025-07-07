@@ -32,6 +32,8 @@ ns = np.array([1, 2, 2, 1])
 #     print("nlin prefactor", nlin_prefactor)
 #     return nlin_prefactor
 
+SPATIAL_MODES = [1, 2, 2, 1]
+
 def get_nlin_prefactor_mmf(cf, mode_a, mode_b):
     n2 = 2.6e-20
     omega_0 = 2 * np.pi * cf.center_frequency
@@ -40,7 +42,9 @@ def get_nlin_prefactor_mmf(cf, mode_a, mode_b):
     constellation_factor = 0.32 * 1.19 # 64-QAM
     print("mode_a", mode_a)
     di = np.diag_indices(len(mode_a))
-    var = constellation_factor * np.ones((cf.n_modes, cf.n_modes))
+    mode_b_prefactor = 2 * np.outer(np.ones((cf.n_modes)), SPATIAL_MODES)
+    print(mode_b_prefactor)
+    var = constellation_factor * mode_b_prefactor 
     var[di] =  (constellation_factor + 1) * (2*ns[mode_a[0]] + 3) - 4
     assert((var > 0).all())
     nlin_prefactor = (P_in)**3 * gamma**2 * var / (cf.baud_rate**2)
@@ -388,7 +392,7 @@ def noise_histogram(use_kappa=False,
     plt.clf()
     plt.figure(figsize=(3.6, 2.8))
     y_data = y_function_mmf(nlin_mmf)
-    
+
     y_extremes = [np.min(y_data), -40]
     n_bins = 25
     print("y_extremes", y_extremes)
