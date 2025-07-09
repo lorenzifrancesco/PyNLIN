@@ -95,8 +95,6 @@ def ct_solver(fiber,
     initial_pump_wavelengths = nu2lambda(initial_pump_frequencies[:cf.n_pumps])
     initial_pump_powers = np.ones_like(initial_pump_wavelengths) * power_per_pump
     initial_pump_powers = initial_pump_powers.repeat(cf.n_modes, axis=0)
-    print(initial_pump_wavelengths.shape)
-    print(initial_pump_powers.shape)
     ## initialize to the configuration that is not bad
     initial_pump_wavelengths = np.array([1.3844927e-06, 1.3975118e-06, 1.4131243e-06, 1.4286949e-06, 1.4559689e-06, 1.4575429e-06], dtype=np.float32)
     if cf.n_modes == 4:
@@ -120,8 +118,6 @@ def ct_solver(fiber,
     # to subtract to the pumps in the 0 dBm launch power setup to prevent RK4 blowup
     if cf.launch_power > -5:
         initial_pump_powers = initial_pump_powers - 3
-    print(initial_pump_wavelengths.shape)
-    print(initial_pump_powers.shape)
     # adapt to torch
     initial_pump_wavelengths_tensor = torch.from_numpy(initial_pump_wavelengths).to(device, dtype=torch.float32)
     initial_pump_powers_tensor =           torch.from_numpy(initial_pump_powers).to(device, dtype=torch.float32)
@@ -209,7 +205,7 @@ if __name__ == "__main__":
     recompute   = False
     set_improper_power = False
     repropagate = True
-    use_smf     = False
+    use_smf     = True
     use_avg_oi  = False
     
     # -10 -> true
@@ -219,7 +215,6 @@ if __name__ == "__main__":
     oi_fit = np.load('results/oi_fit.npy')
     oi_avg = np.load('results/oi_avg.npy')
    
-    # prepare the definitions of fiber and wdm
     if use_smf:
       cf = cfg.load_toml_to_struct("./input/smf.toml")
     else:

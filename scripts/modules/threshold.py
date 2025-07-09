@@ -45,11 +45,9 @@ def get_raman_corrections(smf=False) -> Tuple[float, float, float, float]:
     signal_powers_swp = np.swapaxes(signal_powers, 1, 2)
     initial_powers = signal_powers_swp[0, :, :]
     fB = np.divide(signal_powers_swp, initial_powers)
-    print(fB.shape)
     assert((fB>=0).all())
     fB_max = np.max(fB, axis=(1, 2))
     fB_min = np.min(fB, axis=(1, 2))
-    print(fB_min.shape)
     assert((fB_min<=fB_max).all())
     # assert(len(fB_max) == fB.shape.0)
     z_axis = np.linspace(0, cf.fiber_length, len(fB_max))

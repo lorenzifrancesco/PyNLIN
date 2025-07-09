@@ -40,10 +40,8 @@ def get_nlin_prefactor_mmf(cf, mode_a, mode_b):
     gamma = n2 * omega_0 / (cf.effective_area * c)
     P_in = dBm2watt(cf.launch_power)
     constellation_factor = 0.32 * 1.19 # 64-QAM
-    print("mode_a", mode_a)
     di = np.diag_indices(len(mode_a))
     mode_b_prefactor = 2 * np.outer(np.ones((cf.n_modes)), SPATIAL_MODES)
-    print(mode_b_prefactor)
     var = constellation_factor * mode_b_prefactor 
     var[di] =  (constellation_factor + 1) * (2*ns[mode_a[0]] + 3) - 4
     assert((var > 0).all())
@@ -126,7 +124,6 @@ def get_nlin(cf,
         beta2[i, :] = fiber.group_delay.evaluate_beta2(i, freqs)
     beta1 = np.array(beta1)
     beta2 = np.array(beta2)
-    print("beta1 shape", beta1.shape)
     # for each channel, we compute the total number of collisions that
     # needs to be computed for evaluating the total noise on that channel.
     T = 1 / cf.baud_rate
@@ -174,8 +171,8 @@ def get_nlin(cf,
     ps = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
 
     # beware, we have a mixed unit system here, so we need to be careful
-    print("Optimal parameters MAX: ", ps[0, :])
-    print("Optimal parameters MIN: ", ps[1, :])
+    # print("Optimal parameters MAX: ", ps[0,  :])
+    # print("Optimal parameters MIN: ", ps[1, :])
     lc_softplus = lambda d: (lc(d) * softplus2(d * x_norm, *ps[0, :]) + (1-lc(d)) * softplus2(d*x_norm, *ps[1, :])) / y_norm
 
     def pair_noise(dgd):
@@ -193,7 +190,6 @@ def get_nlin(cf,
         modal_prefactor = np.multiply(modal_prefactor, switchoff_matrix)
         # modal_prefactor *= 0.9
     modal_prefactor = modal_prefactor[:cf.n_modes, :cf.n_modes]
-    print("modal_prefactor", modal_prefactor)
     for i in modes:
         for j in range(len(freqs)):
             # print("WARN: we are neglecting the fact that the kappa matrix is not symmetric.")
@@ -257,7 +253,7 @@ def noise_plot(use_kappa=False,
                                        use_x_mode_interactions=False,
                                        use_dBm_scale=use_dBm_scale,)
     nlin_smf                = get_nlin(cf_smf,
-                                       use_kappa=True,
+                                       use_kappa=use_kappa,
                                        use_fB=use_fB,
                                        use_x_mode_interactions=True,
                                        use_dBm_scale=use_dBm_scale,)
@@ -395,7 +391,6 @@ def noise_histogram(use_kappa=False,
 
     y_extremes = [np.min(y_data), -40]
     n_bins = 25
-    print("y_extremes", y_extremes)
     bin_width = (y_extremes[1] - y_extremes[0]) / n_bins
     bins = np.arange(y_extremes[0], y_extremes[1] + bin_width, bin_width)
     alpha   = 0.1
@@ -415,7 +410,6 @@ def noise_histogram(use_kappa=False,
                       alpha=alpha2,
                       color=colors[i],)
     if use_smf:
-        print(y_function_smf(nlin_smf))
         plot_function(y_function_smf(nlin_smf[0, :]),
                       bins=bins,
                       histtype='stepfilled',
