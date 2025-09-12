@@ -202,7 +202,7 @@ def noise_plot(use_kappa=False,
                use_smf=False,
                use_fB=False,
                use_dBm_scale=False,
-               use_plot_x_mode=True, 
+               use_plot_without_x_mode=True, 
                name = "xxx"):
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
@@ -287,7 +287,7 @@ def noise_plot(use_kappa=False,
                       color=colors[i],
                       ls=linestyles[i],
                       label=labels[i])
-        if use_plot_x_mode:
+        if use_plot_without_x_mode:
             plot_function(freqs_mmf * 1e-12,
                           y_function_mmf(nlin_mmf_noninteracting[i, :]),
                           lw=lw,
