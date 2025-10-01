@@ -19,7 +19,7 @@ def get_plane(k, p, m):
     d = p[0]*k[m[0], 2] + p[1]*k[m[1], 2] + p[2]*k[m[2], 2] - k[m[3], 2]
     return a, b, c, d
 
-cf = cfg.load_toml_to_struct("./input/config_collision.toml")
+cf = cfg.load_toml_to_struct("./input/mmf.toml")
 oi_fit = np.load('results/oi_fit.npy')
 wdm = pynlin.wdm.WDM(
     spacing=cf.channel_spacing,

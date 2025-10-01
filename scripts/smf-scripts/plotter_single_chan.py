@@ -130,8 +130,6 @@ for fiber_length in fiber_lengths:
 				single_interference_channel_spacing = interfering_frequency - frequency_of_interest
 				print("single_interference_channel_spacing= ", single_interference_channel_spacing)
 
-
-
 				# compute the X0mm coefficients given the precompute time integrals
 				m = np.array(f['/time_integrals/channel_0/interfering_channel_'+str(interfering_grid_index-1)+'/m'])
 				z = np.array(f['/time_integrals/channel_0/interfering_channel_'+str(interfering_grid_index-1)+'/z'])
@@ -139,7 +137,6 @@ for fiber_length in fiber_lengths:
 
 				# upper cut z
 				z = np.array(list(filter(lambda x: x<=fiber_length, z)))
-				print(z)
 				I = I[:int(len(m)*(fiber_length/80e3)), :len(z)]
 				m = m[:int(len(m)*(fiber_length/80e3))]
 

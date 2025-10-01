@@ -74,7 +74,6 @@ def iterate_time_integrals(
     b_channels = get_interfering_channels(
         a_chan, wdm, fiber,
     )
-    print(b_channels)
 
     # iterate over all channels of the WDM grid
     for b_num, b_chan in enumerate(b_channels):
@@ -153,6 +152,11 @@ def compute_all_collisions_time_integrals(
         partial_collisions_margin,
         dgd
     )[::-1]
+    # assert pulse.baud_rate == 35e9
+    # assert fiber.length == 70e3
+    # assert wdm.num_channels == 250
+    # assert wdm.spacing == 40e9
+    # assert wdm.central_frequency == 195.94e12
     z_axis_list = []
     z_walkoff = get_z_walkoff(fiber, wdm, a_chan, b_chan, pulse, dgd=dgd)
     if info:
@@ -185,11 +189,11 @@ def compute_all_collisions_time_integrals(
     #   where the pulses start and end the collision
     #   print(get_frequency_spacing(a_chan, b_chan, wdm))
     n_z_points = 200
-    margin = 10
+    margin = 5
     if isinstance(pulse, NyquistPulse):
-      print("\033[91m warn: \033[0m The pulse is Nyquist (long-tailed): overriding the number of points!")
+    #   print("\033[91m warn: \033[0m The pulse is Nyquist (long-tailed): overriding the number of points!")
       n_z_points = 200
-      margin = 10
+      margin = 5
   
     if info:
       print("Setting the z integration ranges...")
@@ -244,7 +248,8 @@ def compute_all_collisions_time_integrals(
     if use_multiprocessing:
         # def partial_function(m, z): return m_th_time_integral(pulse, fiber, wdm, a_chan, b_chan, m, z)
         integrals_list = process_map(
-            partial_function, m_list, z_axis_list, leave=False, chunksize=1
+            partial_function, m_list, z_axis_list, leave=False, chunksize=1, max_workers=14,
+            desc=f"Iterating over m values {len(m_list)} total, {partial_collisions_margin} margins on each size",
         )
     else:
         integrals_list = process_map(

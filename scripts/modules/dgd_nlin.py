@@ -171,8 +171,8 @@ def get_nlin(cf,
     ps = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
 
     # beware, we have a mixed unit system here, so we need to be careful
-    # print("Optimal parameters MAX: ", ps[0,  :])
-    # print("Optimal parameters MIN: ", ps[1, :])
+    print("Optimal parameters MAX: ", ps[0, :])
+    print("Optimal parameters MIN: ", ps[1, :])
     lc_softplus = lambda d: (lc(d) * softplus2(d * x_norm, *ps[0, :]) + (1-lc(d)) * softplus2(d*x_norm, *ps[1, :])) / y_norm
 
     def pair_noise(dgd):

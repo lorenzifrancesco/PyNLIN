@@ -286,8 +286,8 @@ def get_fig4(cf_file = "./input/mmf.toml"):
 
     x_start = 0.2 / x_norm * 1e12
     x_end = 3.0 / x_norm * 1e12
-    x_start = 1e-4
-    x_end  = 2e-2
+    # x_start = 1e-4
+    # x_end  = 2e-2
     plt.axvline(x_start, color='red', lw=1, ls='--')
     plt.axvline(x_end, color='red', lw=1, ls='--')
     plt.axvspan(x_start, x_end, color='red', alpha=0.3)
