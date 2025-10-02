@@ -360,6 +360,7 @@ def get_nlin_threshold(
     plt.figure(figsize=(3.6, 3))
     color_modes = [adjust_luminosity('magenta', 0.8),
                    adjust_luminosity('cyan', 0.8), 'green']
+    # most importantly, we get the fit coefficients
     ps_g, ps_n = get_fit_coefficients(fB_simple_interpolation=fB_simple_interpolation)
     for im, mode in enumerate(modes):
         na_nlin = L / (T * dgds_numeric_g)
@@ -368,10 +369,10 @@ def get_nlin_threshold(
         elif mode == "min":
             na_nlin = na_nlin * rcal_hi_min
 
-        assert(nc.gvd == 0)
         gauss = np.ones_like(dgds_analytic) * np.sqrt(np.pi) * (LD_eff / (T * np.sqrt(2 * np.pi))
                                                                 * np.arcsinh(L / LD_eff))**2
-        gauss = np.ones_like(dgds_analytic) * (L / T)**2 / (2*np.sqrt(np.pi))
+        # assert(nc.gvd == 0)
+        # gauss = np.ones_like(dgds_analytic) * (L / T)**2 / (2*np.sqrt(np.pi))
         nyquist = np.ones_like(dgds_analytic) * 4 / 9 / \
             y_norm  # 0.444=4/9 instead of 0.406
         if use_fB:
@@ -637,14 +638,15 @@ def get_nlin_threshold(
 
 
 if __name__ == "__main__":
-    # plot the case-study figure
-    get_nlin_threshold(recompute=True,
-                       use_fB=True,
-                       fB_simple_interpolation=True)
-    exit()
     # plot the theoretical figure
     get_nlin_threshold(recompute=False,
                        use_fB=False)
 
+    # plot the case-study figure
+    exit()
+    get_nlin_threshold(recompute=True,
+                       use_fB=True,
+                       fB_simple_interpolation=True)
+    exit()
     print(get_raman_corrections())
     get_fit_coefficients()
