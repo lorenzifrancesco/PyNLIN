@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rc
 import pynlin.wdm
 from pynlin.utils import nu2lambda
-from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay
+from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay, load_rms_gvd
 from numpy import polyval
 from pynlin.fiber import *
 from pynlin.pulses import *
@@ -168,7 +168,7 @@ def softplus2(x, a, b, c):
 
 
 @log_calls(logger)
-def get_raman_corrections(smf: bool = False) -> Tuple[float, float, float, float]:
+def get_raman_corrections(smf: bool = False, gvd = 0.0) -> Tuple[float, float, float, float]:
     """
     Given the optimized signal profiles, calculate max and min asymptotic values
     for the correction coefficients f_B.
@@ -187,7 +187,7 @@ def get_raman_corrections(smf: bool = False) -> Tuple[float, float, float, float
         "raman_gain": getattr(cf, "raman_gain", None),
     })
 
-    assert (cf.launch_power == -6.0 and cf.raman_gain == 0.0)
+    assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
 
     sol_path = f"results/ct_solution-6_gain_0.0{select_string}.npy"
     solutions = np.load(sol_path, allow_pickle=True).item()
@@ -205,31 +205,49 @@ def get_raman_corrections(smf: bool = False) -> Tuple[float, float, float, float
     z_axis = np.linspace(0, cf.fiber_length, len(fB_max))
     dz = z_axis[1] - z_axis[0]
     assert (fB.shape[0] == len(z_axis))
-    rcal_lo_min = (np.sum(fB_min) * dz / cf.fiber_length)**2
-    rcal_lo_max = (np.sum(fB_max) * dz / cf.fiber_length)**2
-    rcal_hi_min = np.sum(fB_min**2) * dz / cf.fiber_length
-    rcal_hi_max = np.sum(fB_max**2) * dz / cf.fiber_length
+    
+    if gvd == 0:
+        r_lo_min = (np.sum(fB_min) * dz / cf.fiber_length)**2
+        r_lo_max = (np.sum(fB_max) * dz / cf.fiber_length)**2
+        r_hi_min = np.sum(fB_min**2) * dz / cf.fiber_length
+        r_hi_max = np.sum(fB_max**2) * dz / cf.fiber_length
 
-    # Sanity checks
-    rcal_hi = np.sum(fB**2, axis=0) * dz / cf.fiber_length
-    rcal_lo = (np.sum(fB, axis=0) * dz / cf.fiber_length)**2
-    assert ((rcal_hi >= rcal_hi_min - 1e-15).all())
-    assert ((rcal_hi <= rcal_hi_max + 1e-15).all())
-    assert ((rcal_lo >= rcal_lo_min - 1e-15).all())
-    assert ((rcal_lo <= rcal_lo_max + 1e-15).all())
+        # Sanity checks
+        rcal_hi = np.sum(fB**2, axis=0) * dz / cf.fiber_length
+        rcal_lo = (np.sum(fB, axis=0) * dz / cf.fiber_length)**2
+        assert ((rcal_hi >= r_hi_min - 1e-15).all())
+        assert ((rcal_hi <= r_hi_max + 1e-15).all())
+        assert ((rcal_lo >= r_lo_min - 1e-15).all())
+        assert ((rcal_lo <= r_lo_max + 1e-15).all())
+    else: 
+        # load the numerically computed noises (FIXME check the order of this computation. When are the numerical values saved?):
+        noise_min = np.load(f"results/partial_nlin_gaussian_min{gvd}B2.npy")
+        noise_max = np.load(f"results/partial_nlin_gaussian_max{gvd}B2.npy")
+        noise_perfect = np.load(f"results/partial_nlin_gaussian_perfect{gvd}B2.npy")
+        r_lo_min = noise_min[0] / noise_perfect[0]
+        r_hi_min = noise_min[-1] / noise_perfect[-1]
+        r_lo_max = noise_max[0] / noise_perfect[0]
+        r_hi_max = noise_max[-1] / noise_perfect[-1]
 
     _log_params(logger, "get_raman_corrections outputs", "computed", {
-        "rcal_lo_min": rcal_lo_min,
-        "rcal_lo_max": rcal_lo_max,
-        "rcal_hi_min": rcal_hi_min,
-        "rcal_hi_max": rcal_hi_max,
+        "rcal_lo_min": r_lo_min,
+        "rcal_lo_max": r_lo_max,
+        "rcal_hi_min": r_hi_min,
+        "rcal_hi_max": r_hi_max,
     })
 
-    return rcal_lo_min, rcal_lo_max, rcal_hi_min, rcal_hi_max
+    return r_lo_min, r_lo_max, r_hi_min, r_hi_max
 
+# basic convention [min, max] (lo and hi are in different calls)
+def get_dispersion_corrected_raman_coefficient(gvd_rms: float, 
+                                               dless_r: float, 
+                                               dless_r_extremes: Tuple[float, float, float], d_r_extremes: Tuple[float, float]) -> float:
+    
+    raise NotImplementedError("This function is not currently used, please implement it if needed")
+    return d_r_extremes[1]
 
 @log_calls(logger)
-def get_fit_coefficients(fB_simple_interpolation: bool = False, ) -> Tuple[np.ndarray, np.ndarray]: # FIXME inwert here the GVD param to call it from dgd_nlin.py
+def get_fit_coefficients(fB_simple_interpolation: bool = False, gvd = None) -> Tuple[np.ndarray, np.ndarray]: # FIXME inwert here the GVD param to call it from dgd_nlin.py
     """
     Given the numerical noise results for a representative GVD, find the best
     fit coefficients in the Nyquist and Gaussian cases. Only consider max and min profiles.
@@ -244,6 +262,8 @@ def get_fit_coefficients(fB_simple_interpolation: bool = False, ) -> Tuple[np.nd
     nc.dgd1 = DGD_MIN / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_n = DGD_MAX / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_g = nc.dgd2_n
+    if gvd is None: 
+        gvd = nc.gvd
 
     _log_params(logger, "get_fit_coefficients inputs", "config + args", {
         "fB_simple_interpolation": fB_simple_interpolation,
@@ -278,11 +298,11 @@ def get_fit_coefficients(fB_simple_interpolation: bool = False, ) -> Tuple[np.nd
     ps_n = np.zeros((len(modes), 3))
 
     for mode in modes:
-        partial_B2g = np.load(f"results/partial_nlin_gaussian_{mode}{nc.gvd}B2.npy")
-        partial_B2n = np.load(f"results/partial_nlin_nyquist_{mode}{nc.gvd}B2.npy")
+        partial_B2g = np.load(f"results/partial_nlin_gaussian_{mode}{gvd}B2.npy")
+        partial_B2n = np.load(f"results/partial_nlin_nyquist_{mode}{gvd}B2.npy")
         _log_params(logger, f"curve_fit datasets [{mode}]", "npy files", {
-            "gaussian_file": f"results/partial_nlin_gaussian_{mode}{nc.gvd}B2.npy",
-            "nyquist_file": f"results/partial_nlin_nyquist_{mode}{nc.gvd}B2.npy",
+            "gaussian_file": f"results/partial_nlin_gaussian_{mode}{gvd}B2.npy",
+            "nyquist_file": f"results/partial_nlin_nyquist_{mode}{gvd}B2.npy",
             "len_gaussian": len(partial_B2g),
             "len_nyquist": len(partial_B2n),
         })
@@ -296,7 +316,6 @@ def get_fit_coefficients(fB_simple_interpolation: bool = False, ) -> Tuple[np.nd
         })
 
     return ps_g, ps_n
-
 
 def adjust_luminosity(color, factor):
     _log_params(logger, "adjust_luminosity inputs", "function args", {"color": color, "factor": factor})
@@ -382,8 +401,10 @@ def get_nlin_threshold(
         beta2[i, :] = fiber.group_delay.evaluate_beta2(i, freqs)
 
     px = 0
-    gvds = [nc.gvd]
-
+    
+    # here we iterate over all the possible gvds
+    # gvds = [nc.gvd]
+    gvds = np.unique(load_rms_gvd().flatten())
     logger.info(
         "Computing NLIN coeff. in L/LW ∈ [%.1e, %.1e] (ps/m range)",
         nc.dgd1 * 1e12, nc.dgd2_g * 1e12,
@@ -392,7 +413,7 @@ def get_nlin_threshold(
     if use_fB:
         rcal_lo_min, rcal_lo_max, rcal_hi_min, rcal_hi_max = get_raman_corrections()
         modes = ["min", "max"]
-        assert (cf.launch_power == -6.0 and cf.raman_gain == 0.0)
+        assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
         sol_path = "results/ct_solution-6_gain_0.0.npy"
         solutions = np.load(sol_path, allow_pickle=True).item()
         logger.info("Loaded case-study Raman solutions from %s", sol_path)
@@ -461,7 +482,7 @@ def get_nlin_threshold(
             dgds_numeric = np.logspace(np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
             dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
 
-            partial_nlin = np.zeros(n_samples_numeric)
+            partial_nlin     = np.zeros(n_samples_numeric)
             partial_nlin_min = np.zeros(n_samples_numeric)
             partial_nlin_max = np.zeros(n_samples_numeric)
             a_chan = (1, 1)
@@ -654,7 +675,7 @@ def get_nlin_threshold(
 if __name__ == "__main__":
     logger.info("Starting threshold script with LOG_LEVEL=%s", os.getenv('LOG_LEVEL', getattr(cfg, 'LOG_LEVEL', 'DEBUG')))
     # plot the theoretical figure
-    get_nlin_threshold(recompute=False, use_fB=True, fB_simple_interpolation=False)
+    get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=False)
 
     # plot the case-study figure
     # get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=True)

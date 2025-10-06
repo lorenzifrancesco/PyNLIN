@@ -90,3 +90,10 @@ def load_oi() -> np.array:
                 oi_law_fit, (x, y), oi[:, :, i, j].ravel(), p0=[1e10, 1e10, 1e10, 1e10, 0, 1])[0].T
     np.save('results/oi_fit.npy', oi_fit)
     return oi_fit
+
+# for the calculation of the total noise, we need the rms value of the averaged GVDs for each group modes.
+# they are taken to be averaged
+# this only works for the OFC fiber of the JLT paper
+def load_rms_gvd():
+    avg_gvd = np.array([-24.0, -24.0, -20.0, -2]) * 1e-27
+    return np.sqrt((avg_gvd[:, None]**2 + avg_gvd[None, :]**2)/2)
