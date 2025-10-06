@@ -199,6 +199,7 @@ def get_nlin(cf,
     # precompute the Raman corrections from the numerical results of the integrals
     
     # precompute the GVD-dependent fitting parameters (perfect amplification)
+    rms_gvd = load_rms_gvd()
     ps_matrix = np.zeros((cf.n_modes, cf.n_modes, 3))
     r_bar_hi_min = np.zeros((cf.n_modes, cf.n_modes))
     r_bar_lo_min = np.zeros((cf.n_modes, cf.n_modes))
@@ -211,7 +212,7 @@ def get_nlin(cf,
     for mA in modes:
         for mB in modes:
             gvd = rms_gvd[mA, mB]
-            ps_matrix[mA, mB, :] = get_fit_coefficients(gvd=gvd)
+            ps_matrix[mA, mB, :] = get_fit_coefficients(gvd=gvd)[param_select]
             r_bar_lo_min[mA, mB], r_bar_lo_max[mA, mB], r_bar_hi_min[mA, mB], r_bar_hi_max[mA, mB] = get_raman_corrections(smf=(cf.n_modes==1), gvd=gvd)
 
     # nlin_megafit = lambda d: softplus2(d * x_norm, *ps_perf[0, :]) * raman_correction(d) / y_norm

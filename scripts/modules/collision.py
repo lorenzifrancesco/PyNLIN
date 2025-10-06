@@ -20,21 +20,21 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
     nyquist_pulse = NyquistPulse(
     baud_rate=cf.baud_rate,
     num_symbols=200, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
-    samples_per_symbol=10,
+    samples_per_symbol=30,
     rolloff=0.0,
     )
     gaussian_pulse = GaussianPulse(
-        baud_rate=cf.baud_rate,
-        num_symbols=5e2, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
-        samples_per_symbol=2**5,
+        baud_rate = cf.baud_rate,
+        num_symbols = 100, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
+        samples_per_symbol = 2**5,
     )
     plt.figure(figsize=(4, 2.2))
     ls = ["-", "--"]
     for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
-      m = [-10, -90]*2
-      m1 = -10 * 2
-      m2 = -90 * 2
-      dgd_hi = 200e-15
+      m = [-10, -90]
+      m1 = -10
+      m2 = -90
+      dgd_hi = 100e-15
       beta2a = -100e-27
       beta2b = -50e-27
       # beta2bar = beta2rms(beta2a, beta2b)
@@ -46,8 +46,8 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
       # 1. the two pulses
       # cases are related to single collisions
       # assume beta2a = beta2b
-      cases = [(dgd_hi, beta2a, beta2a, -10 * 2),
-               (dgd_hi, beta2a, beta2a, -90 * 2),]
+      cases = [(dgd_hi, beta2a, beta2a, -10),
+               (dgd_hi, beta2a, beta2a, -90),]
       I_list = []
       for dgd, beta2a, _, m in cases:
           I = np.real(m_th_time_integral_general(pulse, fiber, wdm, (0, 0), (0, 0), 0.0, m, z, dgd, None, beta2b, beta2rms_complementary(beta2a, beta2b)))
@@ -84,8 +84,9 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
       print(peaks)
       
       # 3. case of very low DGD (almost zero)
-      I_low = np.real(m_th_time_integral_general(pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, z, 1e-20, None, beta2a, beta2a))
-      I_low_2 = np.real(m_th_time_integral_general(pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, z, 1e-20, None, beta2b, beta2rms_complementary(beta2a, beta2b)))
+      print(f"low DGD parameters L/LD1: {-beta2a * pulse.baud_rate**2 * fiber.length:.2e}, L/LD2: {-beta2b * pulse.baud_rate**2 * fiber.length:.2e}")
+      I_low = np.real(m_th_time_integral_general(pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, z, 1e-40, None, beta2a, beta2a))
+      I_low_2 = np.real(m_th_time_integral_general(pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, z, 1e-40, None, beta2b, beta2rms_complementary(beta2a, beta2b)))
       
       # 4. Plotting
       colors  = ["grey", "blue"]
@@ -112,9 +113,9 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
                     linewidth=lw)
       # plotting the low DGD case
       plt.plot(z/LDbar, 
-              I_low / pulse.baud_rate, 
-              label='low DGD', 
-              color="green", 
+              I_low / pulse.baud_rate,
+              label='low DGD',
+              color="green",
               linewidth=lw,
               linestyle=ls[ipulse])
       plt.plot(z/LDbar, 
@@ -146,10 +147,10 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
     plt.gca().xaxis.set_major_formatter(formatter)
     plt.tight_layout()
     plt.savefig("media/1-quovadis.pdf")
-    print("Done plotting Fig.1.")
+    print("Done plotting Fig.1 media/1-quovadis.pdf .")
 
 
-def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
+def plot_dispersion_analysis(fiber, wdm, cf, recompute=True):
     print("Plotting Fig.1 (pulse collisions)...")
     
     nyquist_pulse = NyquistPulse(
@@ -163,19 +164,23 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
         num_symbols=5e2, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
         samples_per_symbol=2**5,
     )
-    plt.figure(figsize=(4, 2.2))
+    plt.figure(figsize=(2.2, 2.2))
     ls = ["-", "--"]
     names = ["gaussian", "nyquist"]
     for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
-      z = np.linspace(0, fiber.length*10, 1000)
+      z = np.linspace(0, fiber.length, 2)
       # 3. case of very low DGD (almost zero)
       def compute_I_low(pulse, fiber, wdm, z, beta2a, beta2b):
         I_low = np.real(m_th_time_integral_general(
-            pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, z, 1e-20, None, beta2a, beta2b
+            pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, [z[-1]], 1e-40, None, beta2a, beta2b
         ))
-        return I_low[-1] 
+        return I_low[-1]
       beta2_range = np.linspace(0.1, 100, 50) * 1e-27
       beta20 = 1 / (cf.baud_rate**2 * z[-1])
+      print(beta2_range)
+      print(beta20)
+      # assert(np.isclose(beta2_range[-1]/beta20, 1.0))
+      
       print(f"Showing values of z/L_D from {z[-1] * cf.baud_rate**2 * beta2_range[0]:.2e} to {z[-1] * cf.baud_rate **2 * beta2_range[-1]:.2e}")
       beta2a_values, beta2b_values = np.meshgrid(beta2_range, beta2_range)
 
@@ -184,17 +189,21 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=False):
             [compute_I_low(pulse, fiber, wdm, z, beta2a, beta2b) for beta2a in beta2_range]
             for beta2b in beta2_range
         ]) / cf.baud_rate
+        print("  Done computing I_low values.")
         np.save(f"results/I_low_{names[ipulse]}.npy", I_low_values)
       I_low_values = np.load(f"results/I_low_{names[ipulse]}.npy")
-      plt.figure(figsize=(10, 10.3))
-      contour      = plt.contourf(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.091), levels=100, cmap='viridis')
-      contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.091), levels=20, colors="w")
+      # max 
+      # plt.figure(figsize=(10, 10.3))
+      print(I_low_values)
+      contour      = plt.contourf(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.91), levels=100, cmap='viridis')
+      contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.91), levels=20, colors="w")
       plt.clabel(contour_lines, inline=True, fontsize=8)
 
-      plt.xlabel(r'$|\beta_{2A}/\beta_{20}|$')
-      plt.ylabel(r'$|\beta_{2B}/\beta_{20}|$')
+      plt.xlabel(r'$|\beta_{2A}|LT^{-2}$')
+      plt.ylabel(r'$|\beta_{2B}|LT^{-2}$')
       # plt.colorbar(label=r'$I_{0;AB}(\bar{L}_{D0}) \cdot T$')
       plt.gca().set_aspect('equal')
       plt.tight_layout()
       plt.savefig("media/differential_dispersion_"+names[ipulse]+".pdf")
       print(f"Saved dispersion in media/differential_dispersion_{names[ipulse]}.pdf")
+      plt.clf()

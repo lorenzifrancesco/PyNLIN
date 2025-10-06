@@ -54,12 +54,12 @@ delta = (s_freq - l_freq) * 1e-12
 avg = ((s_freq + l_freq) * 1e-12 / 2)
 
 ###########
-fig_to_generate = [3]
+fig_to_generate = [-1, 1]
 if -1 in fig_to_generate:
     plot_dispersion_analysis(fiber,
                              wdm,
                              cf,
-                             recompute=False)
+                             recompute=True)
 
 if 1 in fig_to_generate:
     # the plot of Marco
