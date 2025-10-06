@@ -17,7 +17,7 @@ from scripts.modules.time_integrals import do_time_integrals
 from scripts.modules.load_fiber_values import *
 from scripts.modules.load_fiber_values import load_group_delay
 from scripts.modules.collision import plot_illustrative, plot_dispersion_analysis
-from scripts.modules.threshold import get_fig2_raman, get_fig2
+# from scripts.modules.threshold import get_fig2_raman, get_fig2
 from scripts.modules.dgd_nlin import noise_plot, noise_histogram
 
 cf = cfg.load_toml_to_struct("./input/config_collision.toml") # config_collisions is useful to print the plot of Marco, illustrative one
@@ -54,7 +54,7 @@ delta = (s_freq - l_freq) * 1e-12
 avg = ((s_freq + l_freq) * 1e-12 / 2)
 
 ###########
-fig_to_generate = [-1]
+fig_to_generate = [3]
 if -1 in fig_to_generate:
     plot_dispersion_analysis(fiber,
                              wdm,

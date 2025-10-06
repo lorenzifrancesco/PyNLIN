@@ -145,7 +145,7 @@ def get_nlin(cf,
     d_max = nc.dgd2_g
     d_span = d_max - d_min
     if use_fB:
-        f_minus_min, f_minus_max, f_plus_min, f_plus_max = get_raman_corrections(smf=(cf.n_modes==1))
+        f_minus_min, f_minus_max, f_plus_min, f_plus_max = get_raman_corrections(smf=(cf.n_modes==1)) # FIXME insert here the dependency on the GVD
         lincomb_lo = (rcal_minus - f_minus_min) / (f_minus_max - f_minus_min)
         lincomb_hi = (rcal_plus  - f_plus_min) / (f_plus_max - f_plus_min)
         # print(lincomb_lo)
@@ -167,12 +167,19 @@ def get_nlin(cf,
         f_hi_minus = 1.0
         lc = lambda d: np.ones((len(modes), len(freqs)))
 
-    ps_g, ps_n = get_fit_coefficients()
+    # FIXME: whose mode is it? Assign the right averaged GVD. We actually need the RMS GVD OF THE MODE PAIR
+    # do we still have knowledge of the A channel?
+    avg_gvd = np.array([-24.0, -24.0, -20.0, -2]) * 1e-27
+    gvd_matrix = np.sqrt(avg_gvd[:, None]**2 + avg_gvd[None, :]**2)
+    print(gvd_matrix)
+    exit()
+    gvd = gvd_matrix[mode1, mode2]
+    ps_g, ps_n = get_fit_coefficients(gvd) # here the fit coefficients are automatically taken with the right GVD
     ps = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
 
     # beware, we have a mixed unit system here, so we need to be careful
     print("Optimal parameters MAX: ", ps[0, :])
-    print("Optimal parameters MIN: ", ps[1, :])
+    print("Optimal parameters MIN: ", ps[1, :]) # FIXME here we should use the same trick as in the paper. Derive ps[1, :] from ps[0, :] and the ratio of the GVDs by shifting.
     lc_softplus = lambda d: (lc(d) * softplus2(d * x_norm, *ps[0, :]) + (1-lc(d)) * softplus2(d*x_norm, *ps[1, :])) / y_norm
 
     def pair_noise(dgd):

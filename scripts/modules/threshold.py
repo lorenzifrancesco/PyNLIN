@@ -229,7 +229,7 @@ def get_raman_corrections(smf: bool = False) -> Tuple[float, float, float, float
 
 
 @log_calls(logger)
-def get_fit_coefficients(fB_simple_interpolation: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+def get_fit_coefficients(fB_simple_interpolation: bool = False, ) -> Tuple[np.ndarray, np.ndarray]: # FIXME inwert here the GVD param to call it from dgd_nlin.py
     """
     Given the numerical noise results for a representative GVD, find the best
     fit coefficients in the Nyquist and Gaussian cases. Only consider max and min profiles.
@@ -521,6 +521,10 @@ def get_nlin_threshold(
     color_modes = [adjust_luminosity('magenta', 0.8), adjust_luminosity('cyan', 0.8), 'green']
 
     ps_g, ps_n = get_fit_coefficients(fB_simple_interpolation=fB_simple_interpolation)
+    # FINALIZING FIXME
+    print("Fit coefficients (gauss):", ps_g)
+    print("Fit coefficients (nyquist):", ps_n)
+    # exit()
     for im, mode in enumerate(modes):
         na_nlin = L / (T * dgds_numeric_g)
         if mode == "max":
@@ -528,7 +532,9 @@ def get_nlin_threshold(
         elif mode == "min":
             na_nlin = na_nlin * rcal_hi_min
 
-        gauss = np.ones_like(dgds_analytic) * np.sqrt(np.pi) * (LD_eff / (T * np.sqrt(2 * np.pi)) * np.arcsinh(L / LD_eff))**2
+        
+        # gauss = np.ones_like(dgds_analytic) * np.sqrt(np.pi) * (LD_eff / (T * np.sqrt(2 * np.pi)) * np.arcsinh(L / LD_eff))**2
+        gauss = np.ones_like(dgds_analytic) * (L / T)**2 / np.sqrt(2 * np.pi)
         nyquist = np.ones_like(dgds_analytic) * 4 / 9 / y_norm
         if use_fB:
             rcal_hi = rcal_hi_max if mode == "max" else rcal_hi_min
@@ -538,12 +544,12 @@ def get_nlin_threshold(
 
         plt.plot(dgds_numeric_g * x_norm, na_nlin * y_norm, lw=1, color=adjust_luminosity('orange', 0.9))
         if use_fB:
-            plt.plot(dgds_analytic * x_norm, gauss * y_norm, color=color_modes[im], lw=1, ls=":", label=r'$N^>$')
-            plt.plot(dgds_analytic * x_norm, nyquist * y_norm, color=color_modes[im], ls="--", lw=1, label='Marco')
+            # plt.plot(dgds_analytic * x_norm, gauss * y_norm, color=color_modes[im], lw=1, ls=":", label=r'$N^>$')
+            # plt.plot(dgds_analytic * x_norm, nyquist * y_norm, color=color_modes[im], ls="--", lw=1, label='Marco')
+            pass
         else:
             plt.plot(dgds_analytic * x_norm, gauss * y_norm, color="blue", lw=1, ls=":", label=r'$N^>$')
             plt.plot(dgds_analytic * x_norm, nyquist * y_norm, color="green", ls="--", lw=1, label='Marco')
-
         lowest_dgd = 0.0
         lw = 1
         ss = 20
@@ -561,8 +567,18 @@ def get_nlin_threshold(
                 fitted_data_g_flat = softplus2(dgds_analytic * x_norm, *ps_g[0, :])
                 fitted_data_n_flat = softplus2(dgds_analytic * x_norm, *ps_n[0, :])
             else:
-                fitted_data_g = softplus2(dgds_analytic * x_norm, *ps_g[im, :])
-                fitted_data_n = softplus2(dgds_analytic * x_norm, *ps_n[im, :])
+                # here we have two fitting choices: fit max and min, or fit only min and just substitute the max shifting the min (JLT).
+                fitting_method = "shift_min_to_max"  # "fit_both" or "shift_min_to_max"
+                if fitting_method == "shift_min_to_max":
+                    modified_ps_g = ps_g[0, :].copy()
+                    modified_ps_g[0] *= (ps_g[im, 0] / ps_g[0, 0])
+                    modified_ps_n = ps_n[0, :].copy()
+                    modified_ps_n[0] *= (ps_n[im, 0] / ps_n[0, 0])
+                    fitted_data_g = softplus2(dgds_analytic * x_norm, *modified_ps_g)
+                    fitted_data_n = softplus2(dgds_analytic * x_norm, *modified_ps_n)
+                else:
+                    fitted_data_g = softplus2(dgds_analytic * x_norm, *ps_g[im, :])
+                    fitted_data_n = softplus2(dgds_analytic * x_norm, *ps_n[im, :])
 
             if ix == 0:
                 lowest_dgd = partial_B2g[0]
@@ -638,11 +654,11 @@ def get_nlin_threshold(
 if __name__ == "__main__":
     logger.info("Starting threshold script with LOG_LEVEL=%s", os.getenv('LOG_LEVEL', getattr(cfg, 'LOG_LEVEL', 'DEBUG')))
     # plot the theoretical figure
-    get_nlin_threshold(recompute=False, use_fB=False, fB_simple_interpolation=True)
+    get_nlin_threshold(recompute=False, use_fB=True, fB_simple_interpolation=False)
 
     # plot the case-study figure
     # get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=True)
 
     # Example utilities (disabled by default):
     # logger.info("Raman corrections: %s", _safe_repr(get_raman_corrections()))
-    # logger.info("Fit coefficients shapes: %s", _safe_repr([x.shape for x in get_fit_coefficients()]))
+    # logger.info("Fit coefficients shapes: %s", _safe_repr([x.shape for x in get_fit_coefficients()]))0

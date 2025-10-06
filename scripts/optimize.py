@@ -202,8 +202,9 @@ def repropagate_numpy(fiber,
 
 if __name__ == "__main__":    
     # Configuration
-    recompute   = False
-    set_improper_power = False
+    recompute   = True
+    # activate this is you want to use an optimization obtained with a differnt launch power
+    set_improper_power = True
     repropagate = True
     use_smf     = True
     use_avg_oi  = False
@@ -277,7 +278,7 @@ if __name__ == "__main__":
                 use_avg_oi       = False
             )
             print("Pump w : ", pump_wavelengths)
-            print("Pump p : ", pump_powers) 
+            print("Pump p : ", pump_powers)
             # shortcutting
             # pump_wavelengths = np.array([1.3844928, 1.3975118 ,1.4131243, 1.4286948, 1.4559689, 1.4575429])
             # pump_powers = np.array([-12.056175 ,  -9.558269 ,  -9.226123,   -6.7145286,  -8.507724 ,  -0.8452828])
