@@ -17,7 +17,7 @@ rc('text', usetex=True)
 
 
 def beta2rms(beta2a, beta2b):
-    return -np.sqrt(beta2a**2 + beta2b**2)
+    return -np.sqrt((beta2a**2 + beta2b**2)/2)
 
 
 def beta2rms_complementary(beta2rms, beta2a):

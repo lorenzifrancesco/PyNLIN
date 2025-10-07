@@ -38,7 +38,7 @@ def iterate_time_integrals(
     coefficients Xhkm for each combination of frequencies in the supplied WDM
     grid."""
     if isinstance(fiber, SMFiber):
-      assert (a_chan[0] == 0)
+        assert (a_chan[0] == 0)
 
     append_write = "a"
     found = False
@@ -121,13 +121,13 @@ def compute_all_collisions_time_integrals(
     fiber: Fiber,
     wdm: WDM,
     pulse: Pulse,
-    dgd = None,
-    gvd = None, 
+    dgd=None,
+    gvd=None,
     points_per_collision: int = 10,
     use_multiprocessing: bool = True,
     partial_collisions_margin: int = 10,
     speedup_pulse_propagation=True,
-    info = False
+    info=False
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute the integrals for all the collisions for the specified pair of
     channels.
@@ -160,14 +160,15 @@ def compute_all_collisions_time_integrals(
     z_axis_list = []
     z_walkoff = get_z_walkoff(fiber, wdm, a_chan, b_chan, pulse, dgd=dgd)
     if info:
-      print("==============")
-      if dgd is None:
-        print(
-            f"a: {a_chan}, b: {b_chan}, a_freq:{f_grid[a_chan[1]]:.5e}, b_freq:{f_grid[b_chan[1]]:.5e}")
-        print(f"dgd: {get_dgd(a_chan, b_chan, fiber, wdm):.3e}, z_w: {z_walkoff:.3e}, lenght/z_w:{fiber.length/z_walkoff:.5e}")
-      else:
-        print(f"set dgd:{dgd:.2e}, z_walkoff/L = {z_walkoff/fiber.length}")
-      print("==============")
+        print("==============")
+        if dgd is None:
+            print(
+                f"a: {a_chan}, b: {b_chan}, a_freq:{f_grid[a_chan[1]]:.5e}, b_freq:{f_grid[b_chan[1]]:.5e}")
+            print(
+                f"dgd: {get_dgd(a_chan, b_chan, fiber, wdm):.3e}, z_w: {z_walkoff:.3e}, lenght/z_w:{fiber.length/z_walkoff:.5e}")
+        else:
+            print(f"set dgd:{dgd:.2e}, z_walkoff/L = {z_walkoff/fiber.length}")
+        print("==============")
 
     n_rough_grid = 50
     spacing = get_frequency_spacing(a_chan, b_chan, wdm)
@@ -191,15 +192,15 @@ def compute_all_collisions_time_integrals(
     n_z_points = 200
     margin = 5
     if isinstance(pulse, NyquistPulse):
-    #   print("\033[91m warn: \033[0m The pulse is Nyquist (long-tailed): overriding the number of points!")
-      n_z_points = 200
-      margin = 5
-  
+        #   print("\033[91m warn: \033[0m The pulse is Nyquist (long-tailed): overriding the number of points!")
+        n_z_points = 200
+        margin = 5
+
     if info:
-      print("Setting the z integration ranges...")
+        print("Setting the z integration ranges...")
     for m in m_list:
-        if info: 
-          print(f"  m={m:5d} ", end="")
+        if info:
+            print(f"  m={m:5d} ", end="")
         z_m = get_collision_location(m, fiber, wdm, a_chan, b_chan, pulse, dgd)
         z_min = z_m - (z_walkoff / 2 * margin)
         z_max = z_m + (z_walkoff / 2 * margin)
@@ -231,19 +232,21 @@ def compute_all_collisions_time_integrals(
         else:
             z_axis_list.append(np.linspace(z_min, z_max, n_z_points))
         if info:
-          print(f"    z_axis = ({z_axis_list[-1][0]:.2e}, {z_axis_list[-1][-1]:.2e}, {len(z_axis_list[-1]):5d})")
-    if pulse.num_symbols != n_z_points:
-      print("\033[91m warn: \033[0m overriding the pulse number of samples!")
-      pulse.num_symbols = n_z_points
+            print(
+                f"    z_axis = ({z_axis_list[-1][0]:.2e}, {z_axis_list[-1][-1]:.2e}, {len(z_axis_list[-1]):5d})")
+    if pulse.num_symbols != n_z_points:  # does this make sense?
+        print(f"\033[91m warn: \033[0m pulse num_symbols ({pulse.num_symbols}) != n_z_points ({n_z_points})!")
+        print("\033[91m warn: \033[0m overriding the pulse number of samples!")
+        pulse.num_symbols = n_z_points
     if info:
-      print("  Done.")
+        print("  Done.")
     # build a partial function otherwise multiprocessing
     # complains about not being able to pickle stuff
     partial_function = functools.partial(
         m_th_time_integral, pulse, fiber, wdm, a_chan, b_chan, dgd, gvd
     )
     if info:
-      print("Computing the integrals for every m...")
+        print("Computing the integrals for every m...")
     start = time.time()
     if use_multiprocessing:
         # def partial_function(m, z): return m_th_time_integral(pulse, fiber, wdm, a_chan, b_chan, m, z)
@@ -255,10 +258,10 @@ def compute_all_collisions_time_integrals(
         integrals_list = process_map(
             partial_function, m_list, z_axis_list, leave=False, chunksize=1, max_workers=1
         )
-    end = time.time()    
-    if info: 
-      print(f"  Done in {(end-start)*1e3:.0e} ms.")
-    
+    end = time.time()
+    if info:
+        print(f"  Done in {(end-start)*1e3:.0e} ms.")
+
     # convert the list of arrays in a 2d array, since the shape is the same
     z_axis_list_2d = np.stack(z_axis_list)
     integrals_list_2d = np.stack(integrals_list)
@@ -272,19 +275,20 @@ def m_th_time_integral(
     wdm: WDM,
     a_chan: Tuple[int, int],
     b_chan: Tuple[int, int],
-    dgd, ### for manual operation of the DGD
+    dgd,  # for manual operation of the DGD
     gvd,
     m: int,
     z: List[float],
-    gvda = None, # additional parameters for full specification  
-    gvdb = None,
+    gvda=None,  # additional parameters for full specification
+    gvdb=None,
 ):
     freq_spacing = get_frequency_spacing(a_chan, b_chan, wdm)
     if isinstance(pulse, NyquistPulse):
         return m_th_time_integral_general(pulse, fiber, wdm, a_chan, b_chan, freq_spacing, m, z, dgd, gvd, gvda, gvdb)
         raise NotImplementedError("no Nyquist Pulse yet")
     elif isinstance(pulse, GaussianPulse):
-        aaa = m_th_time_integral_Gaussian(pulse, fiber, wdm, a_chan, b_chan, freq_spacing, dgd, gvd, m, z, gvda, gvdb)
+        aaa = m_th_time_integral_Gaussian(
+            pulse, fiber, wdm, a_chan, b_chan, freq_spacing, dgd, gvd, m, z, gvda, gvdb)
         return aaa
     else:
         return m_th_time_integral_general(pulse, fiber, wdm, a_chan, b_chan, freq_spacing, m, z, dgd, gvd, gvda, gvdb)
@@ -298,48 +302,54 @@ def m_th_time_integral_Gaussian(
     a_chan: Tuple[int, int],
     b_chan: Tuple[int, int],
     freq_spacing: float,
-    dgd, 
+    dgd,
     gvd,
     m: int,
     z: List[float],
-    gvda = None,
-    gvdb = None, 
+    gvda=None,
+    gvdb=None,
 ) -> float:
     # Apply the fully analytical formula
-    if dgd is None: 
-      if isinstance(fiber, SMFiber):
-          l_d = 1 / (np.abs(fiber.beta2) * (pulse.baud_rate)**2)
-          # print("§§§§§: ", l_d)
-          dgd = fiber.beta2 * 2 * np.pi * (freq_spacing)
-          factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
-          factor2 = 1 / np.sqrt(1 + (z / l_d)**2)
-          # print(f"=== z: {z:.3e}, exponent: {m + pulse.baud_rate * dgd * z:.3e}")
-          exponent = -((m + pulse.baud_rate * dgd * z) ** 2) / (2 * (1 + (z / l_d)**2))
-          # print(f"m/pulse.baud_rate : {m:.5e}, dgd z: {pulse.baud_rate * dgd * z:.5e}, exponent : {exponent:.5e}")
-          return factor1 * factor2 * np.exp(exponent)
-      if isinstance(fiber, MMFiber):
-          l_da = np.abs(pulse.T0**2 / \
-              (fiber.group_delay.evaluate_beta2(
-                  a_chan[0], wdm.frequency_grid()[a_chan[1]])))
-          l_db = np.abs(pulse.T0**2 / \
-              (fiber.group_delay.evaluate_beta2(
-                  b_chan[0], wdm.frequency_grid()[b_chan[1]])))
-          # TODO: this gets repeated many time for nothing
-          dgd = get_dgd(a_chan, b_chan, fiber, wdm)
-          # fiber.group_delay.evaluate_beta1(b_chan[0], wdm.frequency_grid(
-          # )[b_chan[1]]) - fiber.group_delay.evaluate_beta1(a_chan[0], wdm.frequency_grid()[a_chan[1]])
-          # print("DGD!!!: ", l_da, l_db)
-          avg_l_d = (l_da * l_db) / (l_da + l_db) / 2
-          factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
-          factor2 = 1 / np.sqrt(1 + (z / avg_l_d)**2)
-          exponent = -((m + pulse.baud_rate * dgd * z)**2) / (2 * (1 + (z / avg_l_d)**2))
-          return factor1 * factor2 * np.exp(exponent)
+    if dgd is None:
+        if isinstance(fiber, SMFiber):
+            l_d = 1 / (np.abs(fiber.beta2) * (pulse.baud_rate)**2)
+            # print("§§§§§: ", l_d)
+            dgd = fiber.beta2 * 2 * np.pi * (freq_spacing)
+            factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
+            factor2 = 1 / np.sqrt(1 + (z / l_d)**2)
+            # print(f"=== z: {z:.3e}, exponent: {m + pulse.baud_rate * dgd * z:.3e}")
+            exponent = -((m + pulse.baud_rate * dgd * z) ** 2) / \
+                (2 * (1 + (z / l_d)**2))
+            # print(f"m/pulse.baud_rate : {m:.5e}, dgd z: {pulse.baud_rate * dgd * z:.5e}, exponent : {exponent:.5e}")
+            return factor1 * factor2 * np.exp(exponent)
+        if isinstance(fiber, MMFiber):
+            l_da = np.abs(pulse.T0**2 /
+                          (fiber.group_delay.evaluate_beta2(
+                              a_chan[0], wdm.frequency_grid()[a_chan[1]])))
+            l_db = np.abs(pulse.T0**2 /
+                          (fiber.group_delay.evaluate_beta2(
+                              b_chan[0], wdm.frequency_grid()[b_chan[1]])))
+            # TODO: this gets repeated many time for nothing
+            dgd = get_dgd(a_chan, b_chan, fiber, wdm)
+            # fiber.group_delay.evaluate_beta1(b_chan[0], wdm.frequency_grid(
+            # )[b_chan[1]]) - fiber.group_delay.evaluate_beta1(a_chan[0], wdm.frequency_grid()[a_chan[1]])
+            # print("DGD!!!: ", l_da, l_db)
+            avg_l_d = (l_da * l_db) / (l_da + l_db) / 2
+            factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
+            factor2 = 1 / np.sqrt(1 + (z / avg_l_d)**2)
+            exponent = -((m + pulse.baud_rate * dgd * z)**2) / \
+                (2 * (1 + (z / avg_l_d)**2))
+            return factor1 * factor2 * np.exp(exponent)
     else:
-      avg_l_d = 1 / (np.abs(gvd) * (pulse.baud_rate)**2)
-      factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
-      factor2 = 1 / np.sqrt(1 + (z / avg_l_d)**2)
-      exponent = -((m + pulse.baud_rate * dgd * z)**2) / (2 * (1 + (z / avg_l_d)**2))
-      return factor1 * factor2 * np.exp(exponent)
+        avg_l_d = 1 / (np.abs(gvd) * (pulse.baud_rate)**2)
+        factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
+        factor2 = 1 / np.sqrt(1 + (z / avg_l_d)**2)
+        exponent = -((m + pulse.baud_rate * dgd * z)**2) / \
+            (2 * (1 + (z / avg_l_d)**2))
+        with np.errstate(over='ignore'):
+            total = factor1 * factor2 * np.exp(exponent)
+        return total
+
 
 def m_th_time_integral_Nyquist(
     pulse: Pulse,
@@ -350,8 +360,8 @@ def m_th_time_integral_Nyquist(
     freq_spacing: float,
     m: int,
     z: float,
-    gvda = None,
-    gvdb = None,
+    gvda=None,
+    gvdb=None,
 ) -> float:
     # Nakazawa formula for propagation and then integration??
     # Integrate in spectral domain?
@@ -360,10 +370,11 @@ def m_th_time_integral_Nyquist(
         dgd = fiber.beta2 * 2 * np.pi * (freq_spacing)
         factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
         factor2 = 1 / np.sqrt(1 + (z / l_d)**2)
-        exponent = -((m + pulse.baud_rate * dgd * z) ** 2) / (2 * (1 + (z / l_d)**2))
+        exponent = -((m + pulse.baud_rate * dgd * z) ** 2) / \
+            (2 * (1 + (z / l_d)**2))
         return factor1 * factor2 * np.exp(exponent)
     if isinstance(fiber, MMFiber):
-        raise(NotImplementedError)
+        raise (NotImplementedError)
         l_da = 1 / \
             (fiber.group_delay.evaluate_beta2(
                 a_chan[0], wdm.frequency_grid()[a_chan[1]])(pulse.baud_rate)**2)
@@ -375,7 +386,8 @@ def m_th_time_integral_Nyquist(
         avg_l_d = (l_da * l_db) / (l_da + l_db) / 2
         factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
         factor2 = 1 / np.sqrt(1 + (z / avg_l_d)**2)
-        exponent = -((m / pulse.baud_rate + dgd * z)**2) / (2 * (1 + (z / avg_l_d)**2))
+        exponent = -((m / pulse.baud_rate + dgd * z)**2) / \
+            (2 * (1 + (z / avg_l_d)**2))
         return factor1 * factor2 * np.exp(exponent)
 
 
@@ -388,37 +400,43 @@ def m_th_time_integral_general(
     freq_spacing: float,
     m: int,
     z_axis: List[float],
-    dgd = None,
-    gvd = None,
-    gvda = None,
-    gvdb = None,
+    dgd=None,
+    gvd=None,
+    gvda=None,
+    gvdb=None,
 ) -> float:
     i_list = []
     dt = pulse.T0/pulse.samples_per_symbol
     if dgd is None:
-      for z in z_axis:
-        delay = m / pulse.baud_rate + get_dgd(a_chan, b_chan, fiber, wdm) * z
-        g1 = apply_chromatic_dispersion(b_chan, pulse, fiber, wdm, z, gvd, 0.0)
-        g2 = np.conj(g1)
-        g3 = apply_chromatic_dispersion(b_chan, pulse, fiber, wdm, z, gvd, delay)
-        g4 = np.conj(g3)
-        i_list.append(scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt))
+        for z in z_axis:
+            delay = m / pulse.baud_rate + \
+                get_dgd(a_chan, b_chan, fiber, wdm) * z
+            g1 = apply_chromatic_dispersion(
+                b_chan, pulse, fiber, wdm, z, gvd, 0.0)
+            g2 = np.conj(g1)
+            g3 = apply_chromatic_dispersion(
+                b_chan, pulse, fiber, wdm, z, gvd, delay)
+            g4 = np.conj(g3)
+            i_list.append(scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt))
     else:
-      # avg_l_d = 1 / (np.abs(gvd) * (pulse.baud_rate)**2)
-      if gvda is None or gvdb is None:
-        gvda = gvd
-        gvdb = gvd
-      for z in z_axis:
-        delay = m / pulse.baud_rate + dgd * z
-        g1 = apply_chromatic_dispersion(b_chan, pulse, fiber, wdm, z, gvda, 0.0)
-        g2 = np.conj(g1)
-        g3 = apply_chromatic_dispersion(b_chan, pulse, fiber, wdm, z, gvdb, delay) ## here may be the problem!!
-        g4 = np.conj(g3)
-        i_list.append(scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt))
+        # avg_l_d = 1 / (np.abs(gvd) * (pulse.baud_rate)**2)
+        if gvda is None or gvdb is None:
+            gvda = gvd
+            gvdb = gvd
+        for z in z_axis:
+            delay = m / pulse.baud_rate + dgd * z
+            g1 = apply_chromatic_dispersion(
+                b_chan, pulse, fiber, wdm, z, gvda, 0.0)
+            g2 = np.conj(g1)
+            g3 = apply_chromatic_dispersion(
+                b_chan, pulse, fiber, wdm, z, gvdb, delay)  # here may be the problem!!
+            g4 = np.conj(g3)
+            i_list.append(scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt))
     return i_list
 
+
 def X0mm_space_integral(
-        z: np.ndarray, time_integrals, amplification_function = None, axis=-1) -> np.ndarray:
+        z: np.ndarray, time_integrals, amplification_function=None, axis=-1) -> np.ndarray:
     """Compute the X0mm XPM coefficients specifying the inner time integral as
     input.
 
@@ -426,12 +444,14 @@ def X0mm_space_integral(
     computing the time integral.
     """
     if callable(amplification_function):
-      X = scipy.integrate.trapezoid(time_integrals * amplification_function(z), z, axis=axis)
+        X = scipy.integrate.trapezoid(
+            time_integrals * amplification_function(z), z, axis=axis)
     else:
         # if the amplification function is not supplied, assume perfect distributed
         # amplification
         amplification_function = np.ones_like(z)
-        X = scipy.integrate.trapezoid(time_integrals * amplification_function, z, axis=axis)
+        X = scipy.integrate.trapezoid(
+            time_integrals * amplification_function, z, axis=axis)
     return X
 
 
@@ -446,9 +466,9 @@ def apply_chromatic_dispersion(
     dt = t[1] - t[0]
     nsamples = len(g)
     if gvd == None:
-      beta2 = get_gvd(b_chan, fiber, wdm)
+        beta2 = get_gvd(b_chan, fiber, wdm)
     else:
-      beta2 = gvd
+        beta2 = gvd
     freq = np.fft.fftfreq(nsamples, d=dt)
     omega = 2 * np.pi * freq
     omega = np.fft.fftshift(omega)

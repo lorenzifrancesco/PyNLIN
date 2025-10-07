@@ -118,11 +118,13 @@ class GaussianPulse(Pulse):
         Ndt = self.samples_per_symbol * self.num_symbols
         t = np.arange(-Ndt / 2, Ndt / 2) * dt
 
-        gt = np.exp(-t**2/(2*(self.T0**2))) / np.sqrt((np.sqrt(np.pi) * self.T0))
+        # this underflows pretty much systematically. We suppress warnings
+        with np.errstate(under='ignore'):
+            gt = np.exp(-t**2/(2*(self.T0**2))) / np.sqrt((np.sqrt(np.pi) * self.T0))
         
-        # Correct analytical normalization (finiteness of interval make it imprecise)
-        energy = scipy.integrate.trapezoid(np.abs(gt) ** 2, t)
-        gt = gt / np.sqrt(energy)
+            # Correct analytical normalization (finiteness of interval make it imprecise)
+            energy = scipy.integrate.trapezoid(np.abs(gt) ** 2, t)
+            gt = gt / np.sqrt(energy)
         self.t = t
         self.g = gt
         

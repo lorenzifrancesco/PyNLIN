@@ -157,7 +157,6 @@ np.seterr(all="warn")
 # ==========================
 # Core functions
 # ==========================
-
 @log_calls(logger)
 def softplus2(x, a, b, c):
     # _log_params(logger, "softplus2 params", "function args", {
@@ -235,7 +234,6 @@ def get_raman_corrections(smf: bool = False, gvd = 0.0) -> Tuple[float, float, f
         "rcal_hi_min": r_hi_min,
         "rcal_hi_max": r_hi_max,
     })
-
     return r_lo_min, r_lo_max, r_hi_min, r_hi_max
 
 # basic convention [min, max] (lo and hi are in different calls)
@@ -306,7 +304,7 @@ def get_fit_coefficients(fB_simple_interpolation: bool = False, gvd = None) -> T
             "len_gaussian": len(partial_B2g),
             "len_nyquist": len(partial_B2n),
         })
-        popt_n, _ = curve_fit(softplus2, dgds_numeric_n * x_norm, partial_B2n * y_norm, p0=p0)
+        popt_n, _ = curve_fit(softplus2, dgds_numeric_n * x_norm, partial_B2n * y_norm, p0=p0) # this explodes
         popt_g, _ = curve_fit(softplus2, dgds_numeric_g * x_norm, partial_B2g * y_norm, p0=p0)
         ps_g[modes.index(mode), :] = popt_g
         ps_n[modes.index(mode), :] = popt_n
@@ -405,6 +403,7 @@ def get_nlin_threshold(
     # here we iterate over all the possible gvds
     # gvds = [nc.gvd]
     gvds = np.unique(load_rms_gvd().flatten())
+    gvds = [0.0, 30e-27]
     logger.info(
         "Computing NLIN coeff. in L/LW ∈ [%.1e, %.1e] (ps/m range)",
         nc.dgd1 * 1e12, nc.dgd2_g * 1e12,
@@ -675,7 +674,9 @@ def get_nlin_threshold(
 if __name__ == "__main__":
     logger.info("Starting threshold script with LOG_LEVEL=%s", os.getenv('LOG_LEVEL', getattr(cfg, 'LOG_LEVEL', 'DEBUG')))
     # plot the theoretical figure
-    get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=False)
+    get_nlin_threshold(recompute=True, 
+                       use_fB=True, 
+                       fB_simple_interpolation=False)
 
     # plot the case-study figure
     # get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=True)
