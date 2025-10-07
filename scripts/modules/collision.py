@@ -19,13 +19,13 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
     
     nyquist_pulse = NyquistPulse(
     baud_rate=cf.baud_rate,
-    num_symbols=200, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
-    samples_per_symbol=30,
+    num_symbols=220, # beware of "aliasing" (i.e. when it is smaller than the maximum m we have repeated values)
+    samples_per_symbol=2**5,
     rolloff=0.0,
     )
     gaussian_pulse = GaussianPulse(
         baud_rate = cf.baud_rate,
-        num_symbols = 100, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
+        num_symbols = 220, # beware of "aliasing" (i.e. when it is smaller than the maximum m we have repeated values)
         samples_per_symbol = 2**5,
     )
     plt.figure(figsize=(4, 2.2))
@@ -36,7 +36,7 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
       m2 = -90
       dgd_hi = 100e-15
       beta2a = -100e-27
-      beta2b = -50e-27
+      beta2b = -50e-29
       # beta2bar = beta2rms(beta2a, beta2b)
       LDbar = 1/(pulse.baud_rate**2 * np.abs(beta2a))
       LW = 1/(pulse.baud_rate * np.abs(dgd_hi))
@@ -63,7 +63,7 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
       m_max = fiber.length / zw
       print(f"  > m_max: {m_max}")
       m_axis = -np.array(range(int(round(m_max))))
-      m_axis = m_axis[::20]
+      m_axis = m_axis[::10]
       peaks   = np.zeros(2)[np.newaxis, :].repeat(len(m_axis), axis=0)
       z_peaks = np.zeros(2)[np.newaxis, :].repeat(len(m_axis), axis=0)
       #
@@ -81,7 +81,6 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
         print("  Loading peaks...")
         peaks, z_peaks = np.load("results/fig1_peaks.npy")
         print("  Done loading peaks.")
-      print(peaks)
       
       # 3. case of very low DGD (almost zero)
       print(f"low DGD parameters L/LD1: {-beta2a * pulse.baud_rate**2 * fiber.length:.2e}, L/LD2: {-beta2b * pulse.baud_rate**2 * fiber.length:.2e}")
@@ -121,9 +120,11 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
       plt.plot(z/LDbar, 
               I_low_2 / pulse.baud_rate, 
               label='low DGD', 
-              color="orange", 
+              color="orange",
               linewidth=lw,
               linestyle=ls[ipulse])
+      for xi, yi, wi in zip(z/LDbar, I_low/pulse.baud_rate, I_low_2 / pulse.baud_rate)[::100]:
+        print(f"{xi:.2e}, {yi:.2e}, {wi:.2e}")
       # plotting the pulses
       for ii, I in enumerate(I_list):
         if ii == 0:
@@ -134,14 +135,13 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
                   linewidth=lw,
                   linestyle=ls[ipulse], )
         else:
-          print(len(z))
           plt.plot(z/LDbar, 
                   I / pulse.baud_rate, 
                   color="red",
                   linewidth=lw,
                   linestyle=ls[ipulse], )
     # plt.legend()
-    plt.xlabel(r'$z / \bar{L_D}$')
+    plt.xlabel(r'$z / L_D^{\mathrm{rms}}$')
     plt.ylabel(r'$I(z) \cdot T $')
     plt.gca().yaxis.set_major_formatter(formatter)
     plt.gca().xaxis.set_major_formatter(formatter)
@@ -164,7 +164,7 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=True):
         num_symbols=5e2, # CHANGING THIS SOLVES THE ALIASING PROBLEM TODO
         samples_per_symbol=2**5,
     )
-    plt.figure(figsize=(2.2, 2.2))
+    plt.figure(figsize=(20.2, 20.2))
     ls = ["-", "--"]
     names = ["gaussian", "nyquist"]
     for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
@@ -177,8 +177,6 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=True):
         return I_low[-1]
       beta2_range = np.linspace(0.1, 100, 50) * 1e-27
       beta20 = 1 / (cf.baud_rate**2 * z[-1])
-      print(beta2_range)
-      print(beta20)
       # assert(np.isclose(beta2_range[-1]/beta20, 1.0))
       
       print(f"Showing values of z/L_D from {z[-1] * cf.baud_rate**2 * beta2_range[0]:.2e} to {z[-1] * cf.baud_rate **2 * beta2_range[-1]:.2e}")
@@ -194,9 +192,8 @@ def plot_dispersion_analysis(fiber, wdm, cf, recompute=True):
       I_low_values = np.load(f"results/I_low_{names[ipulse]}.npy")
       # max 
       # plt.figure(figsize=(10, 10.3))
-      print(I_low_values)
       contour      = plt.contourf(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.91), levels=100, cmap='viridis')
-      contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.91), levels=20, colors="w")
+      contour_lines = plt.contour(beta2a_values/beta20, beta2b_values/beta20, np.clip(I_low_values, a_min=-10, a_max=0.16), levels=50, colors="w")
       plt.clabel(contour_lines, inline=True, fontsize=8)
 
       plt.xlabel(r'$|\beta_{2A}|LT^{-2}$')
