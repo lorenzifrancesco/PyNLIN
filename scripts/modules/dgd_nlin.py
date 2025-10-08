@@ -1,5 +1,7 @@
-import logging
-import scipy.io
+from loguru import logger as lg
+from scripts.modules.log_init import init_logging
+init_logging()
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -17,9 +19,8 @@ import scripts.modules.cfg as cfg
 from pynlin.utils import watt2dBm, dBm2watt
 from scipy.optimize import curve_fit
 from scipy.constants import c
-from loguru import logger as lg
-from scripts.modules.log_init import init_logging
-init_logging()
+
+from type_utils import PulseShape
 
 
 ns = np.array([1, 2, 2, 1])
@@ -192,16 +193,12 @@ def get_nlin(cf,
         # (zeta(d) * d * x_norm, *ps[0, :]) + (1-zeta(d)) * softplus2(d*x_norm, *ps[1, :])) / y_norm
 
     modal_prefactor = kappa # FIXME check this modal prefactor thing
-        
     if use_dBm_scale:
         modal_prefactor = np.multiply(
             modal_prefactor,
             get_nlin_prefactor(cf, np.array(modes), np.array(modes))
             )
-    
-    
     # precompute the Raman corrections from the numerical results of the integrals
-    
     # precompute the GVD-dependent fitting parameters (perfect amplification)
     rms_gvd = load_rms_gvd()
     ps_matrix = np.zeros((cf.n_modes, cf.n_modes, 3))
