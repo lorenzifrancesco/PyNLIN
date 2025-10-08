@@ -17,6 +17,10 @@ import scripts.modules.cfg as cfg
 from pynlin.utils import watt2dBm, dBm2watt
 from scipy.optimize import curve_fit
 from scipy.constants import c
+from loguru import logger as lg
+from scripts.modules.log_init import init_logging
+init_logging()
+
 
 ns = np.array([1, 2, 2, 1])
 
@@ -212,7 +216,7 @@ def get_nlin(cf,
     for mA in modes:
         for mB in modes:
             gvd = rms_gvd[mA, mB]
-            ps_matrix[mA, mB, :] = get_fit_coefficients(gvd=gvd)[param_select]
+            ps_matrix[mA, mB, :] = get_fit_coefficients(gvd=gvd)[param_select] # FIXME inside of this function, implement the shift of the variables with
             r_bar_lo_min[mA, mB], r_bar_lo_max[mA, mB], r_bar_hi_min[mA, mB], r_bar_hi_max[mA, mB] = get_raman_corrections(smf=(cf.n_modes==1), gvd=gvd)
 
     # nlin_megafit = lambda d: softplus2(d * x_norm, *ps_perf[0, :]) * raman_correction(d) / y_norm
@@ -253,6 +257,7 @@ def noise_plot(use_kappa=False,
         f"Loading a ITU-T standardized WDM grid \n [spacing: {cf_smf.channel_spacing * 1e-9:.3e}GHz, center: {cf_smf.center_frequency * 1e-12:.3e}THz] \n")
     assert (cf_smf.fiber_length == cf_mmf.fiber_length)
     assert (cf_smf.baud_rate == cf_mmf.baud_rate)
+    assert (cf_smf.n_channels == cf_mmf.n_channels)
     if (cf_smf.n_channels == cf_mmf.n_channels * cf_mmf.n_modes):
         print("We are comparing the same total rate")
     else:

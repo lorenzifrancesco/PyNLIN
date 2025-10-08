@@ -25,6 +25,10 @@ from logging.handlers import TimedRotatingFileHandler
 from contextlib import contextmanager
 from functools import wraps
 
+from loguru import logger as lg
+from log_init import init_logging
+init_logging()
+
 DGD_MIN = 0.01  # target L/LW
 DGD_MAX = 100.0
 

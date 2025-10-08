@@ -20,6 +20,10 @@ from scripts.modules.collision import plot_illustrative, plot_dispersion_analysi
 from scripts.modules.threshold import get_nlin_threshold
 from scripts.modules.dgd_nlin import noise_plot, noise_histogram
 
+from loguru import logger as lg
+from scripts.modules.log_init import init_logging
+init_logging()
+
 # config_collisions is useful to print the plot of Marco, illustrative one
 cf = cfg.load_toml_to_struct("./input/config_collision.toml")
 oi_fit = np.load('results/oi_fit.npy')
