@@ -172,9 +172,8 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
     plt.savefig("media/1-quovadis.pdf")
     print("Done plotting Fig.1 media/1-quovadis.pdf .")
 
+
 # range of the evaluation is hardcoded in the function to L/LDA=2
-
-
 def get_I_low(fiber, wdm, recompute=False):
     nyquist_pulse = NyquistPulse(
         baud_rate=cf.baud_rate,
@@ -246,7 +245,13 @@ def build_I_low_interpolator(I_low_dataset, ipulse: int):
         bounds_error=False,
         fill_value=None
     )
-    return interp_func
+    # implement a wrapper to make sure the input is not too much over the original bounds
+    def interp_func_wrapped(x):
+        assert(x[0] <= 1.1 * lld_range[-1] and x[1] <= 1.1 * lld_range[-1]), f"Input {x} exceeds the 110% of the interpolation range [{lld_range[0]}, {lld_range[-1]}]"
+        assert(x[0]>=0 and x[1]>=0), f"Input {x} has negative values check that your LD is positive"
+        return interp_func(x)
+    return interp_func_wrapped
+
 
 def plot_dispersion_analysis(fiber, wdm, recompute=True):
     print("Plotting Fig.1 (pulse collisions)...")
@@ -281,6 +286,7 @@ def plot_dispersion_analysis(fiber, wdm, recompute=True):
         
         
 if __name__ == "__main__":
+    lg.info("Running collision module as main...")
     import numpy as np
     class Fiber:
         length = 200e3

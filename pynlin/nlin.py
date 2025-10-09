@@ -295,6 +295,12 @@ def m_th_time_integral(
 
 
 # @jit
+# WDM structure enters-> 
+#  - LDA LDB calculation
+#  - DGD calculation
+# smf and mmf are differentiated
+
+
 def m_th_time_integral_Gaussian(
     pulse: Pulse,
     fiber: Fiber,
@@ -366,6 +372,7 @@ def m_th_time_integral_Nyquist(
     # Nakazawa formula for propagation and then integration??
     # Integrate in spectral domain?
     if isinstance(fiber, SMFiber):
+        raise (NotImplementedError)
         l_d = 1 / (np.abs(fiber.beta2) * (pulse.baud_rate)**2)
         dgd = fiber.beta2 * 2 * np.pi * (freq_spacing)
         factor1 = pulse.baud_rate / (np.sqrt(2 * np.pi))
@@ -390,7 +397,7 @@ def m_th_time_integral_Nyquist(
             (2 * (1 + (z / avg_l_d)**2))
         return factor1 * factor2 * np.exp(exponent)
 
-
+# apply_chromatic take channel inside
 def m_th_time_integral_general(
     pulse: Pulse,
     fiber: Fiber,
@@ -412,10 +419,10 @@ def m_th_time_integral_general(
             delay = m / pulse.baud_rate + \
                 get_dgd(a_chan, b_chan, fiber, wdm) * z
             g1 = apply_chromatic_dispersion(
-                b_chan, pulse, fiber, wdm, z, gvd, 0.0)
+                gvda, pulse, z, 0.0)
             g2 = np.conj(g1)
             g3 = apply_chromatic_dispersion(
-                b_chan, pulse, fiber, wdm, z, gvd, delay)
+                gvdb, pulse, z, delay)
             g4 = np.conj(g3)
             i_list.append(scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt))
     else:
@@ -426,10 +433,10 @@ def m_th_time_integral_general(
         for z in z_axis:
             delay = m / pulse.baud_rate + dgd * z
             g1 = apply_chromatic_dispersion(
-                b_chan, pulse, fiber, wdm, z, gvda, 0.0)
+                gvda, pulse, z, 0.0)
             g2 = np.conj(g1)
             g3 = apply_chromatic_dispersion(
-                b_chan, pulse, fiber, wdm, z, gvdb, delay)  # here may be the problem!!
+                gvdb, pulse, z, delay)
             g4 = np.conj(g3)
             i_list.append(scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt))
     return i_list
@@ -455,7 +462,9 @@ def X0mm_space_integral(
     return X
 
 
-def apply_chromatic_dispersion(
+
+# Change the get_gvd
+def apply_chromatic_dispersion_explicit_args(
         b_chan: Tuple[int, int], pulse: Pulse, fiber: Fiber, wdm: WDM, z: float,
         gvd=None, delay: float = None) -> Tuple[np.ndarray, np.ndarray]:
     """Return the propagated pulse shape.
@@ -475,6 +484,33 @@ def apply_chromatic_dispersion(
     gf = np.fft.fftshift(np.fft.fft(g))
 
     propagator = -1j * beta2 / 2 * omega**2 * z
+    delay = np.exp(-1j * delay * omega)
+
+    gf_propagated = gf * np.exp(propagator) * delay
+    g_propagated = np.fft.ifft(np.fft.fftshift(gf_propagated))
+
+    return g_propagated
+
+
+# essential function
+def apply_chromatic_dispersion(
+        gvd: float, 
+        pulse: Pulse, 
+        z: float, 
+        delay: float = None) -> Tuple[np.ndarray, np.ndarray]:
+    """Return the propagated pulse shape.
+    Optionally apply a delay in time.
+    """
+
+    g, t = pulse.data()
+    dt = t[1] - t[0]
+    nsamples = len(g)
+    freq = np.fft.fftfreq(nsamples, d=dt)
+    omega = 2 * np.pi * freq
+    omega = np.fft.fftshift(omega)
+    gf = np.fft.fftshift(np.fft.fft(g))
+
+    propagator = -1j * gvd / 2 * omega**2 * z
     delay = np.exp(-1j * delay * omega)
 
     gf_propagated = gf * np.exp(propagator) * delay
