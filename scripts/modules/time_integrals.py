@@ -11,7 +11,7 @@ def do_time_integrals(a_chan, fiber, wdm, pulse, overwrite):
     partial_collisions_margin = 2
     points_per_collision = 10
 
-    pynlin.nlin.iterate_time_integrals(
+    pynlin.nlin.time_integrals_all_b_chans(
         wdm,
         fiber,
         a_chan,

@@ -57,6 +57,9 @@ def beta2_to_dispersion(beta2, wavelength):
     """
     return -2 * np.pi * c0 / (wavelength**2) * beta2
 
+def beta2rms(beta2a, beta2b):
+    return np.sqrt((beta2a**2 + beta2b**2)/2)
+
 
 def dispersion_to_beta2(D, wavelength):
     """Convert the dispersion coefficient to GVD (beta2).
@@ -69,7 +72,7 @@ def oi_law(l1, l2, params):
     a1, b1, a2, b2, x, c = params
     return (a1 * l1**2 + b1 * l1 + a2 * l2**2 + b2 * l2 + x * l1 * l2 + c)
 
-
+ 
 def oi_polynomial_expansion(wl, values):
   
     A1, B1, A2, B2, X, C = values

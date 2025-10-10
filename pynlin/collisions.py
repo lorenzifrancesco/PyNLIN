@@ -6,9 +6,6 @@ from pynlin.fiber import Fiber, SMFiber, MMFiber
 from pynlin.wdm import WDM
 from pynlin.pulses import Pulse
 
-def get_interfering_channels(): 
-  pass
-
 def get_interfering_frequencies(
     channel_of_interest: float,
     frequency_grid: np.ndarray,
@@ -31,12 +28,9 @@ def get_frequency_spacing(a_chan, b_chan, wdm):
   
 def get_m_values(
     fiber: Fiber,
-    wdm: WDM,
-    a_chan: Tuple[int, int],
-    b_chan: Tuple[int, int],
-    T: float,
+    pulse: Pulse,
     partial_collisions_start:int,
-    dgd = None
+    dgd: float 
 ) -> np.ndarray:
     """Get values of the m indeces to compute the X0mm XPM coefficients for.
 
@@ -46,11 +40,7 @@ def get_m_values(
     `partial_collisions_start` and `partial_collisions_end` kwargs.
     """
     partial_collisions_end = partial_collisions_start
-    if dgd is None:
-      dgd = get_dgd(a_chan, b_chan, fiber, wdm)
-    m_max = -(fiber.length * dgd) / T
-    # print(m_max)
-    # print(-m_max * T /dgd)
+    m_max = -(fiber.length * dgd) * pulse.baud_rate
     if m_max < 0:
         m_max = math.ceil(m_max)
         return np.arange(m_max - partial_collisions_start, partial_collisions_end + 1)
@@ -60,18 +50,12 @@ def get_m_values(
 
 
 def get_collision_location(m, 
-                           fiber: Fiber, 
-                           wdm: WDM, 
-                           a_chan:Tuple[int, int], 
-                           b_chan: Tuple[int, int],
                            pulse: Pulse,
-                           dgd = None) -> float:
-    """For the specified index m, compute the position of the corresponding
-    complete collision."""
-    if dgd is None:
-      dgd = get_dgd(a_chan, b_chan, fiber, wdm)
-    # print(f" DGD: {dgd}, a_chan: {a_chan}, b_chan: {b_chan}")
-    return -m / (pulse.baud_rate *  dgd)
+                           dgd:float) -> float:
+    if dgd == 0:
+        assert m == 0, "m should be zero if dgd is zero"
+        return 0.0
+    return -m / (pulse.baud_rate * dgd)
   
   
 def get_dgd(a_chan, b_chan, fiber, wdm) -> float:
@@ -93,16 +77,9 @@ def get_gvd(b_chan, fiber, wdm) -> float:
   
   
 def get_z_walkoff(
-  fiber: Fiber, 
-  wdm: WDM, 
-  a_chan: Tuple[int, int], 
-  b_chan: Tuple[int, int], 
   pulse: Pulse,
-  dgd = None):
-  if dgd is None:
-    dgd = get_dgd(a_chan, b_chan, fiber, wdm)
-  # print(f"DGDDDDD : {dgd:.3e}")
+  dgd: float):
   if dgd != 0:
     return np.abs(1 / (pulse.baud_rate * dgd))
   else:
-    return 1e50 # very large number
+    return 1e100 # very large number
