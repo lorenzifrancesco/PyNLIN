@@ -10,7 +10,7 @@ from matplotlib import rc
 import pynlin.wdm
 from pynlin.utils import nu2lambda
 from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay, load_rms_gvd
-from scripts.modules.threshold import get_raman_corrections, get_fit_coefficients, softplus2
+from scripts.modules.validation import get_raman_corrections, get_fit_coefficients, softplus2
 from numpy import polyval
 from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec
@@ -20,10 +20,8 @@ from pynlin.utils import watt2dBm, dBm2watt
 from scipy.optimize import curve_fit
 from scipy.constants import c
 
-from type_utils import PulseShape
+from scripts.modules.nlin_estimator import get_nlin
 
-
-ns = np.array([1, 2, 2, 1])
 
 # # SMF
 # def get_nlin_prefactor_smf(cf):
@@ -37,203 +35,8 @@ ns = np.array([1, 2, 2, 1])
 #     print("nlin prefactor", nlin_prefactor)
 #     return nlin_prefactor
 
-SPATIAL_MODES = [1, 2, 2, 1]
 
-def get_nlin_prefactor_mmf(cf, mode_a, mode_b):
-    n2 = 2.6e-20
-    omega_0 = 2 * np.pi * cf.center_frequency
-    gamma = n2 * omega_0 / (cf.effective_area * c)
-    P_in = dBm2watt(cf.launch_power)
-    constellation_factor = 0.32 * 1.19 # 64-QAM
-    di = np.diag_indices(len(mode_a))
-    mode_b_prefactor = 2 * np.outer(np.ones((cf.n_modes)), SPATIAL_MODES)
-    var = constellation_factor * mode_b_prefactor 
-    var[di] =  (constellation_factor + 1) * (2*ns[mode_a[0]] + 3) - 4
-    assert((var > 0).all())
-    nlin_prefactor = (P_in)**3 * gamma**2 * var / (cf.baud_rate**2)
-    # print("denom", (2*ns[mode_a])**3)
-    return nlin_prefactor
-
-def get_nlin_prefactor(cf, mode_a, mode_b):
-    if len(mode_a) == 1:
-        return get_nlin_prefactor_mmf(cf, [0], [0])[0, 0]
-    else: 
-        return get_nlin_prefactor_mmf(cf, mode_a, mode_b)
-
-def get_nlin(cf,
-             use_kappa=False,
-             use_fB=False,
-             use_x_mode_interactions=True, 
-             use_dBm_scale=False):
-    assert(cf.n_modes == 4)
-    assert(cf.launch_power==-5)
-    nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
-    T = 1 / cf.baud_rate
-    L = cf.fiber_length
-    x_norm = L / T
-    y_norm = x_norm**(-2)
-    oi_fit = np.load('results/oi_fit.npy')
-    if use_kappa:
-        kappa = np.loadtxt('input/kappa.csv', delimiter=',')
-        kappa = kappa**2
-    else:
-        kappa = np.ones((cf.n_modes, cf.n_modes))
-
-    switchoff_matrix = np.eye(cf.n_modes)
-    if cf.n_modes == 1:
-        solutions = np.load("results/ct_solution"+str(int(round(cf.launch_power)))+"_gain_0.0_SMF.npy",
-                            allow_pickle=True).item()
-    else:
-        solutions = np.load("results/ct_solution"+str(int(round(cf.launch_power)))+"_gain_0.0.npy",
-                            allow_pickle=True).item()
-
-    signal_powers = solutions['signal_sol']
-    signal_powers_swp = np.swapaxes(signal_powers, 1, 2)
-    assert (cf.n_modes == signal_powers_swp.shape[1])
-    assert (cf.n_channels == signal_powers_swp.shape[2])
-    initial_powers = signal_powers_swp[0, :, :]
-    fB = np.divide(signal_powers_swp, initial_powers)
-    assert((fB<=1.5).all())
-    assert((fB>0).all())
-    z_axis = np.linspace(0, cf.fiber_length, len(fB))
-    dz = z_axis[1] - z_axis[0]
-    # coeffs = np.polyfit(z_axis, fB, 6)
-    if use_fB:
-        rcal_minus = (np.sum(fB, axis=0) * dz / cf.fiber_length)**2
-        rcal_plus = np.sum(fB**2, axis=0) * dz / cf.fiber_length
-    else:
-        rcal_plus = 1.0
-        rcal_minus = 1.0
-  
-    beta1_params = load_group_delay()
-    wdm = pynlin.wdm.WDM(
-        spacing=cf.channel_spacing,
-        num_channels=cf.n_channels,
-        center_frequency=cf.center_frequency
-    )
-    freqs = wdm.frequency_grid()
-    modes = range(cf.n_modes)
-
-    fiber = MMFiber(
-        effective_area=80e-12,
-        overlap_integrals=oi_fit,
-        group_delay=beta1_params,
-        length=100e3
-    )
-
-    beta1 = np.zeros((cf.n_modes, len(freqs)))
-
-    for i in modes:
-        beta1[i, :] = fiber.group_delay.evaluate_beta1(i, freqs)
-    beta2 = np.zeros((cf.n_modes, len(freqs)))
-    for i in modes:
-        beta2[i, :] = fiber.group_delay.evaluate_beta2(i, freqs)
-    beta1 = np.array(beta1)
-    beta2 = np.array(beta2)
-    # for each channel, we compute the total number of collisions that
-    # needs to be computed for evaluating the total noise on that channel.
-    T = 1 / cf.baud_rate
-    L = cf.fiber_length
-
-    # collisions = np.zeros((len(modes), len(freqs)))
-    # for i in range(len(modes)):
-    #     for j in range(len(freqs)):
-    #         collisions[i, j] = np.floor(np.abs(np.sum(beta1 - beta1[i, j])) * L / T)
-
-    # collisions_single = np.zeros((1, len(freqs)))
-    # for j in range(len(freqs)):
-    #     collisions_single[0, j] = np.floor(
-    #         np.abs(np.sum(beta1[0:] - beta1[0, j])) * L / T)
-
-    nlin = np.zeros((cf.n_modes, len(freqs)))
-    
-    d_min = nc.dgd1
-    d_max = nc.dgd2_g
-    d_span = d_max - d_min
-    if use_fB:
-        r_lo_min, r_lo_max, r_hi_min, r_hi_max = get_raman_corrections(smf=(cf.n_modes==1)) # FIXME insert here the dependency on the GVD
-        r_bar_lo = (rcal_minus - r_lo_min) / (r_lo_max - r_lo_min)
-        r_bar_hi = (rcal_plus  - r_hi_min) / (r_hi_max - r_hi_min)
-        # print(lincomb_lo)
-        # print(lincomb_hi)
-        # assert((rcal_plus<=r_hi_max).all())
-        # assert((rcal_plus>=r_hi_min).all())
-        # assert((rcal_minus<=f_minus_max).all())
-        # assert((rcal_minus>=f_minus_min).all())
-        assert (nc.dgd2_n == nc.dgd2_g)
-        # returns a (4, 250) matrix for all the b channels
-        # assert((r_bar_lo>-1e-15).all())
-        # assert((r_bar_hi>-1e-15).all())
-        def zeta(d):
-            return (d-d_max) / d_span
-         
-        def raman_correction(d):
-            return (zeta(d) * r_bar_lo + (1-zeta(d)) * r_bar_hi)
-    else:
-        f_lo_plus  = 1.0
-        f_lo_minus = 1.0
-        f_hi_plus  = 1.0
-        f_hi_minus = 1.0
-        zeta = lambda d: np.ones((len(modes), len(freqs)))
-
-    # FIXME: whose mode is it? Assign the right averaged GVD. We actually need the RMS GVD OF THE MODE PAIR
-    # do we still have knowledge of the A channel?
-    
-        # ps_g, ps_n           = get_fit_coefficients() # here the fit coefficients are automatically taken with the right GVD
-        # ps_perf_g, ps_perf_n = get_fit_coefficients(fB_simple_interpolation=True)
-        # ps           = ps_g if cf.pulse_shape == 'Gaussian' else ps_n
-        # ps_perf = ps_perf_g if cf.pulse_shape == 'Gaussian' else ps_perf_n
-
-        # # beware, we have a mixed unit system here, so we need to be careful
-        # print("Optimal parameters MAX: ", ps[0, :])
-        # print("Optimal parameters MIN: ", ps[1, :]) # FIXME here we should use the same trick as in the paper. Derive ps[1, :] from ps[0, :] and the ratio of the GVDs by shifting.
-        # print("Optimal parameters perfect: ", ps_perf[0, :])
-            
-        # nlin_megafit = lambda d: softplus2(d * x_norm, *ps_perf[0, :]) * raman_correction(d) / y_norm
-        # (zeta(d) * d * x_norm, *ps[0, :]) + (1-zeta(d)) * softplus2(d*x_norm, *ps[1, :])) / y_norm
-
-    modal_prefactor = kappa # FIXME check this modal prefactor thing
-    if use_dBm_scale:
-        modal_prefactor = np.multiply(
-            modal_prefactor,
-            get_nlin_prefactor(cf, np.array(modes), np.array(modes))
-            )
-    # precompute the Raman corrections from the numerical results of the integrals
-    # precompute the GVD-dependent fitting parameters (perfect amplification)
-    rms_gvd = load_rms_gvd()
-    ps_matrix = np.zeros((cf.n_modes, cf.n_modes, 3))
-    r_bar_hi_min = np.zeros((cf.n_modes, cf.n_modes))
-    r_bar_lo_min = np.zeros((cf.n_modes, cf.n_modes))
-    r_bar_hi_max = np.zeros((cf.n_modes, cf.n_modes))
-    r_bar_lo_max = np.zeros((cf.n_modes, cf.n_modes))
-    if cf.pulse_shape == 'Gaussian':
-        param_select = 0
-    else:
-        param_select = 1
-    for mA in modes:
-        for mB in modes:
-            gvd = rms_gvd[mA, mB]
-            ps_matrix[mA, mB, :] = get_fit_coefficients(gvd=gvd)[param_select] # FIXME inside of this function, implement the shift of the variables with
-            r_bar_lo_min[mA, mB], r_bar_lo_max[mA, mB], r_bar_hi_min[mA, mB], r_bar_hi_max[mA, mB] = get_raman_corrections(smf=(cf.n_modes==1), gvd=gvd)
-
-    # nlin_megafit = lambda d: softplus2(d * x_norm, *ps_perf[0, :]) * raman_correction(d) / y_norm
-    
-    rms_gvd = load_rms_gvd()
-    for mA in modes:
-        for fA in range(len(freqs)):
-            for mB in modes:
-                for fB in range(len(freqs)):
-                    gvd = rms_gvd[mA, mB]
-                    
-    # rescaling for cross-mode interactions
-    if not use_x_mode_interactions:
-        modal_prefactor = np.multiply(modal_prefactor, switchoff_matrix)
-        # modal_prefactor *= 0.9
-    modal_prefactor = modal_prefactor[:cf.n_modes, :cf.n_modes]
-    nlin = modal_prefactor @ nlin
-    return nlin
-
-def noise_plot(use_kappa=False,
+def plot_case_study_noise(use_kappa=False,
                use_smf=False,
                use_fB=False,
                use_dBm_scale=False,
@@ -359,7 +162,7 @@ def noise_plot(use_kappa=False,
         print("-" * 20)
 
 
-def noise_histogram(use_kappa=False,
+def plot_case_study_noise_histogram(use_kappa=False,
                     use_smf=False,
                     use_fB=False,
                     use_dBm_scale=False):
@@ -476,14 +279,14 @@ if __name__ == "__main__":
             name = "realistic"
         else:
             name = "idealized"
-        noise_plot(use_kappa=realistic,
+        plot_case_study_noise(use_kappa=realistic,
                use_smf=realistic,
                use_fB=realistic,
                use_dBm_scale=realistic,
                use_plot_x_mode=not realistic,
                name = name)
         
-    noise_histogram(use_kappa=True, 
+    plot_case_study_noise_histogram(use_kappa=True, 
                     use_smf=True,
                     use_fB=True,
                     use_dBm_scale=True)

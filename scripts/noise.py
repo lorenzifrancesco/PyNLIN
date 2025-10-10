@@ -8,17 +8,12 @@ Generates figs:
 - NLIN thresholding and approximation
 
 """
-import pynlin.fiber
-import pynlin.fiber
-import pynlin.wdm
-import pynlin.pulses
 from scripts.modules import cfg
-from scripts.modules.time_integrals import do_time_integrals
 from scripts.modules.load_fiber_values import *
 from scripts.modules.load_fiber_values import load_group_delay
 from scripts.modules.collision import plot_illustrative, plot_dispersion_analysis
-from scripts.modules.threshold import get_nlin_threshold
-from scripts.modules.dgd_nlin import noise_plot, noise_histogram
+from scripts.modules.validation import get_nlin_threshold
+from scripts.modules.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
 
 from loguru import logger as lg
 from scripts.modules.log_init import init_logging
@@ -76,18 +71,18 @@ if 2 in fig_to_generate:
                        use_fB=True, 
                        fB_simple_interpolation=False)
 if 3 in fig_to_generate:
-    noise_plot(use_kappa=True,
+    plot_case_study_noise(use_kappa=True,
                use_smf=True,
                use_fB=True,
                use_dBm_scale=True,
                use_plot_without_x_mode=False)
-    noise_plot(use_kappa=True,
+    plot_case_study_noise(use_kappa=True,
                use_smf=True,
                use_fB=True,
                use_dBm_scale=True,
                use_plot_without_x_mode=True)
 if 4 in fig_to_generate:
-    noise_histogram(dgd_threshold=3e-15,
+    plot_case_study_noise_histogram(dgd_threshold=3e-15,
                     use_kappa=True,
                     use_smf=True,
                     use_fB=True,

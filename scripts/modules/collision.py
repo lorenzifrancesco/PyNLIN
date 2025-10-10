@@ -1,5 +1,5 @@
 from loguru import logger as lg
-from log_init import init_logging
+from scripts.modules.log_init import init_logging
 init_logging()
 
 import numpy as np
@@ -7,13 +7,11 @@ from pynlin.nlin import m_th_time_integral_general
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 import os
-from scripts.modules.beta_utils import beta2rms, beta2rms_complementary, beta2avg, beta2avg_complementary
+from scripts.modules.beta_utils import beta2rms, beta2rms_complementary
 from pynlin.pulses import NyquistPulse, GaussianPulse
 from scipy.interpolate import RegularGridInterpolator
-from scipy.interpolate import griddata
-from scipy.integrate import trapezoid
 
-from type_utils import PulseShape
+import pynlin
 
 formatter = ScalarFormatter()
 formatter.set_scientific(True)
@@ -313,3 +311,27 @@ if __name__ == "__main__":
         test_points = [(0, 0), (0, 2), (2, 0), (1, 1), (2, 2)]
         for point in test_points:
             lg.trace(f"Point {point}: Interpolated = {interp_func(point)}")
+            
+            
+# this is legacy and shouldn't be used anymore
+# def do_time_integrals(a_chan, fiber, wdm, pulse, overwrite):
+#     partial_collisions_margin = 2
+#     points_per_collision = 10
+
+#     pynlin.nlin.time_integrals_all_b_chans(
+#         wdm,
+#         fiber,
+#         a_chan,
+#         pulse,
+#         "results/results.h5",
+#         overwrite=overwrite,
+#         points_per_collision=points_per_collision,  # kwargs
+#         use_multiprocessing=True,
+#         partial_collisions_margin=partial_collisions_margin,
+#         speedup_pulse_propagation=True
+#     )
+#     return 0
+
+def get_space_integrals(m, z, I):
+    X0mm = pynlin.nlin.X0mm_space_integral(z, I, amplification_function=None)
+    return X0mm

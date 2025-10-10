@@ -126,7 +126,7 @@ def compute_all_collisions_time_integrals_system(
     wdm: WDM,
     pulse: Pulse,
     use_multiprocessing: bool = True,
-    partial_collisions_margin: int = 10,
+    partial_collisions_margin: int = 5,
     speedup_pulse_propagation=True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     
@@ -178,7 +178,7 @@ def compute_all_collisions_time_integrals(
     gvda: float, 
     gvdb: float,
     use_multiprocessing: bool = True,
-    partial_collisions_margin: int = 10,
+    partial_collisions_margin: int = 5,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute the integrals for all the collisions for the specified pair of
     channels.
