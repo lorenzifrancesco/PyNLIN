@@ -166,7 +166,8 @@ def compute_fitted_nlin(gvda: float,
     I_low_dataset = np.load(
         f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}.npz")
     interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
-    # ps = correct_fit_coefficients(ps, lda, ldb, cf.fiber_length, interp)
+    
+    ps = correct_fit_coefficients(ps, lda, ldb, cf.fiber_length, interp)
     fit_nlin = softplus2(dgds_analytic * x_norm, *ps) / y_norm
     return fit_nlin
 
@@ -232,7 +233,7 @@ def simple_plot_threshold(gvda: float = 0.0,
                 label='Numeric (Gauss.)', color="blue", marker="x", s=20, lw=1)
     llda = cf.fiber_length * (gvda * cf.baud_rate**2)
     lldb = cf.fiber_length * (gvdb * cf.baud_rate**2)
-    plt.title(fr"$L/L_{{DA}}=${llda}, $L/L_{{DB}}=${lldb}")
+    plt.title(fr"$L/L_{{DA}}=${llda:.2f}, $L/L_{{DB}}=${lldb:.2f}")
     plt.xscale('log')
     plt.yscale('log')
     ymin, ymax = plt.ylim()
@@ -246,8 +247,8 @@ def simple_plot_threshold(gvda: float = 0.0,
     plt.xlabel(r'$L/L_W$')
     plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
     plt.tight_layout()
-    plt.savefig(f"media/simple_threshold_{pulse_shape}_{llda}_{lldb}.pdf", dpi=dpi)
-    lg.info(f"Saved figure to media/simple_threshold_{pulse_shape}_{llda}_{lldb}.pdf")
+    plt.savefig(f"media/simple_threshold_{pulse_shape}_{llda:.2f}_{lldb:.2f}.pdf", dpi=dpi)
+    lg.info(f"Saved figure to media/simple_threshold_{pulse_shape}_{llda:.2f}_{lldb:.2f}.pdf")
     return
 
 
@@ -440,10 +441,10 @@ def plot_threshold(
 
 if __name__ == "__main__":
     simple_plot_threshold(
-        gvda = 30.0e-27,
+        gvda = 20.0e-27,
         gvdb = 0.0,
         fB_mode="perfect",
-        recompute=True,
+        recompute=False,
         ipulse=1)
     exit()
 
@@ -458,6 +459,3 @@ if __name__ == "__main__":
     # Example utilities (disabled by default):
     # logger.info("Raman corrections: %s", _safe_repr(get_raman_corrections()))
     # logger.info("Fit coefficients shapes: %s", _safe_repr([x.shape for x in get_fit_coefficients()]))
-
-    # FIXME
-    # test_hypothesis()

@@ -117,6 +117,7 @@ def correct_fit_coefficients(ps: Tuple[float, float, float],
     lo_value = quad(I_specific, 0, fiber_length)[0]
     # correction of fit params: check that this is ok. Keep eta the same
     old_lo_value = ps[0]
+    lg.debug(f"Correcting N^circ (LO val): {old_lo_value} --> {lo_value}")
     ps[0] = lo_value
     ps[1] = ps[1] * lo_value / old_lo_value
     return ps
