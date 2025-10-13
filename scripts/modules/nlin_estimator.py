@@ -1,115 +1,101 @@
 from scipy.constants import c
 from pynlin.utils import dBm2watt
-from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.fiber import MMFiber
 import pynlin
 import numpy as np
-import scripts.modules.cfg as cfg
 from typing import Tuple
 from scipy.optimize import curve_fit
-
+from scipy.integrate import quad
 from loguru import logger as lg
 from scripts.modules.log_init import init_logging
 init_logging()
 
+from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
+import scripts.modules.cfg as cfg
+from scripts.modules.collision import build_I_low_interpolator
+
 SPATIAL_MODES = np.array([1, 2, 2, 1])
-LLW_MIN = 0.01 # target L/LW
+LLW_MIN = 0.01  # target L/LW
 LLW_MAX = 100.0
+
+
+def fB_preprocessing(cf):
+    fBs = load_fB(cf)
+    # for the maximum and the minimum Raman profiles, we need to compute the m = 0 integral for the GVD grid.
+    # Mapping to a angle - lenght space.
+    
+
+def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, callable, callable]:
+    assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
+    sol_path = "results/ct_solution-6_gain_0.0.npy" # all the information about the numerosity and stuff is here.
+    solutions = np.load(sol_path, allow_pickle=True).item()
+
+    signal_powers = solutions['signal_sol']
+    signal_powers = np.swapaxes(signal_powers, 1, 2) # indices: (z, mode, channel)
+    fB = signal_powers / signal_powers[0, :, :]  # normalize to input power
+    fB_max = np.max(signal_powers, axis=(1, 2))
+    fB_min = np.min(signal_powers, axis=(1, 2))
+    z_axis = np.linspace(0, cf.fiber_length, len(fB_max))
+    assert ((fB_min <= fB_max).all())
+    assert (fB.shape[0] == len(z_axis))
+
+    coeffs_max = np.polyfit(z_axis, fB_max, 6)
+    coeffs_min = np.polyfit(z_axis, fB_min, 6)
+
+    def fB_max_function(z):
+        return np.polyval(coeffs_max, z)
+
+    def fB_min_function(z):
+        return np.polyval(coeffs_min, z)
+
+    return fB, fB_min, fB_max, fB_min_function, fB_max_function
 
 
 def softplus2(x, a, b, c):
     return a * (1 + (x / b)**(1 / c))**(-c)
 
 
-
-
-
-# perfect -> nonzero gvd / nonzero Raman
-# Additive effect
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def get_raman_corrections(smf: bool = False, gvd=0.0) -> Tuple[float, float, float, float]:
+# a hot function !! gets evaluated (Nch)^2 times
+def get_raman_corrections(cf, # FIXME get_raman_extremes 
+                          gvda, 
+                          gvdb, 
+                          fB, 
+                          fB_min, 
+                          fB_max, 
+                          asymptotic,
+                          ) -> Tuple[float, float, float, float]:
     """
     Given the optimized signal profiles, calculate max and min asymptotic values
     for the correction coefficients f_B.
-    Requires: results/oi_fit.npy, input/mmf.toml or smf.toml,
+    Requires: input/mmf.toml or smf.toml,
               results/ct_solution-6_gain_0.0[_SMF].npy
     """
-    toml_path = "./input/smf.toml" if smf else "./input/mmf.toml"
-    select_string = "_SMF" if smf else ""
-    cf = cfg.load_toml_to_struct(toml_path)
+    # toml_path = "./input/smf.toml" if smf else "./input/mmf.toml"
+    # select_string = "_SMF" if smf else ""
+    # cf = cfg.load_toml_to_struct(toml_path)
 
-    assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
-
-    sol_path = f"results/ct_solution-6_gain_0.0{select_string}.npy"
-    solutions = np.load(sol_path, allow_pickle=True).item()
-
-    signal_powers = solutions['signal_sol']
-    signal_powers_swp = np.swapaxes(signal_powers, 1, 2)
-    initial_powers = signal_powers_swp[0, :, :]
-    fB = np.divide(signal_powers_swp, initial_powers)
-    assert ((fB >= 0).all())
-    fB_max = np.max(fB, axis=(1, 2))
-    fB_min = np.min(fB, axis=(1, 2))
-    assert ((fB_min <= fB_max).all())
-
+    fB, fB_min, fB_max, fB_min_func, fB_max_func = load_fB(cf)
     z_axis = np.linspace(0, cf.fiber_length, len(fB_max))
     dz = z_axis[1] - z_axis[0]
-    assert (fB.shape[0] == len(z_axis))
-
-    if gvd == 0:
-        r_lo_min = (np.sum(fB_min) * dz / cf.fiber_length)**2
+    if asymptotic == Regime.HI:
+        r_lo_min = (np.sum(fB_min) * dz / cf.fiber_length)**2 # insert the Raman simple here.
         r_lo_max = (np.sum(fB_max) * dz / cf.fiber_length)**2
         r_hi_min = np.sum(fB_min**2) * dz / cf.fiber_length
         r_hi_max = np.sum(fB_max**2) * dz / cf.fiber_length
 
-        # Sanity checks
         rcal_hi = np.sum(fB**2, axis=0) * dz / cf.fiber_length
         rcal_lo = (np.sum(fB, axis=0) * dz / cf.fiber_length)**2
         assert ((rcal_hi >= r_hi_min - 1e-15).all())
         assert ((rcal_hi <= r_hi_max + 1e-15).all())
         assert ((rcal_lo >= r_lo_min - 1e-15).all())
         assert ((rcal_lo <= r_lo_max + 1e-15).all())
-    else:
+    else: # Raman complicated (need the fitting -->
+        # - We can work in a faster way. Estimate only t 
+        # # REUSE THE CONCEPT ALREADY WRITTEN IN THE ARTICLE.
         noise_min = np.load(f"results/partial_nlin_gaussian_min{gvd}B2.npy")
         noise_max = np.load(f"results/partial_nlin_gaussian_max{gvd}B2.npy")
-        noise_perfect = np.load(
-            f"results/partial_nlin_gaussian_perfect{gvd}B2.npy")
+        noise_perfect = np.load(f"results/partial_nlin_gaussian_perfect{gvd}B2.npy") # load integral here: 
+        
         r_lo_min = noise_min[0] / noise_perfect[0]
         r_hi_min = noise_min[-1] / noise_perfect[-1]
         r_lo_max = noise_max[0] / noise_perfect[0]
@@ -117,79 +103,69 @@ def get_raman_corrections(smf: bool = False, gvd=0.0) -> Tuple[float, float, flo
 
     return r_lo_min, r_lo_max, r_hi_min, r_hi_max
 
-def get_dispersion_corrected_raman_coefficient(gvd_rms: float,
-                                               dless_r: float,
-                                               dless_r_extremes: Tuple[float, float, float], d_r_extremes: Tuple[float, float]) -> float:
 
-    raise NotImplementedError(
-        "This function is not currently used, please implement it if needed")
-    return d_r_extremes[1]
-
-
-def get_fit_coefficients(fB_simple_interpolation: bool = False, gvd=None) -> Tuple[np.ndarray, np.ndarray]:
+def correct_fit_coefficients(ps: Tuple[float, float, float], 
+                             lda: float, 
+                             ldb: float,
+                             fiber_length: float,
+                             interp: callable):
     """
-    Given the numerical noise results for a representative GVD, find the best
-    fit coefficients in the Nyquist and Gaussian cases. Only consider max and min profiles.
-    Requires: results/partial_nlin_gaussian_*.npy, results/partial_nlin_nyquist_*.npy,
-              input/mmf.toml, input/numerical_config.toml, results/oi_fit.npy
+    This only corrects for the non negligible gvd
     """
+    I_specific = lambda x: interp(x/lda, x/ldb) # this is also in normalized units
+    lg.info(f"a sample of I_specific at L/LD=1: {I_specific(1.0)}")
+    lo_value = quad(I_specific, 0, fiber_length)[0]
+    # correction of fit params: check that this is ok. Keep eta the same
+    old_lo_value = ps[0]
+    ps[0] = lo_value
+    ps[1] = ps[1] * lo_value / old_lo_value
+    return ps
+
+
+def get_fit_coefficients(gvda: float = 0.0, 
+                         gvdb: float = 0.0,
+                         ipulse: int = 1) -> Tuple[np.ndarray, np.ndarray]:
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
     nc = cfg.load_nc_toml_to_struct("./input/numerical_config.toml")
 
     # Override DGD ranges using global targets
     lg.warning(f"Overriding DGD ranges to [{LLW_MIN}, {LLW_MAX}] ps/sqrt(km)")
-    old = {"dgd1": getattr(nc, "dgd1", None), "dgd2_n": getattr(
-        nc, "dgd2_n", None), "dgd2_g": getattr(nc, "dgd2_g", None)}
     nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
-    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
-    nc.dgd2_g = nc.dgd2_n
-    if gvd is None:
-        gvd = nc.gvd
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate) # build the fit from the minimum to the maximum 
+    dgd2 = nc.dgd2_n
 
-    oi_fit = np.load('results/oi_fit.npy')
-    beta1_params = load_group_delay()
-    # fiber = MMFiber(
-    #     effective_area=cf.effective_area,
-    #     overlap_integrals=oi_fit,
-    #     group_delay=beta1_params,
-    #     length=cf.fiber_length,
-    #     n_modes=cf.n_modes
-    # )
-
-    modes = ["perfect"] if fB_simple_interpolation else ["min", "max"]
-    dgds_numeric_g = np.logspace(
-        np.log10(nc.dgd1), np.log10(nc.dgd2_g), nc.n_samples_numeric_g)
-    dgds_numeric_n = np.logspace(
-        np.log10(nc.dgd1), np.log10(nc.dgd2_n), nc.n_samples_numeric_n)
+    cf_path = "./input/mmf.toml"
+    cf = cfg.load_toml_to_struct(cf_path)
+   
+    dgds_numeric = np.logspace(
+        np.log10(nc.dgd1), np.log10(dgd2), nc.n_samples_numeric_n)
+    
     T = 1 / cf.baud_rate
-    L = fiber.length # HOW TO FIXME
+    L = cf.fiber_length
     x_norm = L / T
     y_norm = x_norm**(-2)
     p0 = [0.2, 4.5, 0.5]
 
-    ps_g = np.zeros((len(modes), 3))
-    ps_n = np.zeros((len(modes), 3))
+    if ipulse == 0:
+        pulse_shape = "gaussian"
+    else:
+        pulse_shape = "nyquist"
+    
+    # # this is the "cheating" case
+    if gvda != 0.0 or gvdb != 0.0:
+        raise("You are trying to cheat! Instead of fitting from a case computed with dispersion, you should use the dispersion correction given by correct_fit_coefficients")
+        partial_B2 = np.load(
+        f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
+    else:
+        partial_B2 = np.load(
+        f"results/partial_nlin_{pulse_shape}_perfect_0.0_0.0.npy")
 
-    for mode in modes:
-        partial_B2g = np.load(
-            f"results/partial_nlin_gaussian_{mode}{gvd}B2.npy")
-        partial_B2n = np.load(
-            f"results/partial_nlin_nyquist_{mode}{gvd}B2.npy")
+    assert len(dgds_numeric) == len(
+        partial_B2), f"Nyquist: {len(dgds_numeric)} vs {len(partial_B2)}"
 
-        assert len(dgds_numeric_g) == len(
-            partial_B2g), f"Gaussian: {len(dgds_numeric_g)} vs {len(partial_B2g)}"
-        assert len(dgds_numeric_n) == len(
-            partial_B2n), f"Nyquist: {len(dgds_numeric_n)} vs {len(partial_B2n)}"
-
-        popt_n, _ = curve_fit(softplus2, dgds_numeric_n *
-                              x_norm, partial_B2n * y_norm, p0=p0)
-        popt_g, _ = curve_fit(softplus2, dgds_numeric_g *
-                              x_norm, partial_B2g * y_norm, p0=p0)
-        ps_g[modes.index(mode), :] = popt_g
-        ps_n[modes.index(mode), :] = popt_n
-
-    return ps_g, ps_n
-
+    popt, _ = curve_fit(softplus2, dgds_numeric *
+                            x_norm, partial_B2 * y_norm, p0=p0)
+    return popt
 
 
 def get_nlin_prefactor_mmf(cf, mode_a, mode_b):
@@ -214,15 +190,17 @@ def get_nlin_prefactor(cf, mode_a, mode_b):
     else:
         return get_nlin_prefactor_mmf(cf, mode_a, mode_b)
 
-# system-wide nlin
-def get_nlin(cf,
+
+def get_nlin_system(cf,
              use_kappa=False,
              use_fB=False,
              use_x_mode_interactions=True,
              use_dBm_scale=False):
     assert (cf.n_modes == 4)
     assert (cf.launch_power == -5)
-    nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
+    if use_fB:
+        raise NotImplementedError("Raman not implemented yet")
+    nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml") # FIXME
     T = 1 / cf.baud_rate
     L = cf.fiber_length
     x_norm = L / T
@@ -233,32 +211,34 @@ def get_nlin(cf,
         kappa = kappa**2
     else:
         kappa = np.ones((cf.n_modes, cf.n_modes))
-
     switchoff_matrix = np.eye(cf.n_modes)
-    if cf.n_modes == 1:
-        solutions = np.load("results/ct_solution"+str(int(round(cf.launch_power)))+"_gain_0.0_SMF.npy",
-                            allow_pickle=True).item()
-    else:
-        solutions = np.load("results/ct_solution"+str(int(round(cf.launch_power)))+"_gain_0.0.npy",
-                            allow_pickle=True).item()
+    
+    
+    # # FIXME
+    # if cf.n_modes == 1:
+    #     solutions = np.load("results/ct_solution"+str(int(round(cf.launch_power)))+"_gain_0.0_SMF.npy",
+    #                         allow_pickle=True).item()
+    # else:
+    #     solutions = np.load("results/ct_solution"+str(int(round(cf.launch_power)))+"_gain_0.0.npy",
+    #                         allow_pickle=True).item()
 
-    signal_powers = solutions['signal_sol']
-    signal_powers_swp = np.swapaxes(signal_powers, 1, 2)
-    assert (cf.n_modes == signal_powers_swp.shape[1])
-    assert (cf.n_channels == signal_powers_swp.shape[2])
-    initial_powers = signal_powers_swp[0, :, :]
-    fB = np.divide(signal_powers_swp, initial_powers)
-    assert ((fB <= 1.5).all())
-    assert ((fB > 0).all())
+    # signal_powers = solutions['signal_sol']
+    # signal_powers_swp = np.swapaxes(signal_powers, 1, 2)
+    # assert (cf.n_modes == signal_powers_swp.shape[1])
+    # assert (cf.n_channels == signal_powers_swp.shape[2])
+    # initial_powers = signal_powers_swp[0, :, :]
+    # fB = np.divide(signal_powers_swp, initial_powers)
+    # assert ((fB <= 1.5).all())
+    # assert ((fB > 0).all())
     z_axis = np.linspace(0, cf.fiber_length, len(fB))
     dz = z_axis[1] - z_axis[0]
-    # coeffs = np.polyfit(z_axis, fB, 6)
-    if use_fB:
-        rcal_minus = (np.sum(fB, axis=0) * dz / cf.fiber_length)**2
-        rcal_plus = np.sum(fB**2, axis=0) * dz / cf.fiber_length
-    else:
-        rcal_plus = 1.0
-        rcal_minus = 1.0
+    # # coeffs = np.polyfit(z_axis, fB, 6)
+    # if use_fB:
+    #     rcal_minus = (np.sum(fB, axis=0) * dz / cf.fiber_length)**2
+    #     rcal_plus = np.sum(fB**2, axis=0) * dz / cf.fiber_length
+    # else:
+    #     rcal_plus = 1.0
+    #     rcal_minus = 1.0
 
     beta1_params = load_group_delay()
     wdm = pynlin.wdm.WDM(
@@ -307,12 +287,6 @@ def get_nlin(cf,
         # returns a (4, 250) matrix for all the b channels
         # assert((r_bar_lo>-1e-15).all())
         # assert((r_bar_hi>-1e-15).all())
-
-        def zeta(d):
-            return (d-d_max) / d_span
-
-        def raman_correction(d):
-            return (zeta(d) * r_bar_lo + (1-zeta(d)) * r_bar_hi)
     else:
         f_lo_plus = 1.0
         f_lo_minus = 1.0
@@ -338,7 +312,7 @@ def get_nlin(cf,
         param_select = 0
     else:
         param_select = 1
-        
+
     for mA in modes:
         for mB in modes:
             gvd = rms_gvd[mA, mB]
@@ -362,3 +336,15 @@ def get_nlin(cf,
     modal_prefactor = modal_prefactor[:cf.n_modes, :cf.n_modes]
     nlin = modal_prefactor @ nlin
     return nlin
+
+if __name__ == "__main__":
+    import scripts.modules.cfg as cfg
+    cf = cfg.load_toml_to_struct("./input/mmf.toml")
+    correct_fit_coefficients([1, 2, 3], 0.5, 0.5, cf.fiber_length, lambda x: x) # this is broken
+    
+    # build the interpolator and pass it to the corrector
+    I_low_n = np.load(f"results/I_low_nyquist.npz")
+    interp = build_I_low_interpolator(I_low_dataset = I_low_n, ipulse = 0)
+    lg.debug("Useful range of L/LD from LO time integral data: ", I_low_n['lld_range'])
+    
+    correct_fit_coefficients([1, 2, 3], 0.4, 0.4, interp)

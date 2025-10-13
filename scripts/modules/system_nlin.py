@@ -20,7 +20,7 @@ from pynlin.utils import watt2dBm, dBm2watt
 from scipy.optimize import curve_fit
 from scipy.constants import c
 
-from scripts.modules.nlin_estimator import get_nlin
+from scripts.modules.nlin_estimator import get_nlin_system
 
 
 # # SMF
@@ -80,18 +80,18 @@ def plot_case_study_noise(use_kappa=False,
     # print("SMF", get_nlin_prefactor_smf(cf_smf))
     # print("aeff1/2", (cf_smf.effective_area/cf_mmf.effective_area)**2)
     # exit()
-    nlin_mmf                = get_nlin(cf_mmf,
+    nlin_mmf                = get_nlin_system(cf_mmf,
                                        use_kappa=use_kappa,
                                        use_fB=use_fB,
                                        use_x_mode_interactions=True,
                                        use_dBm_scale=use_dBm_scale,
                                        )
-    nlin_mmf_noninteracting =  get_nlin(cf_mmf,
+    nlin_mmf_noninteracting =  get_nlin_system(cf_mmf,
                                        use_kappa=use_kappa,
                                        use_fB=use_fB,
                                        use_x_mode_interactions=False,
                                        use_dBm_scale=use_dBm_scale,)
-    nlin_smf                = get_nlin(cf_smf,
+    nlin_smf                = get_nlin_system(cf_smf,
                                        use_kappa=use_kappa,
                                        use_fB=use_fB,
                                        use_x_mode_interactions=True,
@@ -196,11 +196,11 @@ def plot_case_study_noise_histogram(use_kappa=False,
     )
     freqs_mmf = wdm.frequency_grid()
 
-    nlin_mmf = get_nlin(cf_mmf,
+    nlin_mmf = get_nlin_system(cf_mmf,
                         use_kappa=use_kappa,
                         use_fB=use_fB,
                         use_dBm_scale=use_dBm_scale,)
-    nlin_smf = get_nlin(cf_smf,
+    nlin_smf = get_nlin_system(cf_smf,
                         use_kappa=False,
                         use_fB=True,
                         use_dBm_scale=use_dBm_scale,)

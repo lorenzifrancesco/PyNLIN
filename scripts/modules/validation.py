@@ -1,52 +1,36 @@
-import os
-import sys
-import time
-import warnings
-import scipy.io
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import rc
-import pynlin.wdm
-from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
-from pynlin.fiber import *
-from pynlin.pulses import *
-from pynlin.nlin import compute_all_collisions_time_integrals, X0mm_space_integral
-from matplotlib.gridspec import GridSpec
-import scripts.modules.cfg as cfg
-from scipy.interpolate import interp1d
-from pynlin.collisions import get_m_values, get_collision_location
+from scripts.modules.nlin_estimator import get_raman_corrections, get_fit_coefficients, softplus2
+from scripts.modules.nlin_estimator import LLW_MAX, LLW_MIN, get_raman_corrections, get_fit_coefficients, softplus2, load_fB, correct_fit_coefficients, build_I_low_interpolator
 import matplotlib.colors as mcolors
-from scipy.optimize import curve_fit
-from typing import Tuple, Dict, Any
-
-from scripts.modules.nlin_estimator import LLW_MAX, LLW_MIN
-
+from pynlin.collisions import get_m_values, get_collision_location
+from scipy.interpolate import interp1d
+import scripts.modules.cfg as cfg
+from pynlin.nlin import compute_all_collisions_time_integrals, X0mm_space_integral
+from pynlin.pulses import *
+from pynlin.fiber import *
+from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
+import pynlin.wdm
+from matplotlib import rc
+import matplotlib.pyplot as plt
+import os
+import numpy as np
 from loguru import logger as lg
 from scripts.modules.log_init import init_logging
 init_logging()
 
-from scripts.modules.nlin_estimator import get_raman_corrections, get_fit_coefficients, softplus2
 
 # ==========================
 # Core functions
 # ==========================
+
 def adjust_luminosity(color, factor):
     rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB
     return np.clip(rgb * factor, 0, 1)  # Scale and clip values
 
 
-
-def get_nlin_threshold(
-    recompute: bool = False,
-    use_fB: bool = False,
-    fB_simple_interpolation: bool = False,
-):
-    if not use_fB:
-        fB_simple_interpolation = True
-        lg.trace("Disabling fB_simple_interpolation since use_fB is False")
-
-    rc('text', usetex=True)
-
+def compute_numeric_nlin(gvda: float,
+                         gvdb: float,
+                         ipulse: int,
+                         recompute: bool = False,):
     cf_path = "./input/mmf.toml"
     nc_path = "./input/numerical_config.toml"
     cf = cfg.load_toml_to_struct(cf_path)
@@ -66,179 +50,237 @@ def get_nlin_threshold(
         n_modes=cf.n_modes
     )
 
-    wdm = pynlin.wdm.WDM(
-        spacing=cf.channel_spacing,
-        num_channels=cf.n_channels,
-        center_frequency=cf.center_frequency
-    )
+    def get_space_integrals(z, I, fB):
+        return X0mm_space_integral(z, I, amplification_function=fB)
 
-    freqs = wdm.frequency_grid()
-    mode_idx = [0, 1, 2, 3]
-    mode_names = ['LP01', 'LP11', 'LP21', 'LP02']
-
-    beta1 = np.zeros((len(mode_idx), len(freqs)))
-    for i in mode_idx:
-        beta1[i, :] = fiber.group_delay.evaluate_beta1(i, freqs)
-    beta2 = np.zeros((len(mode_idx), len(freqs)))
-    for i in mode_idx:
-        beta2[i, :] = fiber.group_delay.evaluate_beta2(i, freqs)
-    px = 0
-    # here we iterate over all the possible gvds
-    # gvds = [nc.gvd]
-    gvds = np.unique(load_rms_gvd().flatten())
-    gvds = [0.0, 30e-27]
-
-    if use_fB:
-        rcal_lo_min, rcal_lo_max, rcal_hi_min, rcal_hi_max = get_raman_corrections()
-        modes = ["min", "max"]
-        assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
-        sol_path = "results/ct_solution-6_gain_0.0.npy"
-        solutions = np.load(sol_path, allow_pickle=True).item()
-
-        signal_powers = solutions['signal_sol']
-        signal_powers = np.swapaxes(signal_powers, 1, 2)
-        fB_max = np.max(signal_powers, axis=(1, 2))
-        fB_min = np.min(signal_powers, axis=(1, 2))
-        fB_max /= fB_max[0]
-        fB_min /= fB_min[0]
-
-        z_axis = np.linspace(0, fiber.length, len(fB_max))
-        coeffs_max = np.polyfit(z_axis, fB_max, 6)
-        coeffs_min = np.polyfit(z_axis, fB_min, 6)
-
-        def fB_max_function(z):
-            return np.polyval(coeffs_max, z)
-
-        def fB_min_function(z):
-            return np.polyval(coeffs_min, z)
+    if ipulse == 0:
+        dgd2 = nc.dgd2_g
+        n_samples_numeric = nc.n_samples_numeric_g
     else:
-        modes = ["perfect"]
+        dgd2 = nc.dgd2_n
+        n_samples_numeric = nc.n_samples_numeric_n
 
-        def fB_max_function(z):
-            return 1.0
+    dgds_numeric = np.logspace(
+        np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
 
-        def fB_min_function(z):
-            return 1.0
+    partial_nlin = np.zeros(n_samples_numeric)
+    partial_nlin_min = np.zeros(n_samples_numeric)
+    partial_nlin_max = np.zeros(n_samples_numeric)
 
-    def get_space_integrals_max(m, z, I):
-        return X0mm_space_integral(z, I, amplification_function=fB_max_function)
+    if ipulse == 0:
+        pulse = GaussianPulse(
+            baud_rate=cf.baud_rate, num_symbols=1e2, samples_per_symbol=2**5)
+    else:
+        pulse = NyquistPulse(
+            baud_rate=cf.baud_rate, num_symbols=1e3, samples_per_symbol=2**5, rolloff=0.0)
 
-    def get_space_integrals_min(m, z, I):
-        return X0mm_space_integral(z, I, amplification_function=fB_min_function)
-    
-    def get_space_integrals(m, z, I):
-        return X0mm_space_integral(z, I, amplification_function=None)
+    # does the file already exist?
+    filename = f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_perfect_{gvda}_{gvdb}.npy"
 
-    def antonio_rescale_max(dgd):
-        acc = 0.0
-        for m in get_m_values(fiber, pulse, 0, dgd):
-            acc += fB_max_function(get_collision_location(m, pulse, dgd))**2
-        return acc
+    _, _, _, fB_min_func, fB_max_func = load_fB(cf)
+    if not os.path.exists(filename) or recompute:
+        for idx, dgd in enumerate(dgds_numeric):
+            z, I, m = compute_all_collisions_time_integrals(
+                fiber, pulse, dgd, gvda, gvdb, use_multiprocessing=True)
 
-    def antonio_rescale_min(dgd):
-        acc = 0.0
-        for m in get_m_values(fiber, pulse, 0, dgd):
-            acc += fB_min_function(get_collision_location(m, pulse, dgd))**2
-        return acc
+            X0mm = get_space_integrals(z, I, lambda x: x)
+            X0mm_max = get_space_integrals(z, I, fB_max_func)
+            X0mm_min = get_space_integrals(z, I, fB_min_func)
 
-    # ----------------------------------
-    # Computation of the NLIN coefficient
-    # ----------------------------------
-    for gvd in gvds:
-        for px in [0, 1]:
-            if px == 0:
-                pulse = GaussianPulse(
-                    baud_rate=cf.baud_rate, num_symbols=1e2, samples_per_symbol=2**5)
-            else:
-                pulse = NyquistPulse(
-                    baud_rate=cf.baud_rate, num_symbols=1e3, samples_per_symbol=2**5, rolloff=0.0)
+            for xx in [X0mm, X0mm_max, X0mm_min]:
+                nonzero = np.real(xx) != 0
+                assert np.all(np.imag(xx[nonzero]) < 1e-6 * np.real(
+                    xx[nonzero])), f"Imaginary part too large: {np.max(np.imag(xx[nonzero]) / np.real(xx[nonzero]))}"
 
-            n_samples_analytic = 500
-            if px == 0:
-                dgd2 = nc.dgd2_g
-                n_samples_numeric = nc.n_samples_numeric_g
-            else:
-                dgd2 = nc.dgd2_n
-                n_samples_numeric = nc.n_samples_numeric_n
+            partial_nlin[idx] = np.sum(np.real(X0mm)**2)
+            partial_nlin_min[idx] = np.sum(np.real(X0mm_min)**2)
+            partial_nlin_max[idx] = np.sum(np.real(X0mm_max)**2)
 
-            dgds_numeric = np.logspace(
-                np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
-            dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
+        if ipulse == 0:
+            np.save(
+                f"results/partial_nlin_gaussian_perfect_{gvda}_{gvdb}.npy", partial_nlin)
+            np.save(
+                f"results/partial_nlin_gaussian_min_{gvda}_{gvdb}.npy", partial_nlin_min)
+            np.save(
+                f"results/partial_nlin_gaussian_max_{gvda}_{gvdb}.npy", partial_nlin_max)
+        else:
+            np.save(
+                f"results/partial_nlin_nyquist_perfect_{gvda}_{gvdb}.npy", partial_nlin)
+            np.save(
+                f"results/partial_nlin_nyquist_min_{gvda}_{gvdb}.npy", partial_nlin_min)
+            np.save(
+                f"results/partial_nlin_nyquist_max_{gvda}_{gvdb}.npy", partial_nlin_max)
+        lg.info(f"Saved numeric results to {filename} and similar with _min and _max")
+    return
 
-            partial_nlin = np.zeros(n_samples_numeric)
-            partial_nlin_min = np.zeros(n_samples_numeric)
-            partial_nlin_max = np.zeros(n_samples_numeric)
 
-            gvda = gvd
-            gvdb = gvd
+def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
+    cf_path = "./input/mmf.toml"
+    nc_path = "./input/numerical_config.toml"
+    cf = cfg.load_toml_to_struct(cf_path)
+    nc = cfg.load_nc_toml_to_struct(nc_path)
 
-            if recompute:
-                for idx, dgd in enumerate(dgds_numeric):
-                    z, I, m = compute_all_collisions_time_integrals(
-                        fiber, pulse, dgd, gvda, gvdb, use_multiprocessing=True)
-                    X0mm_min = get_space_integrals_min(m, z, I)
-                    X0mm_max = get_space_integrals_max(m, z, I)
-                    X0mm = get_space_integrals(m, z, I)
+    n_samples_analytic = 500
+    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_g = nc.dgd2_n
+    dgd2 = nc.dgd2_n
+    dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
 
-                    for xx in [X0mm, X0mm_max, X0mm_min]:
-                        nonzero = np.real(xx) != 0
-                        # lg.warning(
-                        #     f"Skipping an assert {np.all(np.imag(xx[nonzero]) < 1e-6 * np.real(xx[nonzero]))}")
-                        assert np.all(np.imag(xx[nonzero]) < 1e-6 * np.real(
-                            xx[nonzero])), f"Imaginary part too large: {np.max(np.imag(xx[nonzero]) / np.real(xx[nonzero]))}"
-
-                    partial_nlin[idx] = np.sum(np.real(X0mm)**2)
-                    partial_nlin_min[idx] = np.sum(np.real(X0mm_min)**2)
-                    partial_nlin_max[idx] = np.sum(np.real(X0mm_max)**2)
-
-                if px == 0:
-                    np.save(
-                        f"results/partial_nlin_gaussian_perfect{gvd}B2.npy", partial_nlin)
-                    np.save(
-                        f"results/partial_nlin_gaussian_min{gvd}B2.npy", partial_nlin_min)
-                    np.save(
-                        f"results/partial_nlin_gaussian_max{gvd}B2.npy", partial_nlin_max)
-                else:
-                    np.save(
-                        f"results/partial_nlin_nyquist_perfect{gvd}B2.npy", partial_nlin)
-                    np.save(
-                        f"results/partial_nlin_nyquist_min{gvd}B2.npy", partial_nlin_min)
-                    np.save(
-                        f"results/partial_nlin_nyquist_max{gvd}B2.npy", partial_nlin_max)
-
+    L = cf.fiber_length
     T = 1 / cf.baud_rate
-    L = fiber.length
-    assert (T == pulse.T0)
-    # LD_eff = pulse.T0**2 / np.abs(gvd)
-    dgds_analytic = np.linspace(nc.dgd1, nc.dgd2_g, n_samples_analytic)
-    analytic_nlin = L / (T * dgds_analytic)
-    nlin_analytic_max = np.zeros_like(dgds_analytic)
-    nlin_analytic_min = np.zeros_like(dgds_analytic)
+    nlin_hi = L/(T * dgds_analytic)
+    nlin_lo = np.ones_like(nlin_hi)
+    if ipulse == 0:  # Gaussian
+        nlin_lo *= (L/T)**2 * 1/(np.sqrt(np.pi) * 2)
+    else:  # Nyquist
+        nlin_lo *= (L/T)**2 * 4/9
 
-    for ix, i in enumerate(dgds_analytic):
-        nlin_analytic_max[ix] = antonio_rescale_max(i) / (i**2)
-        nlin_analytic_min[ix] = antonio_rescale_min(i) / (i**2)
+    nlin_hi[nlin_hi > 1e100] = np.nan
+    nlin_lo[nlin_lo > 1e100] = np.nan
+    return nlin_hi, nlin_lo
 
-    analytic_nlin[analytic_nlin > 1e100] = np.nan
-    dgds_numeric_g = np.logspace(
-        np.log10(nc.dgd1), np.log10(nc.dgd2_g), nc.n_samples_numeric_g)
-    dgds_numeric_n = np.logspace(
-        np.log10(nc.dgd1), np.log10(nc.dgd2_n), nc.n_samples_numeric_n)
 
-    x_norm = L / T
+def compute_fitted_nlin(gvda: float,
+                        gvdb: float,
+                        fB_mode: str,
+                        ipulse: int,
+                        recompute: bool = False,):
+    # this should use the methods from the nlin_estimator
+    cf_path = "./input/mmf.toml"
+    nc_path = "./input/numerical_config.toml"
+    cf = cfg.load_toml_to_struct(cf_path)
+    nc = cfg.load_nc_toml_to_struct(nc_path)
+
+    n_samples_analytic = 500
+    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    dgd2 = nc.dgd2_n
+    dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
+
+    x_norm = cf.fiber_length * cf.baud_rate
     y_norm = x_norm**(-2)
 
+    # this is the smart fit.
+    ps = get_fit_coefficients(gvda=0.0, gvdb=0.0, ipulse=ipulse)
+    lda = 1 / (gvda * cf.baud_rate**2) if gvda != 0 else 1e30
+    ldb = 1 / (gvdb * cf.baud_rate**2) if gvdb != 0 else 1e30
+
+    I_low_dataset = np.load(
+        f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}.npz")
+    interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
+    # ps = correct_fit_coefficients(ps, lda, ldb, cf.fiber_length, interp)
+    fit_nlin = softplus2(dgds_analytic * x_norm, *ps) / y_norm
+    return fit_nlin
+
+
+def simple_plot_threshold(gvda: float = 0.0,
+                          gvdb: float = 0.0,
+                          fB_mode: str = "perfect",
+                          recompute: bool = False,
+                          ipulse: int = 1):
+    cf_path = "./input/mmf.toml"  # FIXME repeated code
+    nc_path = "./input/numerical_config.toml"
+    cf = cfg.load_toml_to_struct(cf_path)
+    nc = cfg.load_nc_toml_to_struct(nc_path)
+
+    n_samples_analytic = 500
+    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_g = nc.dgd2_n
+    dgd2 = nc.dgd2_n
+    dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
+
+    if ipulse == 0:
+        pulse_shape = "gaussian"
+    else:
+        pulse_shape = "nyquist"
+    
+    if ipulse == 0:
+        dgd2 = nc.dgd2_g
+        n_samples_numeric = nc.n_samples_numeric_g
+    else:
+        dgd2 = nc.dgd2_n
+        n_samples_numeric = nc.n_samples_numeric_n
+
+    dgds_numeric = np.logspace(
+        np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
+    assert (fB_mode == "perfect")
+
+    # ----- call the computation functions -----
+    compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
+    nlin_numeric = np.load(
+        f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
+    lg.info(nlin_numeric)
+    nlin_fitted = compute_fitted_nlin(
+        gvda=gvda, gvdb=gvdb, fB_mode="perfect", ipulse=ipulse, recompute=recompute)
+    nlin_hi, nlin_lo = compute_asymptotic_nlin(ipulse=ipulse)
+
+    
+    rc('text', usetex=True)
     dpi = 300
+    x_norm = cf.fiber_length * cf.baud_rate
+    y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
+    plt.figure(figsize=(3.6, 3))
+    plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
+             color="blue", lw=1, ls="--", label='Fit')
+    plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
+             color="blue", lw=1, ls="--", label='Fit')
+    plt.plot(dgds_analytic * x_norm, nlin_fitted * y_norm,
+             color="blue", lw=1, ls="-", label='Fit')
+    plt.scatter(dgds_numeric * x_norm, nlin_numeric * y_norm,
+                label='Numeric (Gauss.)', color="blue", marker="x", s=20, lw=1)
+    llda = cf.fiber_length * (gvda * cf.baud_rate**2)
+    lldb = cf.fiber_length * (gvdb * cf.baud_rate**2)
+    plt.title(fr"$L/L_{{DA}}=${llda}, $L/L_{{DB}}=${lldb}")
+    plt.xscale('log')
+    plt.yscale('log')
+    ymin, ymax = plt.ylim()
+    plt.ylim(ymin, 1.0)
+    if fB_mode == "perfect":
+        pass
+        # plt.ylim([0.5e-3, 0.11])
+    else:
+        plt.ylim([0.7e-2, 1])
+    plt.xlabel(r'$L/L_W$')
+    plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
+    plt.tight_layout()
+    plt.savefig(f"media/simple_threshold_{pulse_shape}_{llda}_{lldb}.pdf", dpi=dpi)
+    lg.info(f"Saved figure to media/simple_threshold_{pulse_shape}_{llda}_{lldb}.pdf")
+    return
+
+
+def plot_threshold(
+    recompute: bool = False,
+    use_fB: bool = False,
+    fB_simple_interpolation: bool = False,
+    gvda: float = 0.0,
+    gvdb: float = 0.0,
+):
+    if not use_fB:
+        fB_simple_interpolation = True
+        lg.trace("Disabling fB_simple_interpolation since use_fB is False")
+
+    rc('text', usetex=True)
+    dpi = 300
+
+    compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=0, recompute=recompute)
+    compute_fitted_nlin(gvda=gvda, gvdb=gvdb, fB=lambda x: x,
+                        ipulse=0, recompute=recompute)
 
     # ----------------------------------
     # plotting the threshold
     # ----------------------------------
+    cf = cfg.load_toml_to_struct("./input/mmf.toml")
+    x_norm = cf.fiber_length * cf.baud_rate
+    y_norm = (cf.fiber_length * cf.baud_rate)**2
     plt.figure(figsize=(3.6, 3))
     color_modes = [adjust_luminosity(
         'magenta', 0.8), adjust_luminosity('cyan', 0.8), 'green']
 
     ps_g, ps_n = get_fit_coefficients(
         fB_simple_interpolation=fB_simple_interpolation, gvd=0.0)
+
     # FINALIZING FIXME
     lg.trace("Fit coefficients (gauss):", ps_g)
     lg.trace("Fit coefficients (nyquist):", ps_n)
@@ -276,9 +318,9 @@ def get_nlin_threshold(
 
         for ix, gvd in enumerate(gvds):
             partial_B2g = np.load(
-                f"results/partial_nlin_gaussian_{mode}{gvd}B2.npy")
+                f"results/partial_nlin_gaussian_{mode}_{gvda}_{gvdb}.npy")
             partial_B2n = np.load(
-                f"results/partial_nlin_nyquist_{mode}{gvd}B2.npy")
+                f"results/partial_nlin_nyquist_{mode}_{gvda}_{gvdb}.npy")
 
             if fB_simple_interpolation and use_fB:
                 d_lo = dgds_analytic[0]
@@ -365,7 +407,7 @@ def get_nlin_threshold(
 
             for ix, gvd in enumerate(gvds):
                 partial_B2g = np.load(
-                    f"results/partial_nlin_gaussian_perfect{gvd}B2.npy")
+                    f"results/partial_nlin_gaussian_perfect_{gvda}_{gvdb}.npy")
                 if ix == 0:
                     lowest_dgd = partial_B2g[0]
                 plt.plot(dgds_numeric_g * x_norm, np.abs(partial_B2g - gauss_sampled) /
@@ -377,7 +419,7 @@ def get_nlin_threshold(
                     dgds_numeric_g * x_norm, *ps_g[0, :]), color="gray", ls=":", lw=lw, marker="x", markerfacecolor='none', markersize=ss)
 
                 partial_B2n = np.load(
-                    f"results/partial_nlin_nyquist_perfect{gvd}B2.npy")
+                    f"results/partial_nlin_nyquist_perfect_{gvda}_{gvdb}.npy")
                 plt.plot(dgds_numeric_n * x_norm, np.abs(partial_B2n - nyquist_sampled) /
                          nyquist_sampled, color="green", marker="*", markersize=ss, lw=lw)
                 plt.plot(dgds_numeric_n * x_norm, np.abs(partial_B2n - analytic_nlin_sampled) /
@@ -396,10 +438,18 @@ def get_nlin_threshold(
 
 
 if __name__ == "__main__":
+    simple_plot_threshold(
+        gvda = 0.0,
+        gvdb = 0.0,
+        fB_mode="perfect",
+        recompute=True,
+        ipulse=1)
+    exit()
+
     # plot the theoretical figure
-    get_nlin_threshold(recompute=True,
-                       use_fB=False,
-                       fB_simple_interpolation=False)
+    plot_threshold(recompute=True,
+                   use_fB=False,
+                   fB_simple_interpolation=False)
 
     # plot the case-study figure
     # get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=True)
@@ -407,3 +457,6 @@ if __name__ == "__main__":
     # Example utilities (disabled by default):
     # logger.info("Raman corrections: %s", _safe_repr(get_raman_corrections()))
     # logger.info("Fit coefficients shapes: %s", _safe_repr([x.shape for x in get_fit_coefficients()]))
+
+    # FIXME
+    # test_hypothesis()

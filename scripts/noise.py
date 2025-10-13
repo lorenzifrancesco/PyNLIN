@@ -12,7 +12,7 @@ from scripts.modules import cfg
 from scripts.modules.load_fiber_values import *
 from scripts.modules.load_fiber_values import load_group_delay
 from scripts.modules.collision import plot_illustrative, plot_dispersion_analysis
-from scripts.modules.validation import get_nlin_threshold
+from scripts.modules.validation import plot_threshold
 from scripts.modules.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
 
 from loguru import logger as lg
@@ -67,7 +67,7 @@ if 1 in fig_to_generate:
                       cf,
                       recompute=False)
 if 2 in fig_to_generate:
-    get_nlin_threshold(recompute=True, 
+    plot_threshold(recompute=True, 
                        use_fB=True, 
                        fB_simple_interpolation=False)
 if 3 in fig_to_generate:

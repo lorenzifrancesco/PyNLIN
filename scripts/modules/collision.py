@@ -10,8 +10,12 @@ import os
 from scripts.modules.beta_utils import beta2rms, beta2rms_complementary
 from pynlin.pulses import NyquistPulse, GaussianPulse
 from scipy.interpolate import RegularGridInterpolator
-
 import pynlin
+
+import scripts.modules.cfg as cfg
+from pynlin.fiber import MMFiber
+from pynlin.wdm import WDM
+from scripts.modules.load_fiber_values import load_oi, load_group_delay
 
 formatter = ScalarFormatter()
 formatter.set_scientific(True)
@@ -19,6 +23,11 @@ formatter.set_powerlimits([0, 0])
 
 PULSE_NAMES = ["gaussian", "nyquist"]
 PULSE_LINE_STYLE = ["-", "--"]
+
+        
+def get_space_integrals(m, z, I):
+    X0mm = pynlin.nlin.X0mm_space_integral(z, I, amplification_function=None)
+    return X0mm
 
 def plot_illustrative(fiber, wdm, cf, recompute=False):
     print("Plotting Fig.1 (pulse collisions)...")
@@ -197,11 +206,9 @@ def get_I_low(fiber, wdm, recompute=False):
     I_low_values_multipulse = []
     for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
         assert pulse.baud_rate == cf.baud_rate
-
-        def compute_I_low(pulse, fiber, wdm, z, beta2a, beta2b):
+        def compute_I_low(pulse, z, beta2a, beta2b):
             I_low = np.real(m_th_time_integral_general(
-                pulse, fiber, wdm, (0, 0), (0, 0), 0.0, 0, [
-                    z[-1]], 1e-40, None, beta2a, beta2b
+                0, [z[-1]], pulse, 0.0, beta2a, beta2b
             ))
             return I_low[-1]
 
@@ -209,7 +216,7 @@ def get_I_low(fiber, wdm, recompute=False):
         save_path = f"results/I_low_{PULSE_NAMES[ipulse]}.npz"
         if recompute or not os.path.exists(save_path):
             I_low_values = np.array([
-                [compute_I_low(pulse, fiber, wdm, z, beta2a, beta2b)
+                [compute_I_low(pulse,  z, beta2a, beta2b)
                  for beta2a in beta2_range]
                 for beta2b in beta2_range
             ], dtype=float) / cf.baud_rate
@@ -233,36 +240,62 @@ def get_I_low(fiber, wdm, recompute=False):
 def build_I_low_interpolator(I_low_dataset, ipulse: int):
     lld_range = I_low_dataset['lld_range']
     I_low_values = I_low_dataset['I_low_values']
-    z_array = I_low_dataset['z']
-    # save also a grid fitting function if it is not present
-    save_path_interp = f"results/low_dgd_integral/lowdgd_integral_interp_{PULSE_NAMES[ipulse]}__LoverLD_[{lld_range[0]:.1e}-{lld_range[-1]:.1e}]_N{len(lld_range)}_Nz{len(z_array)}.npz"
-    # generate the grid interpolation
     interp_func = RegularGridInterpolator(
         (lld_range, lld_range),
         I_low_values,
         bounds_error=False,
         fill_value=None
     )
-    # implement a wrapper to make sure the input is not too much over the original bounds
-    def interp_func_wrapped(x):
-        assert(x[0] <= 1.1 * lld_range[-1] and x[1] <= 1.1 * lld_range[-1]), f"Input {x} exceeds the 110% of the interpolation range [{lld_range[0]}, {lld_range[-1]}]"
-        assert(x[0]>=0 and x[1]>=0), f"Input {x} has negative values check that your LD is positive"
-        return interp_func(x)
+    def interp_func_wrapped(x, y):
+        assert(x <= 1.1 * lld_range[-1] and y <= 1.1 * lld_range[-1]), f"Input {x} exceeds the 110% of the interpolation range [{lld_range[0]}, {lld_range[-1]}]"
+        assert(x>=0 and y>=0), f"Input has negative values check that your LD is positive"
+        return interp_func([x, y])
     return interp_func_wrapped
 
 
-def plot_dispersion_analysis(fiber, wdm, recompute=True):
+def get_systems_dispersions():
+    cf = cfg.load_toml_to_struct("./input/mmf.toml")
+    fiber = MMFiber(
+        effective_area=cf.effective_area,
+        overlap_integrals=load_oi(),
+        group_delay=load_group_delay(),
+        length=cf.fiber_length,
+        n_modes=cf.n_modes
+    )
+    wdm = pynlin.wdm.WDM(
+        spacing=cf.channel_spacing,
+        num_channels=cf.n_channels,
+        center_frequency=cf.center_frequency
+    )
+    # for every choice of channel in each mode, compute the gvda and gvdb.
+    gvds = np.zeros((cf.n_modes, cf.n_channels))
+    for imode in range(cf.n_modes):
+        for ichan in range(cf.n_channels):
+            freq = wdm.frequency_grid()[ichan]
+            gvds[imode, ichan] = fiber.group_delay.evaluate_group_delay(
+                imode, freq)
+    X, Y = np.meshgrid(gvds, gvds, indexing='xy')
+    X_flat = X.ravel()
+    Y_flat = Y.ravel()
+    return X_flat, Y_flat
+    
+
+def plot_dispersion_analysis(fiber, wdm, recompute=True, with_system_data=True):
     print("Plotting Fig.1 (pulse collisions)...")
     I_low_values, lld_range = get_I_low(fiber, wdm, recompute=recompute)
-
+    if with_system_data:
+        X, Y = get_systems_dispersions()
+        
     for ipulse, I_low_values in enumerate(I_low_values):
         plt.figure(figsize=(4, 4.3))
         contour = plt.contourf(lld_range, lld_range, np.clip(
             I_low_values, a_min=-10, a_max=0.91), levels=20, cmap='viridis')
         contour_lines = plt.contour(lld_range, lld_range, np.clip(
             I_low_values, a_min=-10, a_max=0.6), levels=5, colors="w")
-
         plt.clabel(contour_lines, inline=True, fontsize=8)
+        
+        plt.scatter(X, Y, s=1, color='black', alpha=0.3)
+           
         plt.xlabel(r'$|\beta_{2A}|LT^{-2}$')
         plt.ylabel(r'$|\beta_{2B}|LT^{-2}$')
         # plt.colorbar(label=r'$I_{0;AB}(\bar{L}_{D0}) \cdot T$')
@@ -312,26 +345,3 @@ if __name__ == "__main__":
         for point in test_points:
             lg.trace(f"Point {point}: Interpolated = {interp_func(point)}")
             
-            
-# this is legacy and shouldn't be used anymore
-# def do_time_integrals(a_chan, fiber, wdm, pulse, overwrite):
-#     partial_collisions_margin = 2
-#     points_per_collision = 10
-
-#     pynlin.nlin.time_integrals_all_b_chans(
-#         wdm,
-#         fiber,
-#         a_chan,
-#         pulse,
-#         "results/results.h5",
-#         overwrite=overwrite,
-#         points_per_collision=points_per_collision,  # kwargs
-#         use_multiprocessing=True,
-#         partial_collisions_margin=partial_collisions_margin,
-#         speedup_pulse_propagation=True
-#     )
-#     return 0
-
-def get_space_integrals(m, z, I):
-    X0mm = pynlin.nlin.X0mm_space_integral(z, I, amplification_function=None)
-    return X0mm
