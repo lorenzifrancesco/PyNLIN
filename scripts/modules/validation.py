@@ -439,7 +439,7 @@ def plot_threshold(
 
 if __name__ == "__main__":
     simple_plot_threshold(
-        gvda = 20.0e-27,
+        gvda = 30.0e-27,
         gvdb = 0.0e-27,
         fB_mode="perfect",
         recompute=False,

@@ -197,7 +197,7 @@ def get_I_low(fiber, m_lo, recompute=False):
         samples_per_symbol=32,
     )
     z = np.linspace(0, fiber.length, 2)
-    lld_range = np.linspace(1e-30, 2, 50)  # HARDCODED
+    lld_range = np.linspace(1e-30, 2.3, 50)  # HARDCODED
 
     LD_min = fiber.length / lld_range[-1]
     beta2_max = 1/(cf.baud_rate**2 * LD_min)
@@ -205,7 +205,8 @@ def get_I_low(fiber, m_lo, recompute=False):
     lg.debug("-"*20, "DISPERSION ANALYSIS", "-"*20)
     lg.debug(
         f"LDbar_min = {LD_min:.2e} | L/LDbar_min = {fiber.length/LD_min:.2e}")
-    assert (np.isclose(fiber.length, 2 * LD_min))
+    # assert (np.isclose(fiber.length, 2 * LD_min))
+    lg.debug(f"Computing with L/LD = {fiber.length*cf.baud_rate**2 * beta2_max:.2e}")
     I_low_values_multipulse = []
     for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
         assert pulse.baud_rate == cf.baud_rate
@@ -337,7 +338,7 @@ if __name__ == "__main__":
     cf = Config()
     wdm = WDM()
 
-    for m_lo in [4, 5]:
+    for m_lo in [0, 1, 2, 3, 4, 5]:
         get_I_low(fiber, m_lo, recompute=True)
     # Run both plots
     plot_dispersion_analysis(fiber, recompute=True)
