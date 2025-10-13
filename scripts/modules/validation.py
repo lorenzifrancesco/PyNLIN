@@ -78,7 +78,9 @@ def compute_numeric_nlin(gvda: float,
     if not os.path.exists(filename) or recompute:
         for idx, dgd in enumerate(dgds_numeric):
             z, I, m = compute_all_collisions_time_integrals(
-                fiber, pulse, dgd, gvda, gvdb, use_multiprocessing=True)
+                fiber, pulse, dgd, gvda, gvdb, 
+                use_multiprocessing=True, 
+                partial_collisions_margin=5) # important that it is sufficient. It has been pro
 
             X0mm     = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
             X0mm_max = X0mm_space_integral(z, I, amplification_function=fB_max_func)
@@ -122,7 +124,7 @@ def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_g = nc.dgd2_n
     dgd2 = nc.dgd2_n
-    dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
+    dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
 
     L = cf.fiber_length
     T = 1 / cf.baud_rate
@@ -153,7 +155,7 @@ def compute_fitted_nlin(gvda: float,
     nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
     dgd2 = nc.dgd2_n
-    dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
+    dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
 
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = x_norm**(-2)
@@ -162,12 +164,8 @@ def compute_fitted_nlin(gvda: float,
     ps = get_fit_coefficients(gvda=0.0, gvdb=0.0, ipulse=ipulse)
     lda = 1 / (gvda * cf.baud_rate**2) if gvda != 0 else 1e30
     ldb = 1 / (gvdb * cf.baud_rate**2) if gvdb != 0 else 1e30
-
-    I_low_dataset = np.load(
-        f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}.npz")
-    interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
     
-    ps = correct_fit_coefficients(ps, lda, ldb, cf.fiber_length, interp)
+    ps = correct_fit_coefficients(ps, lda, ldb, cf.fiber_length, ipulse)
     fit_nlin = softplus2(dgds_analytic * x_norm, *ps) / y_norm
     return fit_nlin
 
@@ -189,7 +187,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_g = nc.dgd2_n
     dgd2 = nc.dgd2_n
-    dgds_analytic = np.linspace(nc.dgd1, dgd2, n_samples_analytic)
+    dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
 
     if ipulse == 0:
         pulse_shape = "gaussian"
@@ -224,13 +222,13 @@ def simple_plot_threshold(gvda: float = 0.0,
     dpi = 300
     plt.figure(figsize=(3.6, 3))
     plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
-             color="blue", lw=1, ls="--", label='Fit')
+             color="green", lw=1, ls="--", label='Fit')
     plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
-             color="blue", lw=1, ls="--", label='Fit')
+             color="green", lw=1, ls="--", label='Fit')
     plt.plot(dgds_analytic * x_norm, nlin_fitted * y_norm,
-             color="blue", lw=1, ls="-", label='Fit')
+             color="green", lw=1, ls="-", label='Fit')
     plt.scatter(dgds_numeric * x_norm, nlin_numeric * y_norm,
-                label='Numeric (Gauss.)', color="blue", marker="x", s=20, lw=1)
+                label='Numeric', color="green", marker="*", s=20, lw=1)
     llda = cf.fiber_length * (gvda * cf.baud_rate**2)
     lldb = cf.fiber_length * (gvdb * cf.baud_rate**2)
     plt.title(fr"$L/L_{{DA}}=${llda:.2f}, $L/L_{{DB}}=${lldb:.2f}")
@@ -442,7 +440,7 @@ def plot_threshold(
 if __name__ == "__main__":
     simple_plot_threshold(
         gvda = 20.0e-27,
-        gvdb = 0.0,
+        gvdb = 0.0e-27,
         fB_mode="perfect",
         recompute=False,
         ipulse=1)

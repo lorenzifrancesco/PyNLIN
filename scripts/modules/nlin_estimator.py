@@ -108,18 +108,35 @@ def correct_fit_coefficients(ps: Tuple[float, float, float],
                              lda: float, 
                              ldb: float,
                              fiber_length: float,
-                             interp: callable):
+                             ipulse: int = 1,
+                             m_lo_truncation: int = 5) -> Tuple[float, float, float]:
     """
-    This only corrects for the non negligible gvd
+    This only corrects for the non negligible gvd. It does it up to a certain order.
     """
-    I_specific = lambda x: interp(x/lda, x/ldb) # this is also in normalized units
-    lg.info(f"a sample of I_specific at L/LD=1: {I_specific(1.0)}")
-    lo_value = quad(I_specific, 0, fiber_length)[0]
+    lo_value = 0.0
+    for m_lo in range(m_lo_truncation+1):
+        I_low_dataset = np.load(
+            f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
+        interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
+        I_specific = lambda x: interp(x/lda, x/ldb) # this is also in normalized units
+        lg.info(f"We are calculating in the range L/LD=[1e-90, {fiber_length/lda:.1e}] for m_lo={m_lo}")
+        # compute the integral
+        added_noise = (quad(I_specific, 0, fiber_length)[0] / fiber_length)**2
+        if m_lo != 0:
+            added_noise *= 2
+        lo_value += added_noise
+    # I_specific = lambda x: interp(x/lda, x/ldb) # this is also in normalized units
+    # some_samples = np.array([I_specific(x) for x in np.linspace(0, fiber_length, 10)])
+    # lg.info(f"We are calculating in the range L/LD=[1e-90, {fiber_length/lda:.1e}]")
+    # # compute the integral
+    # lo_value = (quad(I_specific, 0, fiber_length)[0] / fiber_length)**2
+    
     # correction of fit params: check that this is ok. Keep eta the same
     old_lo_value = ps[0]
-    lg.debug(f"Correcting N^circ (LO val): {old_lo_value} --> {lo_value}")
+    lg.info(f"Correcting N^circ (LO val): {old_lo_value} --> {lo_value}")
+    lg.info(f"Correcting delta beta1a of a factor {old_lo_value/(lo_value)}")
     ps[0] = lo_value
-    ps[1] = ps[1] * lo_value / old_lo_value
+    ps[1] = ps[1] * old_lo_value / lo_value
     return ps
 
 
@@ -347,7 +364,6 @@ if __name__ == "__main__":
     
     import scripts.modules.cfg as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
-    correct_fit_coefficients([1, 2, 3], 0.5, 0.5, cf.fiber_length, lambda x: x) # this is broken
     
     # build the interpolator and pass it to the corrector
     I_low_n = np.load(f"results/I_low_nyquist.npz")

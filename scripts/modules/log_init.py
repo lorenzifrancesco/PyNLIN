@@ -15,7 +15,7 @@ def init_logging():
 
     # Remove default handler and add ours
     logger.remove()
-    logger.add(sys.stdout, level="INFO", colorize=True)
+    logger.add(sys.stdout, level="DEBUG", colorize=True)
     logger.add(log_file, level="DEBUG", rotation="10 MB", colorize=False)
     logger.add(log_file_deep, level="TRACE", colorize=False)
 
