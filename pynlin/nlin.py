@@ -140,7 +140,7 @@ def compute_all_collisions_time_integrals_system(
         gvda = fiber.beta2
         gvdb = fiber.beta2
     elif fiber.fiber_type == "MMF":
-        dgd = fiber.group_delay.evaluate_beta1(b_chan[0], f_grid[b_chan[1]]) 
+        dgd = fiber.group_delay.evaluate_beta1(b_chan[0], f_grid[b_chan[1]]) - fiber.group_delay.evaluate_beta1(a_chan[0], f_grid[a_chan[1]])
         gvda = fiber.group_delay.evaluate_beta2(a_chan[0], f_grid[a_chan[1]])
         gvdb = fiber.group_delay.evaluate_beta2(b_chan[0], f_grid[b_chan[1]])
     z_walkoff = get_z_walkoff(pulse, dgd)
@@ -289,7 +289,7 @@ def compute_all_collisions_time_integrals(
     integrals_list_2d = np.stack(integrals_list)
     return z_axis_list_2d, integrals_list_2d, m_list
 
-    
+
 # ---------------------------------------------
 #  Fundamental time integrals
 # ---------------------------------------------
@@ -302,6 +302,8 @@ def m_th_time_integral(
     gvda=None,  # additional parameters for full specification
     gvdb=None,
 ):
+    lg.debug(f"Computing integral for m = {m:10d}, z = ({z[0]:.2e}, {z[-1]:.2e}, {len(z):5d})")
+    lg.debug(f"  gvda = {gvda:.3e}, gvdb = {gvdb:.3e}, dgd = {dgd:.3e}")
     if isinstance(pulse, GaussianPulse):
         return m_th_time_integral_Gaussian(
             m, z, pulse, dgd, gvda, gvdb)

@@ -50,9 +50,6 @@ def compute_numeric_nlin(gvda: float,
         n_modes=cf.n_modes
     )
 
-    def get_space_integrals(z, I, fB):
-        return X0mm_space_integral(z, I, amplification_function=fB)
-
     if ipulse == 0:
         dgd2 = nc.dgd2_g
         n_samples_numeric = nc.n_samples_numeric_g
@@ -83,9 +80,9 @@ def compute_numeric_nlin(gvda: float,
             z, I, m = compute_all_collisions_time_integrals(
                 fiber, pulse, dgd, gvda, gvdb, use_multiprocessing=True)
 
-            X0mm = get_space_integrals(z, I, lambda x: x)
-            X0mm_max = get_space_integrals(z, I, fB_max_func)
-            X0mm_min = get_space_integrals(z, I, fB_min_func)
+            X0mm     = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
+            X0mm_max = X0mm_space_integral(z, I, amplification_function=fB_max_func)
+            X0mm_min = X0mm_space_integral(z, I, amplification_function=fB_min_func)
 
             for xx in [X0mm, X0mm_max, X0mm_min]:
                 nonzero = np.real(xx) != 0
@@ -184,8 +181,10 @@ def simple_plot_threshold(gvda: float = 0.0,
     cf = cfg.load_toml_to_struct(cf_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
 
+    x_norm = cf.fiber_length * cf.baud_rate
+    y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
     n_samples_analytic = 500
-    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd1   = LLW_MIN / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_g = nc.dgd2_n
     dgd2 = nc.dgd2_n
@@ -208,19 +207,20 @@ def simple_plot_threshold(gvda: float = 0.0,
     assert (fB_mode == "perfect")
 
     # ----- call the computation functions -----
+    # -- numeric
     compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
     nlin_numeric = np.load(
         f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
     lg.info(nlin_numeric)
+    lg.info(nlin_numeric * y_norm)
+    
+    # -- analytic
     nlin_fitted = compute_fitted_nlin(
         gvda=gvda, gvdb=gvdb, fB_mode="perfect", ipulse=ipulse, recompute=recompute)
     nlin_hi, nlin_lo = compute_asymptotic_nlin(ipulse=ipulse)
 
-    
     rc('text', usetex=True)
     dpi = 300
-    x_norm = cf.fiber_length * cf.baud_rate
-    y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
     plt.figure(figsize=(3.6, 3))
     plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
              color="blue", lw=1, ls="--", label='Fit')
@@ -241,7 +241,8 @@ def simple_plot_threshold(gvda: float = 0.0,
         pass
         # plt.ylim([0.5e-3, 0.11])
     else:
-        plt.ylim([0.7e-2, 1])
+        pass
+        # plt.ylim([0.7e-2, 1])
     plt.xlabel(r'$L/L_W$')
     plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
     plt.tight_layout()
@@ -265,7 +266,7 @@ def plot_threshold(
     dpi = 300
 
     compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=0, recompute=recompute)
-    compute_fitted_nlin(gvda=gvda, gvdb=gvdb, fB=lambda x: x,
+    compute_fitted_nlin(gvda=gvda, gvdb=gvdb, fB_mode="perfect",
                         ipulse=0, recompute=recompute)
 
     # ----------------------------------
@@ -439,7 +440,7 @@ def plot_threshold(
 
 if __name__ == "__main__":
     simple_plot_threshold(
-        gvda = 0.0,
+        gvda = 30.0e-27,
         gvdb = 0.0,
         fB_mode="perfect",
         recompute=True,

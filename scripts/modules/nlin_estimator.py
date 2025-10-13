@@ -122,7 +122,7 @@ def correct_fit_coefficients(ps: Tuple[float, float, float],
     return ps
 
 
-def get_fit_coefficients(gvda: float = 0.0, 
+def get_fit_coefficients(gvda: float = 0.0,
                          gvdb: float = 0.0,
                          ipulse: int = 1) -> Tuple[np.ndarray, np.ndarray]:
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
@@ -144,27 +144,30 @@ def get_fit_coefficients(gvda: float = 0.0,
     L = cf.fiber_length
     x_norm = L / T
     y_norm = x_norm**(-2)
-    p0 = [0.2, 4.5, 0.5]
+    p0 = [0.4, 4.5, 0.5]
 
     if ipulse == 0:
         pulse_shape = "gaussian"
     else:
-        pulse_shape = "nyquist"
-    
-    # # this is the "cheating" case
+        pulse_shape = "nyquist"    
+
+    nlin_numeric = None
     if gvda != 0.0 or gvdb != 0.0:
         raise("You are trying to cheat! Instead of fitting from a case computed with dispersion, you should use the dispersion correction given by correct_fit_coefficients")
-        partial_B2 = np.load(
+        nlin_numeric = np.load(
         f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
     else:
-        partial_B2 = np.load(
+        nlin_numeric = np.load(
         f"results/partial_nlin_{pulse_shape}_perfect_0.0_0.0.npy")
 
     assert len(dgds_numeric) == len(
-        partial_B2), f"Nyquist: {len(dgds_numeric)} vs {len(partial_B2)}"
-
-    popt, _ = curve_fit(softplus2, dgds_numeric *
-                            x_norm, partial_B2 * y_norm, p0=p0)
+        nlin_numeric), f"Nyquist: {len(dgds_numeric)} vs {len(nlin_numeric)}"
+    lg.warning("nlin_numeric")    
+    lg.warning(nlin_numeric)    
+    popt, _ = curve_fit(softplus2,
+                        dgds_numeric * x_norm,
+                        nlin_numeric * y_norm,
+                        p0=p0)
     return popt
 
 
@@ -338,6 +341,9 @@ def get_nlin_system(cf,
     return nlin
 
 if __name__ == "__main__":
+    get_fit_coefficients(0.0, 0.0, 1)
+    exit()
+    
     import scripts.modules.cfg as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
     correct_fit_coefficients([1, 2, 3], 0.5, 0.5, cf.fiber_length, lambda x: x) # this is broken
