@@ -78,7 +78,7 @@ def compute_numeric_nlin(gvda: float,
             z, I, m = compute_all_collisions_time_integrals(
                 fiber, pulse, dgd, gvda, gvdb, 
                 use_multiprocessing=True, 
-                partial_collisions_margin=5) # important that it is sufficient. It has been pro
+                partial_collisions_margin=5)
 
             X0mm     = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
             X0mm_max = X0mm_space_integral(z, I, amplification_function=fB_max_func)
@@ -173,7 +173,8 @@ def simple_plot_threshold(gvda: float = 0.0,
                           gvdb: float = 0.0,
                           fB_mode: str = "perfect",
                           recompute: bool = False,
-                          ipulse: int = 1):
+                          ipulse: int = 1,
+                          m_lo_truncation: int = 0):
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
     cf = cfg.load_toml_to_struct(cf_path)
@@ -203,41 +204,45 @@ def simple_plot_threshold(gvda: float = 0.0,
     dgds_numeric = np.logspace(
         np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
     # assert (fB_mode == "perfect")
+    
+    _, fB_min, fB_max, _, _ = load_fB(cf)
     if fB_mode == "perfect":
         fB = np.array([1.0]*100)  # dummy, not used since fB_mode is perfect
-    else: 
-        raise NotImplementedError("Only perfect fB_mode is implemented in this simple plot")
+    elif fB_mode == "max": 
+        fB = fB_max
+    elif fB_mode == "min":
+        fB = fB_min
+    else:
+        raise ValueError(f"fB_mode {fB_mode} not recognized")    
     
     # ----- call the computation functions -----
     # -- numeric (compute_numeric computes all the fB_modes)
     compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
     nlin_numeric = np.load(
-        f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
+        f"results/partial_nlin_{pulse_shape}_{fB_mode}_{gvda}_{gvdb}.npy")
     lg.info(nlin_numeric)
     lg.info(nlin_numeric * y_norm)
     
-    raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(cf, m_lo_truncation=2)
+    raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(cf, m_lo_truncation=m_lo_truncation)
+    
     # -- analytic and fitted
-    nlin_fitted = fit_nlin(cf, 
-                           gvda, 
-                           gvdb, 
-                           fB, 
+    nlin_fitted = fit_nlin(cf,
+                           gvda,
+                           gvdb,
+                           fB,
                            raman_gvd_correction_min, 
                            raman_gvd_correction_max,
-                           ipulse=ipulse, m_lo_truncation=2)
+                           ipulse=ipulse, m_lo_truncation=m_lo_truncation)
     nlin_fitted_data = nlin_fitted(dgds_analytic) / y_norm
     nlin_hi, nlin_lo = compute_asymptotic_nlin(ipulse=ipulse)
-
-    lg.debug("fit nlin")
-    lg.debug(nlin_fitted_data)
 
     rc('text', usetex=True)
     dpi = 300
     plt.figure(figsize=(3.6, 3))
-    plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
-             color="green", lw=1, ls="--", label='Fit')
-    plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
-             color="green", lw=1, ls="--", label='Fit')
+    # plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
+    #          color="green", lw=1, ls="--", label='Fit')
+    # plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
+    #          color="green", lw=1, ls="--", label='Fit')
     plt.plot(dgds_analytic * x_norm, nlin_fitted_data * y_norm,
              color="green", lw=1, ls="-", label='Fit')
     plt.scatter(dgds_numeric * x_norm, nlin_numeric * y_norm,
@@ -248,7 +253,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     plt.xscale('log')
     plt.yscale('log')
     ymin, ymax = plt.ylim()
-    plt.ylim(ymin, 1.0)
+    # plt.ylim(ymin, 1.0)
     if fB_mode == "perfect":
         pass
         # plt.ylim([0.5e-3, 0.11])
@@ -472,10 +477,11 @@ def plot_threshold(
 if __name__ == "__main__":
     simple_plot_threshold(
         gvda = 30.0e-27,
-        gvdb = 0.0e-27,
+        gvdb = 30.0e-27,
         fB_mode="perfect",
         recompute=False,
-        ipulse=1)
+        ipulse=1,
+        m_lo_truncation=3)
     exit()
 
     # plot the theoretical figure

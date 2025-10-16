@@ -14,24 +14,26 @@ from loguru import logger as lg
 from scripts.modules.log_init import init_logging
 init_logging()
 import os
+import matplotlib.pyplot as plt
+from pynlin.utils import watt2dBm
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
 LLW_MAX = 100.0
 
-
 def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
     assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
     # all the information about the numerosity and stuff is here.
-    sol_path = "results/ct_solution-6_gain_0.0.npy"
+    sol_path = "results/ct_solution-5_gain_0.0.npy"
     solutions = np.load(sol_path, allow_pickle=True).item()
 
     signal_powers = solutions['signal_sol']
     # indices: (z, mode, channel)
     signal_powers = np.swapaxes(signal_powers, 1, 2)
     fB = signal_powers / signal_powers[0, :, :]  # normalize to input power
-    fB_max = np.max(signal_powers, axis=(1, 2))
-    fB_min = np.min(signal_powers, axis=(1, 2))
+    assert np.all(fB[0, :, :] == 1.0)
+    fB_max = np.max(fB, axis=(1, 2))
+    fB_min = np.min(fB, axis=(1, 2))
     z_axis = np.linspace(0, cf.fiber_length, len(fB_max))
     assert ((fB_min <= fB_max).all())
     assert (fB.shape[0] == len(z_axis))
@@ -44,7 +46,7 @@ def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callabl
 
     def fB_min_function(z):
         return np.polyval(coeffs_min, z)
-
+    
     return fB, fB_min, fB_max, fB_min_function, fB_max_function
 
 
@@ -76,7 +78,8 @@ def load_raman_integral_extremes(cf,
 
 def build_lookup_integral_table_with_raman(cf,
                                            m_lo_truncation: int = 2,
-                                           ipulse: int = 1):
+                                           ipulse: int = 1,
+                                           recompute=False) -> Tuple[callable, callable]:
     # sampling the gvda, gvdb space, build the callable function
     # giving the correction integrals for fB_max and fB_min: integral(L/gvda, L/gvdb).
     _, _, _, fB_min, fB_max = load_fB(cf)
@@ -84,18 +87,25 @@ def build_lookup_integral_table_with_raman(cf,
     fiber_length = cf.fiber_length
     lld = np.linspace(1e-30, MAX_LLD, n_samples)
     ld = fiber_length / lld
+    lg.debug(f"Useful range of L/LD from LO time integral data: {lld[0]:.2e} to {lld[-1]:.2e}")
     raman_correction_grid_max = np.zeros((n_samples, n_samples))
     raman_correction_grid_min = np.zeros((n_samples, n_samples))
     
+    # plot max and min fB
+    # exit()
     # save to file with exhaustive namefile information
     filename = f"results/raman_correction_grid_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.npy"
-    if os.path.exists(filename):
+    
+    if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed Raman correction grid from {filename}")
         data = np.load(filename, allow_pickle=True).item()
-        return data['raman_correction_grid_max'], data['raman_correction_grid_min']
+        raman_correction_grid_max = data['raman_correction_grid_max']
+        raman_correction_grid_min = data['raman_correction_grid_min']
     else:
         lg.info(f"Computing Raman correction grid and saving to {filename}")
         for m_lo in range(m_lo_truncation+1):
+            add_min = np.zeros((n_samples, n_samples))
+            add_max = np.zeros((n_samples, n_samples))
             lg.info(f"Calculating m_lo={m_lo}")
             I_low_dataset = np.load(
                 f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
@@ -104,54 +114,90 @@ def build_lookup_integral_table_with_raman(cf,
                 for idb, ldb in enumerate(ld):
                     # apply symmetry: 
                     if idb < ida:
-                        raman_correction_grid_max[ida, idb] = raman_correction_grid_max[idb, ida]
-                        raman_correction_grid_min[ida, idb] = raman_correction_grid_min[idb, ida]
-                        continue
-                    lg.debug(f"Point {ida*n_samples+idb+1}/{n_samples*n_samples}")
-                    # this is also in normalized units
-                    def I_specific(x): return interp(x/lda, x/ldb)
-                    # compute the integral
-                    raman_correction_grid_max[ida, idb] += (
-                        quad(lambda x: I_specific(x) * fB_max(x), 0, fiber_length)[0] / fiber_length)**2
-                    raman_correction_grid_min[ida, idb] += (
-                        quad(lambda x: I_specific(x) * fB_min(x), 0, fiber_length)[0] / fiber_length)**2
-                    if m_lo != 0:
-                        raman_correction_grid_max[ida, idb] *= 2
-                        raman_correction_grid_min[ida, idb] *= 2
+                        add_max[ida, idb] = add_max[idb, ida]
+                        add_min[ida, idb] = add_min[idb, ida]
+                    else:
+                        lg.debug(f"Point {ida*n_samples+idb+1}/{n_samples*n_samples}, spanning LLDA={cf.fiber_length/lda:.2e}, LLDB={cf.fiber_length/ldb:.2e}")
+                        # this is also in normalized units
+                        def I_specific(x): return interp(x/lda, x/ldb)
+                        # compute the integral
+                        add_max[ida, idb] += (
+                            quad(lambda x: I_specific(x) * fB_max(x), 0, fiber_length)[0] / fiber_length)**2
+                        add_min[ida, idb] += (
+                            quad(lambda x: I_specific(x) * fB_min(x), 0, fiber_length)[0] / fiber_length)**2
+                        lg.trace(f"Contribution of the m_lo={m_lo} integral: max       {add_max[ida, idb]:.2e}, min {add_min[ida, idb]:.2e}")
+            if m_lo != 0:
+                add_max *= 2
+                add_min *= 2
+            raman_correction_grid_max += add_max
+            raman_correction_grid_min += add_min
+                
+            plt.figure(figsize=(4, 4))
+            plt.imshow(raman_correction_grid_max, extent=(lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+            plt.colorbar()
+            plt.title(f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+            plt.xlabel("L/LDa")
+            plt.ylabel("L/LD b")
+            plt.savefig(f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+            plt.close()
+            plt.figure(figsize = (4, 4))
+            plt.imshow(raman_correction_grid_min, extent=(lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+            plt.colorbar()
+            plt.title(f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+            plt.xlabel("L/LDa")
+            plt.ylabel("L/LD b")
+            plt.savefig(f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+            plt.close()
+            # raman_correction_grid_max = np.zeros((n_samples, n_samples))
+            # raman_correction_grid_min = np.zeros((n_samples, n_samples))
         np.save(filename, {
             'raman_correction_grid_max': raman_correction_grid_max,
             'raman_correction_grid_min': raman_correction_grid_min,
         })
         
         
-    # build the interpolator and return it
-    interp_func = RegularGridInterpolator(
+    ## build the interpolator and return it
+    ## checking
+    plt.figure(figsize=(4, 4))
+    plt.imshow(raman_correction_grid_max, extent=(lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+    plt.colorbar()
+    plt.title(f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+    plt.xlabel("L/LDa")
+    plt.ylabel("L/LD b")
+    plt.savefig(f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+    plt.close()
+    plt.figure(figsize = (4, 4))
+    plt.imshow(raman_correction_grid_min, extent=(lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+    plt.colorbar()
+    plt.title(f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+    plt.xlabel("L/LDa")
+    plt.ylabel("L/LD b")
+    plt.savefig(f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+    plt.close()
+    
+    interp_func_max = RegularGridInterpolator(
         (lld, lld),
         raman_correction_grid_max,
         bounds_error=False,
         fill_value=None)
-
-    def interp_func_wrapped_max(x, y):
-        assert (x <= 1.01 * lld[-1] and y <= 1.01 * lld[-1]
-                ), f"Input {x} exceeds the 110% of the interpolation range [{lld[0]}, {lld[-1]}]"
-        assert (x >= 0 and y >=
-                0), f"Input has negative values check that your LD is positive"
-        return interp_func([x, y])
-    interp_func = RegularGridInterpolator(
+    
+    interp_func_min = RegularGridInterpolator(
         (lld, lld),
         raman_correction_grid_min,
         bounds_error=False,
         fill_value=None)
 
-    def interp_func_wrapped_min(x, y):
-        assert (x <= 1.01 * lld[-1] and y <= 1.01 * lld[-1]
-                ), f"Input {x} exceeds the 110% of the interpolation range [{lld[0]}, {lld[-1]}]"
-        assert (x >= 0 and y >=
-                0), f"Input has negative values check that your LD is positive"
-        return interp_func([x, y])
-    return interp_func_wrapped_max, interp_func_wrapped_min
-
-
+    def func_wrapper(func):
+        def func_wrapper(x, y):
+            assert (x <= 1.01 * lld[-1] and y <= 1.01 * lld[-1]
+                    ), f"Input {x} exceeds the 110% of the interpolation range [{lld[0]}, {lld[-1]}]"
+            assert (x >= 0 and y >=
+                    0), f"Input has negative values check that your LD is positive"
+            return func((x, y))
+        return func_wrapper
+    
+    lg.warning(f"getting to the end")
+    return func_wrapper(interp_func_min), func_wrapper(interp_func_max)
 
 """
 ideal := no Raman, no GVD. It is flexible to also compute the GVD, but it is not recommended.
@@ -222,7 +268,7 @@ def gvd_correction(cf,
         # this is also in normalized units
         def I_specific(x): return interp(x/lda, x/ldb)
         lg.info(
-            f"We are calculating in the range L/LD=[1e-90, {fiber_length/lda:.1e}] for m_lo={m_lo}")
+            f"Correcting for L/LD=[~0, {fiber_length/lda:.1e}] for m_lo={m_lo}")
         # compute the integral
         added_noise = (quad(I_specific, 0, fiber_length)[0] / fiber_length)**2
         if m_lo != 0:
@@ -234,10 +280,10 @@ def apply_fit_correction(ps: Tuple[float, float, float],
                          lo_value: float,
                         ) -> Tuple[float, float, float]:
     old_lo_value = ps[0]
-    lg.info(f"Correcting N^circ (LO val): {old_lo_value} --> {lo_value}")
+    lg.info(f"Correcting N^circ (LO val): {old_lo_value:.2e} --> {lo_value:.2e}")
     lg.info(f"Correcting delta beta1a of a factor {old_lo_value/(lo_value)}")
     ps[0] = lo_value
-    ps[1] = ps[1] * old_lo_value / lo_value
+    # ps[1] = ps[1] * old_lo_value / lo_value
     return ps
 
 def fit_nlin(cf,
@@ -265,20 +311,33 @@ def fit_nlin(cf,
         cf.fiber_length/lda, cf.fiber_length/ldb)
     lo_value_min = raman_gvd_correction_min(
         cf.fiber_length/lda, cf.fiber_length/ldb)
-    r_lo_min, r_lo_max, r_hi_min, r_hi_max = load_raman_integral_extremes(cf)
+    r_lo_min, r_lo_max, _, _ = load_raman_integral_extremes(cf)
 
     raman_integral_fB_lo = raman_integral(cf, "LO", fB)
     raman_integral_fB_hi = raman_integral(cf, "HI", fB)
+    # special case of zero GVD
+    # if gvda == 0.0 and gvdb == 0.0:
+    #     # we compute the fB effect using 
+    #     lo_value_fB = raman_integral_fB_lo
+    # else: 
     lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
-        (lo_value_max - lo_value_min) + lo_value_min    
+        (lo_value_max - lo_value_min) + lo_value_min
+
+    lg.debug(f"LO value: {lo_value_fB:.2e}")
     ps_ramanless = apply_fit_correction(ps_ideal.copy(), lo_value_perfect)
-    lg.info(f"Ramanless fit parameters (no Raman, with GVD): {ps_ramanless}")
+    lg.debug(f"LO value computed in the old way: {(ps_ramanless[0]*raman_integral_fB_lo):.2e}")
     ps_ramanful = apply_fit_correction(ps_ideal.copy(), lo_value_fB)
+    
+    ## applying the Raman value is not the same as multiplying ever
     # build the linear composition to match the HI correction (in form of a simple Raman integral)
     def nlin_megafit(d):
-        raise NotImplementedError("Raman not implemented yet")
-        xi = (d-LLW_MIN)/(LLW_MAX-LLW_MIN)
-        return softplus2(d * cf.fiber_length * cf.baud_rate, *ps_ramanful) * (1-xi) + softplus2(d * cf.fiber_length * cf.baud_rate, *ps_ramanless) * xi * raman_integral_fB_hi
+        d = d * cf.fiber_length * cf.baud_rate # FIXME apply normalization..
+        DGD_MAX = LLW_MAX
+        DGD_MIN = LLW_MIN
+        xi = (d-DGD_MIN)/(DGD_MAX-DGD_MIN)
+        return softplus2(d, *ps_ramanful)
+        return softplus2(d, *ps_ramanless) * raman_integral_fB_lo
+        return softplus2(d, *ps_ramanful) * (1-xi) + softplus2(d, *ps_ramanless) * xi * raman_integral_fB_hi
     return nlin_megafit
 
 """

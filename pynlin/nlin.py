@@ -257,8 +257,8 @@ def compute_all_collisions_time_integrals(
         lg.debug(
                 f"    z_axis = ({z_axis_list[-1][0]:.2e}, {z_axis_list[-1][-1]:.2e}, {len(z_axis_list[-1]):5d})")
     if pulse.num_symbols != n_z_points:  # does this make sense?
-        lg.warning(f"\033[91m warn: \033[0m pulse num_symbols ({pulse.num_symbols}) != n_z_points ({n_z_points})!")
-        lg.warning("\033[91m warn: \033[0m overriding the pulse number of samples!")
+        lg.warning(f"pulse num_symbols ({pulse.num_symbols}) != n_z_points ({n_z_points})!")
+        lg.warning("overriding the pulse number of samples!")
         pulse.num_symbols = n_z_points
     lg.debug("  Done.")
     
