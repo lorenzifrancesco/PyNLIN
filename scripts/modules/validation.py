@@ -478,7 +478,7 @@ if __name__ == "__main__":
     simple_plot_threshold(
         gvda = 30.0e-27,
         gvdb = 30.0e-27,
-        fB_mode="perfect",
+        fB_mode="max",
         recompute=False,
         ipulse=1,
         m_lo_truncation=3)

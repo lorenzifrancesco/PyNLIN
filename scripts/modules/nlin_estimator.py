@@ -283,7 +283,7 @@ def apply_fit_correction(ps: Tuple[float, float, float],
     lg.info(f"Correcting N^circ (LO val): {old_lo_value:.2e} --> {lo_value:.2e}")
     lg.info(f"Correcting delta beta1a of a factor {old_lo_value/(lo_value)}")
     ps[0] = lo_value
-    # ps[1] = ps[1] * old_lo_value / lo_value
+    ps[1] = ps[1] * old_lo_value / lo_value
     return ps
 
 def fit_nlin(cf,
@@ -303,7 +303,7 @@ def fit_nlin(cf,
 
     if np.all(fB == 1.0):
         lg.info("You are using a flat fB, no Raman correction will be applied")
-        ps = apply_fit_correction(ps_ideal.copy(), lo_value_perfect)
+        ps = apply_fit_correction(ps_ideal.copy(), lo_value_perfect) # FIXME this kinda breaks when the disperions are high
         return lambda dgd: softplus2(dgd * cf.fiber_length * cf.baud_rate, *ps) 
     
     # correct in the LO regime (Raman + GVD)
@@ -322,7 +322,6 @@ def fit_nlin(cf,
     # else: 
     lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
         (lo_value_max - lo_value_min) + lo_value_min
-
     lg.debug(f"LO value: {lo_value_fB:.2e}")
     ps_ramanless = apply_fit_correction(ps_ideal.copy(), lo_value_perfect)
     lg.debug(f"LO value computed in the old way: {(ps_ramanless[0]*raman_integral_fB_lo):.2e}")
@@ -335,9 +334,9 @@ def fit_nlin(cf,
         DGD_MAX = LLW_MAX
         DGD_MIN = LLW_MIN
         xi = (d-DGD_MIN)/(DGD_MAX-DGD_MIN)
+        return softplus2(d, *ps_ramanful) * (1-xi) + softplus2(d, *ps_ramanless) * xi * raman_integral_fB_hi
         return softplus2(d, *ps_ramanful)
         return softplus2(d, *ps_ramanless) * raman_integral_fB_lo
-        return softplus2(d, *ps_ramanful) * (1-xi) + softplus2(d, *ps_ramanless) * xi * raman_integral_fB_hi
     return nlin_megafit
 
 """
