@@ -10,7 +10,7 @@ from matplotlib import rc
 import pynlin.wdm
 from pynlin.utils import nu2lambda
 from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay, load_rms_gvd
-from scripts.modules.validation import get_raman_corrections, get_fit_coefficients, softplus2
+from scripts.modules.validation import get_raman_corrections, ideal_fit_coefficients, softplus2
 from numpy import polyval
 from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec

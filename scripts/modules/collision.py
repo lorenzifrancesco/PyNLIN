@@ -24,7 +24,7 @@ formatter.set_powerlimits([0, 0])
 
 PULSE_NAMES = ["gaussian", "nyquist"]
 PULSE_LINE_STYLE = ["-", "--"]
-
+MAX_LLD = 2.3
         
 def get_space_integrals(m, z, I):
     X0mm = pynlin.nlin.X0mm_space_integral(z, I, amplification_function=None)
@@ -197,7 +197,7 @@ def get_I_low(fiber, m_lo, recompute=False):
         samples_per_symbol=32,
     )
     z = np.linspace(0, fiber.length, 2)
-    lld_range = np.linspace(1e-30, 2.3, 50)  # HARDCODED
+    lld_range = np.linspace(1e-30, MAX_LLD, 50)  # HARDCODED
 
     LD_min = fiber.length / lld_range[-1]
     beta2_max = 1/(cf.baud_rate**2 * LD_min)

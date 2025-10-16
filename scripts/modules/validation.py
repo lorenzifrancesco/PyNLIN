@@ -1,5 +1,6 @@
-from scripts.modules.nlin_estimator import get_raman_corrections, get_fit_coefficients, softplus2
-from scripts.modules.nlin_estimator import LLW_MAX, LLW_MIN, get_raman_corrections, get_fit_coefficients, softplus2, load_fB, correct_fit_coefficients, build_I_low_interpolator
+from scripts.modules.nlin_estimator import ideal_fit_coefficients, softplus2, fit_nlin, build_lookup_integral_table_with_raman, LLW_MAX, LLW_MIN, ideal_fit_coefficients, softplus2, load_fB
+from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
+from scripts.modules.log_init import init_logging
 import matplotlib.colors as mcolors
 from pynlin.collisions import get_m_values, get_collision_location
 from scipy.interpolate import interp1d
@@ -7,14 +8,11 @@ import scripts.modules.cfg as cfg
 from pynlin.nlin import compute_all_collisions_time_integrals, X0mm_space_integral
 from pynlin.pulses import *
 from pynlin.fiber import *
-from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
-import pynlin.wdm
 from matplotlib import rc
 import matplotlib.pyplot as plt
 import os
 import numpy as np
 from loguru import logger as lg
-from scripts.modules.log_init import init_logging
 init_logging()
 
 
@@ -140,34 +138,35 @@ def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
     return nlin_hi, nlin_lo
 
 
-def compute_fitted_nlin(gvda: float,
-                        gvdb: float,
-                        fB_mode: str,
-                        ipulse: int,
-                        recompute: bool = False,):
-    # this should use the methods from the nlin_estimator
-    cf_path = "./input/mmf.toml"
-    nc_path = "./input/numerical_config.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
-    nc = cfg.load_nc_toml_to_struct(nc_path)
+# def compute_fitted_nlin(gvda: float,
+#                         gvdb: float,
+#                         fB_mode: str,
+#                         ipulse: int,
+#                         recompute: bool = False,):
+#     # this should use the methods from the nlin_estimator
+#     cf_path = "./input/mmf.toml"
+#     nc_path = "./input/numerical_config.toml"
+#     cf = cfg.load_toml_to_struct(cf_path)
+#     nc = cfg.load_nc_toml_to_struct(nc_path)
 
-    n_samples_analytic = 500
-    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
-    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
-    dgd2 = nc.dgd2_n
-    dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
+#     n_samples_analytic = 500
+#     nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+#     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+#     dgd2 = nc.dgd2_n
+#     dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
 
-    x_norm = cf.fiber_length * cf.baud_rate
-    y_norm = x_norm**(-2)
+#     x_norm = cf.fiber_length * cf.baud_rate
+#     y_norm = x_norm**(-2)
 
-    # this is the smart fit.
-    ps = get_fit_coefficients(gvda=0.0, gvdb=0.0, ipulse=ipulse)
-    lda = 1 / (gvda * cf.baud_rate**2) if gvda != 0 else 1e30
-    ldb = 1 / (gvdb * cf.baud_rate**2) if gvdb != 0 else 1e30
+#     # this is the smart fit.
+#     ps = ideal_fit_coefficients(gvda=0.0, gvdb=0.0, ipulse=ipulse)
+#     lda = 1 / (gvda * cf.baud_rate**2) if gvda != 0 else 1e30
+#     ldb = 1 / (gvdb * cf.baud_rate**2) if gvdb != 0 else 1e30
     
-    ps = correct_fit_coefficients(ps, lda, ldb, cf.fiber_length, ipulse)
-    fit_nlin = softplus2(dgds_analytic * x_norm, *ps) / y_norm
-    return fit_nlin
+#     lo_value = gvd_correction(lda, ldb, cf.fiber_length, ipulse=ipulse)
+#     ps = apply_fit_correction(ps, lo_value)
+#     fitted_nlin = softplus2(dgds_analytic * x_norm, *ps) / y_norm
+#     return fitted_nlin
 
 
 def simple_plot_threshold(gvda: float = 0.0,
@@ -203,20 +202,34 @@ def simple_plot_threshold(gvda: float = 0.0,
 
     dgds_numeric = np.logspace(
         np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
-    assert (fB_mode == "perfect")
-
+    # assert (fB_mode == "perfect")
+    if fB_mode == "perfect":
+        fB = np.array([1.0]*100)  # dummy, not used since fB_mode is perfect
+    else: 
+        raise NotImplementedError("Only perfect fB_mode is implemented in this simple plot")
+    
     # ----- call the computation functions -----
-    # -- numeric
+    # -- numeric (compute_numeric computes all the fB_modes)
     compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
     nlin_numeric = np.load(
         f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
     lg.info(nlin_numeric)
     lg.info(nlin_numeric * y_norm)
     
-    # -- analytic
-    nlin_fitted = compute_fitted_nlin(
-        gvda=gvda, gvdb=gvdb, fB_mode="perfect", ipulse=ipulse, recompute=recompute)
+    raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(cf, m_lo_truncation=2)
+    # -- analytic and fitted
+    nlin_fitted = fit_nlin(cf, 
+                           gvda, 
+                           gvdb, 
+                           fB, 
+                           raman_gvd_correction_min, 
+                           raman_gvd_correction_max,
+                           ipulse=ipulse, m_lo_truncation=2)
+    nlin_fitted_data = nlin_fitted(dgds_analytic) / y_norm
     nlin_hi, nlin_lo = compute_asymptotic_nlin(ipulse=ipulse)
+
+    lg.debug("fit nlin")
+    lg.debug(nlin_fitted_data)
 
     rc('text', usetex=True)
     dpi = 300
@@ -225,7 +238,7 @@ def simple_plot_threshold(gvda: float = 0.0,
              color="green", lw=1, ls="--", label='Fit')
     plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
              color="green", lw=1, ls="--", label='Fit')
-    plt.plot(dgds_analytic * x_norm, nlin_fitted * y_norm,
+    plt.plot(dgds_analytic * x_norm, nlin_fitted_data * y_norm,
              color="green", lw=1, ls="-", label='Fit')
     plt.scatter(dgds_numeric * x_norm, nlin_numeric * y_norm,
                 label='Numeric', color="green", marker="*", s=20, lw=1)
@@ -250,6 +263,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     return
 
 
+# FIXME need to apply Raman
 def plot_threshold(
     recompute: bool = False,
     use_fB: bool = False,
@@ -271,14 +285,32 @@ def plot_threshold(
     # ----------------------------------
     # plotting the threshold
     # ----------------------------------
-    cf = cfg.load_toml_to_struct("./input/mmf.toml")
+    cf_path = "./input/mmf.toml"  # FIXME repeated code
+    nc_path = "./input/numerical_config.toml"
+    cf = cfg.load_toml_to_struct(cf_path)
+    nc = cfg.load_nc_toml_to_struct(nc_path)
+
+    x_norm = cf.fiber_length * cf.baud_rate
+    y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
+    n_samples_analytic = 500
+    nc.dgd1   = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_g = nc.dgd2_n
+    dgd2 = nc.dgd2_n
+    dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
+
+    dgds_numeric_n = np.logspace(
+        np.log10(nc.dgd1), np.log10(dgd2), nc.n_samples_numeric_n)
+    dgds_numeric_g = np.logspace(
+        np.log10(nc.dgd1), np.log10(dgd2), nc.n_samples_numeric_g)
+    
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = (cf.fiber_length * cf.baud_rate)**2
     plt.figure(figsize=(3.6, 3))
     color_modes = [adjust_luminosity(
         'magenta', 0.8), adjust_luminosity('cyan', 0.8), 'green']
 
-    ps_g, ps_n = get_fit_coefficients(
+    ps_g, ps_n = ideal_fit_coefficients(
         fB_simple_interpolation=fB_simple_interpolation, gvd=0.0)
 
     # FINALIZING FIXME
