@@ -241,8 +241,8 @@ def simple_plot_threshold(gvda: float = 0.0,
     plt.figure(figsize=(3.6, 3))
     # plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
     #          color="green", lw=1, ls="--", label='Fit')
-    # plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
-    #          color="green", lw=1, ls="--", label='Fit')
+    plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
+             color="green", lw=1, ls="--", label='Fit')
     plt.plot(dgds_analytic * x_norm, nlin_fitted_data * y_norm,
              color="green", lw=1, ls="-", label='Fit')
     plt.scatter(dgds_numeric * x_norm, nlin_numeric * y_norm,
@@ -256,10 +256,9 @@ def simple_plot_threshold(gvda: float = 0.0,
     # plt.ylim(ymin, 1.0)
     if fB_mode == "perfect":
         pass
-        # plt.ylim([0.5e-3, 0.11])
+        plt.ylim([0.5e-3, 0.11])
     else:
-        pass
-        # plt.ylim([0.7e-2, 1])
+        plt.ylim([0.7e-3, 0.1])
     plt.xlabel(r'$L/L_W$')
     plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
     plt.tight_layout()
@@ -477,7 +476,7 @@ def plot_threshold(
 if __name__ == "__main__":
     simple_plot_threshold(
         gvda = 30.0e-27,
-        gvdb = 30.0e-27,
+        gvdb = 0.0e-27,
         fB_mode="max",
         recompute=False,
         ipulse=1,
