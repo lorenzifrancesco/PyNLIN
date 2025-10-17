@@ -334,6 +334,7 @@ def fit_nlin(cf,
         DGD_MAX = LLW_MAX
         DGD_MIN = LLW_MIN
         xi = (d-DGD_MIN)/(DGD_MAX-DGD_MIN)
+        return softplus2(d, *ps_ramanful) ** (1-xi) * ((softplus2(d, *ps_ramanless) * raman_integral_fB_hi))** xi
         return softplus2(d, *ps_ramanful) * (1-xi) + softplus2(d, *ps_ramanless) * xi * raman_integral_fB_hi
         return softplus2(d, *ps_ramanful)
         return softplus2(d, *ps_ramanless) * raman_integral_fB_lo
