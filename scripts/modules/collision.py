@@ -52,7 +52,7 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
         m1 = -10
         m2 = -90
         dgd_hi = 100e-15
-        beta2a = -100e-27  # here is the problem !?
+        beta2a = -100e-27
         beta2b = -1.0e-50
         # beta2bar = beta2rms(beta2a, beta2b)
         assert pulse.baud_rate == cf.baud_rate
@@ -285,16 +285,24 @@ def get_systems_dispersions():
     return X_flat, Y_flat
     
 
-def plot_dispersion_analysis(fiber, m_lo=3, recompute=True, with_system_data=False):
+def plot_dispersion_analysis(fiber, 
+                             m_lo=3, 
+                             recompute=True, 
+                             with_system_data=False):
     lg.debug("Plotting Fig.1 (pulse collisions)...")
     I_low_values, lld_range = get_I_low(fiber, m_lo, recompute=recompute)
     if with_system_data:
         X, Y = get_systems_dispersions()
         
     for ipulse, I_low_values in enumerate(I_low_values):
-        plt.figure(figsize=(4, 4.3))
+        plt.figure(figsize=(3, 2.3))
+        if ipulse == 0:
+            vmax = 0.36
+        else:
+            vmax = 0.6
         contour = plt.contourf(lld_range, lld_range, np.clip(
-            I_low_values, a_min=-10, a_max=0.91), levels=20, cmap='viridis')
+            I_low_values, a_min=-10, a_max=0.91), levels=20, cmap='viridis', 
+                               vmin=0, vmax = vmax)
         contour_lines = plt.contour(lld_range, lld_range, np.clip(
             I_low_values, a_min=-10, a_max=0.6), levels=5, colors="w")
         plt.clabel(contour_lines, inline=True, fontsize=8)
@@ -302,8 +310,10 @@ def plot_dispersion_analysis(fiber, m_lo=3, recompute=True, with_system_data=Fal
         if with_system_data:
             plt.scatter(X, Y, marker=".", s = 0.011, color='white', alpha=0.15)
            
-        plt.xlabel(r'$|\beta_{2A}|LT^{-2}$')
-        plt.ylabel(r'$|\beta_{2B}|LT^{-2}$')
+        # plt.xlabel(r'$|\beta_{2A}|LT^{-2}$')
+        # plt.ylabel(r'$|\beta_{2B}|LT^{-2}$')
+        plt.xlabel(r'$z/L_{DA}$')
+        plt.ylabel(r'$z/L_{DB}$')
         # plt.colorbar(label=r'$I_{0;AB}(\bar{L}_{D0}) \cdot T$')
         ax = plt.gca()
         ax.set_aspect('equal')
@@ -314,10 +324,10 @@ def plot_dispersion_analysis(fiber, m_lo=3, recompute=True, with_system_data=Fal
         ax.set_ylim(0, 2)
         ax.set_xticks(np.linspace(0, 2, 5))
         ax.set_yticks(np.linspace(0, 2, 5))
-        plt.title(f"m = {m_lo}")
+        # plt.title(f"m = {m_lo}")
         plt.tight_layout()
         plt.savefig("media/differential_dispersion_" +
-                    PULSE_NAMES[ipulse]+".pdf", dpi=300)
+                    PULSE_NAMES[ipulse]+"_m"+str(m_lo)+".pdf", dpi=300, bbox_inches="tight", pad_inches=0)
         lg.debug(
             f"Saved dispersion in media/differential_dispersion_{PULSE_NAMES[ipulse]}.pdf")
         plt.clf()
@@ -339,9 +349,10 @@ if __name__ == "__main__":
     wdm = WDM()
 
     for m_lo in [0, 1, 2, 3, 4, 5]:
-        get_I_low(fiber, m_lo, recompute=True)
-    # Run both plots
-    plot_dispersion_analysis(fiber, recompute=True)
+        plot_dispersion_analysis(fiber, 
+                                 recompute=False,
+                                 m_lo=m_lo, 
+                                 with_system_data=False)
     exit()
     plot_illustrative(fiber, wdm, cf, recompute=False)
     

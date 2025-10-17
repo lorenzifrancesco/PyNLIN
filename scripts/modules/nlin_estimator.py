@@ -284,12 +284,14 @@ def apply_plateau_correction(ps: Tuple[float, float, float],
     lg.info(f"Correcting delta beta 1 of a factor {old_lo_value/(lo_value)}")
     ps[0] = lo_value
     ps[1] = ps[1] * old_lo_value / lo_value
+    # ps[2] = ps[2] * np.sqrt(lo_value / old_lo_value)
     return ps
 
 def apply_turning_point_correction(ps: Tuple[float, float, float],
                                    hi_factor: float):
     lg.info(f"Correcting delta beta 1 of a factor {hi_factor}")
     ps[1] = ps[1] * hi_factor # beware of the sign of the correction (in log units)
+    # ps[2] = ps[2] / np.sqrt(hi_factor)
     return ps
 
 def fit_nlin(cf,
@@ -309,7 +311,7 @@ def fit_nlin(cf,
 
     if np.all(fB == 1.0):
         lg.info("You are using a flat fB, no Raman correction will be applied")
-        ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect) # FIXME this kinda breaks when the disperions are high
+        ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
         return lambda dgd: softplus2(dgd * cf.fiber_length * cf.baud_rate, *ps) 
     
     # correct in the LO regime (Raman + GVD)

@@ -1,4 +1,4 @@
-from scripts.modules.nlin_estimator import ideal_fit_coefficients, softplus2, fit_nlin, build_lookup_integral_table_with_raman, LLW_MAX, LLW_MIN, ideal_fit_coefficients, softplus2, load_fB
+from scripts.modules.nlin_estimator import ideal_fit_coefficients, softplus2, fit_nlin, build_lookup_integral_table_with_raman, LLW_MAX, LLW_MIN, ideal_fit_coefficients, softplus2, load_fB, raman_integral
 from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
 from scripts.modules.log_init import init_logging
 import matplotlib.colors as mcolors
@@ -78,7 +78,7 @@ def compute_numeric_nlin(gvda: float,
             z, I, m = compute_all_collisions_time_integrals(
                 fiber, pulse, dgd, gvda, gvdb, 
                 use_multiprocessing=True, 
-                partial_collisions_margin=5)
+                partial_collisions_margin=10)
 
             X0mm     = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
             X0mm_max = X0mm_space_integral(z, I, amplification_function=fB_max_func)
@@ -267,6 +267,29 @@ def simple_plot_threshold(gvda: float = 0.0,
     return
 
 
+def fB_undepleted(z):
+    """
+    f_B(z) = exp[-α_s z + (g * Pp_in * e^{-α_p L} / α_p) * (e^{α_p z} - 1)]
+    Parameters are tuned so f_B(70 km) ≈ f_B(0) = 1.
+    """
+    z = z/ 1000
+    # --- Parameters giving approximate gain-loss balance ---
+    alpha_s = 0.023   # signal loss [1/km]
+    alpha_p = 0.12    # pump loss [1/km]
+    g       = 0.95    # gain coefficient [1/(W·km)]
+    Pp_in   = 0.20    # pump input power [W]
+    L       = 70.0    # fiber length [km]
+
+    z = np.asarray(z, dtype=float)
+    if np.any((z < 0) | (z > L)):
+        raise ValueError(f"z must be between 0 and {L} km")
+
+    exp_neg_apL = np.exp(-alpha_p * L)
+    expm1_apz   = np.expm1(alpha_p * z)
+    exponent = -alpha_s * z + (g * Pp_in * exp_neg_apL / alpha_p) * expm1_apz
+    return np.exp(exponent)
+
+
 # FIXME need to apply Raman
 def plot_threshold(
     recompute: bool = False,
@@ -274,153 +297,154 @@ def plot_threshold(
     fB_simple_interpolation: bool = False,
     gvda: float = 0.0,
     gvdb: float = 0.0,
+    m_lo_truncation: int = 0
 ):
     if not use_fB:
         fB_simple_interpolation = True
         lg.trace("Disabling fB_simple_interpolation since use_fB is False")
 
-    rc('text', usetex=True)
-    dpi = 300
-
-    compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=0, recompute=recompute)
-    compute_fitted_nlin(gvda=gvda, gvdb=gvdb, fB_mode="perfect",
-                        ipulse=0, recompute=recompute)
-
-    # ----------------------------------
-    # plotting the threshold
-    # ----------------------------------
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
     cf = cfg.load_toml_to_struct(cf_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
-
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
     n_samples_analytic = 500
     nc.dgd1   = LLW_MIN / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_g = nc.dgd2_n
+    n_samples_numeric = nc.n_samples_numeric_n
+    lg.warning(n_samples_numeric)
     dgd2 = nc.dgd2_n
     dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
-
-    dgds_numeric_n = np.logspace(
-        np.log10(nc.dgd1), np.log10(dgd2), nc.n_samples_numeric_n)
-    dgds_numeric_g = np.logspace(
-        np.log10(nc.dgd1), np.log10(dgd2), nc.n_samples_numeric_g)
+    dgds_numeric = np.logspace(
+            np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
+    # undepleted fB
+    z_axis = np.linspace(0.0, cf.fiber_length, 100)
+    # fB = fB_undepleted(z_axis)
     
-    x_norm = cf.fiber_length * cf.baud_rate
-    y_norm = (cf.fiber_length * cf.baud_rate)**2
-    plt.figure(figsize=(3.6, 3))
-    color_modes = [adjust_luminosity(
-        'magenta', 0.8), adjust_luminosity('cyan', 0.8), 'green']
-
-    ps_g, ps_n = ideal_fit_coefficients(
-        fB_simple_interpolation=fB_simple_interpolation, gvd=0.0)
-
-    # FINALIZING FIXME
-    lg.trace("Fit coefficients (gauss):", ps_g)
-    lg.trace("Fit coefficients (nyquist):", ps_n)
-    # exit()
-    for im, mode in enumerate(modes):
-        na_nlin = L / (T * dgds_numeric_g)
-        if mode == "max":
-            na_nlin = na_nlin * rcal_hi_max
-        elif mode == "min":
-            na_nlin = na_nlin * rcal_hi_min
-
-        # gauss = np.ones_like(dgds_analytic) * np.sqrt(np.pi) * (LD_eff / (T * np.sqrt(2 * np.pi)) * np.arcsinh(L / LD_eff))**2
-        gauss = np.ones_like(dgds_analytic) * (L / T)**2 / np.sqrt(2 * np.pi)
-        nyquist = np.ones_like(dgds_analytic) * 4 / 9 / y_norm
-        if use_fB:
-            rcal_hi = rcal_hi_max if mode == "max" else rcal_hi_min
-            rcal_lo = rcal_lo_max if mode == "max" else rcal_lo_min
-            gauss *= rcal_lo
-            nyquist *= rcal_lo
-
-        plt.plot(dgds_numeric_g * x_norm, na_nlin * y_norm,
-                 lw=1, color=adjust_luminosity('orange', 0.9))
-        if use_fB:
-            # plt.plot(dgds_analytic * x_norm, gauss * y_norm, color=color_modes[im], lw=1, ls=":", label=r'$N^>$')
-            # plt.plot(dgds_analytic * x_norm, nyquist * y_norm, color=color_modes[im], ls="--", lw=1, label='Marco')
-            pass
+    # nlin_fitted = []
+    # nlin_fitted_data = []
+    # nlin_hi = []
+    # nlin_lo = []
+    _, fB_min, fB_max, _, _ = load_fB(cf)
+    
+    fB = fB_max
+    fB_mode = "max"
+    
+    for ipulse in [0, 1]:
+        ipulse=1
+        if ipulse == 0:
+            pulse_shape = "gaussian"
         else:
-            plt.plot(dgds_analytic * x_norm, gauss * y_norm,
-                     color="blue", lw=1, ls=":", label=r'$N^>$')
-            plt.plot(dgds_analytic * x_norm, nyquist * y_norm,
-                     color="green", ls="--", lw=1, label='Marco')
-        lowest_dgd = 0.0
+            pulse_shape = "nyquist"
+        
+        if ipulse == 0:
+            dgd2 = nc.dgd2_g
+            n_samples_numeric = nc.n_samples_numeric_g
+        else:
+            dgd2 = nc.dgd2_n
+            n_samples_numeric = nc.n_samples_numeric_n
+
+        dgds_numeric = np.logspace(
+            np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
+        # assert (fB_mode == "perfect")
+        
+        
+        # ----- call the computation functions -----
+        # -- numeric (compute_numeric computes all the fB_modes)
+        compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
+        nlin_numeric_bare = np.load(
+            f"results/partial_nlin_{pulse_shape}_perfect_0.0_0.0.npy")
+        nlin_numeric_gvd = np.load(
+            f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
+        nlin_numeric_gvd_raman = np.load(
+            f"results/partial_nlin_{pulse_shape}_{fB_mode}_{gvda}_{gvdb}.npy")
+        nlin_numeric_raman = np.load(
+            f"results/partial_nlin_{pulse_shape}_{fB_mode}_0.0_0.0.npy")
+        # lg.info(nlin_numeric)
+        # lg.info(nlin_numeric * y_norm)
+        
+        raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(cf, m_lo_truncation=m_lo_truncation, recompute=False)
+        
+        # -- analytic and fitted
+        nlin_fit_bare = (fit_nlin(cf,
+                            0.0,
+                            0.0,
+                            np.ones_like(fB),
+                            raman_gvd_correction_min, 
+                            raman_gvd_correction_max,
+                            ipulse=ipulse, m_lo_truncation=m_lo_truncation))
+        nlin_fit_gvd = (fit_nlin(cf,
+                            gvda,
+                            gvdb,
+                            np.ones_like(fB),
+                            raman_gvd_correction_min, 
+                            raman_gvd_correction_max,
+                            ipulse=ipulse, m_lo_truncation=m_lo_truncation))
+        nlin_fit_gvd_raman = (fit_nlin(cf,
+                            gvda,
+                            gvdb,
+                            fB, # FIXME adapt
+                            raman_gvd_correction_min, 
+                            raman_gvd_correction_max,
+                            ipulse=ipulse, m_lo_truncation=m_lo_truncation))
+        nlin_fit_raman = (fit_nlin(cf,
+                            0.0,
+                            0.0,
+                            fB, # FIXME adapt
+                            raman_gvd_correction_min, 
+                            raman_gvd_correction_max,
+                            ipulse=ipulse, m_lo_truncation=m_lo_truncation))
+        # nlin_fitted_data = (nlin_fitted(dgds_analytic) / y_norm)
+        n_hi, n_lo = compute_asymptotic_nlin(ipulse=ipulse)
+        nlin_hi = (n_hi)
+        nlin_hi_correct = nlin_hi * raman_integral(cf, "HI", fB)
+        nlin_lo = (n_lo)
+    
+        rc('text', usetex=True)
+        dpi = 300
+        # ----------------------------------
+        # plotting the threshold
+        # ----------------------------------
+        plt.figure(figsize=(3.6, 2.5))
+        color_modes = [adjust_luminosity(
+            'magenta', 0.8), adjust_luminosity('cyan', 0.8), 'green']
+        # exit()
+        plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm,
+                lw=1, color=adjust_luminosity('green', 0.9), ls='--')
+        plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm,
+                lw=1, color=adjust_luminosity('orange', 0.9))
+        plt.plot(dgds_analytic * x_norm, nlin_hi_correct * y_norm,
+                lw=1, color=adjust_luminosity('orange', 0.9))
+
         lw = 1
         ss = 20
-
-        for ix, gvd in enumerate(gvds):
-            partial_B2g = np.load(
-                f"results/partial_nlin_gaussian_{mode}_{gvda}_{gvdb}.npy")
-            partial_B2n = np.load(
-                f"results/partial_nlin_nyquist_{mode}_{gvda}_{gvdb}.npy")
-
-            if fB_simple_interpolation and use_fB:
-                d_lo = dgds_analytic[0]
-                d_hi = dgds_analytic[-1]
-                dgd_span = d_hi - d_lo
-                fitted_data_g = softplus2(dgds_analytic * x_norm, *ps_g[0, :]) * (
-                    (dgds_analytic - d_lo) * rcal_hi - (dgds_analytic - d_hi) * rcal_lo) / dgd_span
-                fitted_data_n = softplus2(dgds_analytic * x_norm, *ps_n[0, :]) * (
-                    (dgds_analytic - d_lo) * rcal_hi - (dgds_analytic - d_hi) * rcal_lo) / dgd_span
-                # fitted_data_g_flat = softplus2(
-                #     dgds_analytic * x_norm, *ps_g[0, :])
-                # fitted_data_n_flat = softplus2(
-                #     dgds_analytic * x_norm, *ps_n[0, :])
-            else:
-                # here we have two fitting choices: fit max and min, or fit only min and just substitute the max shifting the min (JLT).
-                fitting_method = "shift_min_to_max"  # "fit_both" or "shift_min_to_max"
-                if fitting_method == "shift_min_to_max":
-                    modified_ps_g = ps_g[0, :].copy()
-                    modified_ps_g[0] *= (ps_g[im, 0] / ps_g[0, 0])
-                    modified_ps_n = ps_n[0, :].copy()
-                    modified_ps_n[0] *= (ps_n[im, 0] / ps_n[0, 0])
-                    fitted_data_g = softplus2(
-                        dgds_analytic * x_norm, *modified_ps_g)
-                    fitted_data_n = softplus2(
-                        dgds_analytic * x_norm, *modified_ps_n)
-                else:
-                    fitted_data_g = softplus2(
-                        dgds_analytic * x_norm, *ps_g[im, :])
-                    fitted_data_n = softplus2(
-                        dgds_analytic * x_norm, *ps_n[im, :])
-
-            if ix == 0:
-                lowest_dgd = partial_B2g[0]
-            plt.plot(dgds_analytic * x_norm,
-                     fitted_data_g, color="gray", lw=0.6)
-            plt.plot(dgds_analytic * x_norm, fitted_data_n,
-                     color="gray", lw=0.6, ls="-.")
-
-            if use_fB:
-                plt.scatter(dgds_numeric_g * x_norm, partial_B2g * y_norm, label='Gauss.' +
-                            str(gvd), color=color_modes[im], marker="x", s=ss, lw=lw)
-                plt.scatter(dgds_numeric_n * x_norm, partial_B2n * y_norm, label='Nyq.' +
-                            str(gvd), color=color_modes[im], marker="*", s=ss, lw=lw)
-            else:
-                plt.scatter(dgds_numeric_g * x_norm, partial_B2g * y_norm,
-                            label='Gauss.' + str(gvd), color="blue", marker="x", s=ss, lw=lw)
-                plt.scatter(dgds_numeric_n * x_norm, partial_B2n * y_norm,
-                            label='Nyq.' + str(gvd), color="green", marker="*", s=ss, lw=lw)
-
+        plt.plot(dgds_analytic * x_norm, nlin_fit_bare(dgds_analytic), color="gray", lw=0.6)
+        plt.plot(dgds_analytic * x_norm, nlin_fit_gvd(dgds_analytic), color="gray", lw=0.6)
+        plt.plot(dgds_analytic * x_norm, nlin_fit_gvd_raman(dgds_analytic), color="gray", lw=0.6)
+        plt.plot(dgds_analytic * x_norm, nlin_fit_raman(dgds_analytic), color="gray", lw=0.6)
+        plt.scatter(dgds_numeric * x_norm, nlin_numeric_bare * y_norm, label='Gauss.', color="green", marker=".", s=ss, lw=lw)
+        plt.scatter(dgds_numeric * x_norm, nlin_numeric_gvd * y_norm, label='Gauss.', color="green", marker="+", s=ss, lw=lw)
+        plt.scatter(dgds_numeric * x_norm, nlin_numeric_gvd_raman * y_norm, label='Gauss.', color="green", marker=(6, 2, 0), s=ss, lw=lw)
+        plt.scatter(dgds_numeric * x_norm, nlin_numeric_raman * y_norm, label='Gauss.', color="green", marker="x", s=ss, lw=lw)
+        
         plt.xscale('log')
         plt.yscale('log')
         ymin, ymax = plt.ylim()
         plt.ylim(ymin, 1.0)
-        if use_fB:
-            plt.ylim([0.5e-3, 0.11])
-        else:
-            plt.ylim([0.7e-2, 1])
+        # if use_fB:
+            # plt.ylim([0.5e-3, 0.11])
+        # else:
+            # plt.ylim([0.7e-2, 1])
         plt.xlabel(r'$L/L_W$')
         plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
         plt.tight_layout()
-        out_pdf = "media/2-threshold_raman.pdf" if use_fB else "media/2-threshold.pdf"
-        plt.savefig(out_pdf, dpi=dpi)
+        out_pdf = "media/2-threshold_raman-all.pdf"
+        plt.savefig(out_pdf, dpi=dpi, bbox_inches="tight", pad_inches=0)
         lg.info(f"Saved figure to {out_pdf}")
-
+    
+        exit()
         # ----------------------------------
         # plotting the error (only without Raman)
         # ----------------------------------
@@ -474,6 +498,13 @@ def plot_threshold(
 
 
 if __name__ == "__main__":
+    plot_threshold(recompute=False,
+                   use_fB=False,
+                   fB_simple_interpolation=True,
+                   gvda = 30.0e-27,
+                   gvdb = 0.0e-27,
+                   m_lo_truncation=4)
+    exit()
     simple_plot_threshold(
         gvda = 30.0e-27,
         gvdb = 0.0e-27,
@@ -481,7 +512,6 @@ if __name__ == "__main__":
         recompute=False,
         ipulse=1,
         m_lo_truncation=3)
-    exit()
 
     # plot the theoretical figure
     plot_threshold(recompute=True,
