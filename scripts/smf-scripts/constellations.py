@@ -25,8 +25,7 @@ def arity_coefficient():
         average_power = dBm2watt(0)
         qam = pynlin.constellations.QAM(m)
         qam_symbols = qam.symbols()
-
-        qam_symbols = qam_symbols / np.sqrt(np.mean(np.abs(qam_symbols)**2))
+        qam_symbols = qam_symbols / np.sqrt(np.mean(np.abs(qam_symbols)**2)) # normalize the symbol average energy to 1
         var_QAM.append(np.mean(np.abs(qam_symbols)**4) /
                        np.mean(np.abs(qam_symbols)**2) ** 2 - 1)
 
@@ -38,24 +37,22 @@ def arity_coefficient():
         qam_symbols = qam_symbols / np.sqrt(np.mean(np.abs(qam_symbols)**2))
         var_PSK.append(np.mean(np.abs(qam_symbols)**4) /
                        np.mean(np.abs(qam_symbols)**2) ** 2 - 1)
-
-    # normalized to 16-QAM variance
+    print("QAM variance factors:", var_QAM)
+    print("QAM values for mu_0 ", np.array(var_QAM) + 1)
     var_QAM = np.array(var_QAM)
     var_PSK = np.array(var_PSK)
-    var_16_QAM = 1.0
-    plt.semilogx(m_QAM, var_QAM / var_16_QAM, color='black', base=2,
+    plt.semilogx(m_QAM, var_QAM, color='black', base=2,
                  linestyle="none", marker="x", markersize=13, label="QAM")
-    plt.semilogx(m_PSK, var_PSK / var_16_QAM, color='black', base=2,
+    plt.semilogx(m_PSK, var_PSK, color='black', base=2,
                  linestyle="none", marker="o", markersize=10, label="PSK")
     plt.annotate("{:1.3f}".format(
-        var_QAM[1] / var_16_QAM), (16, var_QAM[1] / var_16_QAM - 0.05))
+        var_QAM[1]), (16, var_QAM[1] - 0.05))
     plt.annotate("{:1.3f}".format(
-        var_QAM[2] / var_16_QAM), (64, var_QAM[2] / var_16_QAM - 0.05))
-    plt.annotate("{:1.3f}".format(var_QAM[3] / var_16_QAM),
-                 (256 - 70, var_QAM[3] / var_16_QAM - 0.05))
-    plt.annotate("{:1.3f}".format(var_QAM[4] / var_16_QAM),
-                 (1024 - 390, var_QAM[4] / var_16_QAM - 0.05))
-
+        var_QAM[2]), (64, var_QAM[2] - 0.05))
+    plt.annotate("{:1.3f}".format(var_QAM[3]),
+                 (256 - 70, var_QAM[3] - 0.05))
+    plt.annotate("{:1.3f}".format(var_QAM[4]),
+                 (1024 - 390, var_QAM[4] - 0.05))
     plt.grid()
     plt.xlabel("Modulation order")
     plt.xticks(ticks=arity_list, labels=arity_list)
@@ -67,6 +64,7 @@ def arity_coefficient():
 
     fig_arity.tight_layout()
     fig_arity.savefig("media/modulation_order_noise.pdf")
+    print("Arity coefficient plot saved in media/modulation_order_noise.pdf")
 
 
 def constellation_statistics():

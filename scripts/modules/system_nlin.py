@@ -20,14 +20,12 @@ from pynlin.utils import watt2dBm, dBm2watt
 from scipy.optimize import curve_fit
 from scipy.constants import c
 
-from scripts.modules.nlin_estimator import get_nlin_system
+from scripts.modules.nlin_estimator import collision_coeffs_system, total_nlin
 
 
 # # SMF
 # def get_nlin_prefactor_smf(cf):
-#     n2 = 2.6e-20 # constant of SiO2 # FIXME offload
-#     omega_0 = 2 * np.pi * cf.center_frequency # Hz
-#     gamma = n2 * omega_0/ (cf.effective_area * c) # WDM band center approximation
+
 #     print("Using gamma = ", gamma)
 #     P_in = dBm2watt(cf.launch_power)
 #     constellation_factor = 0.32 * 1.19 # 64-QAM (<|b|^4>/<|b|^2>^2 - 1)
@@ -35,6 +33,8 @@ from scripts.modules.nlin_estimator import get_nlin_system
 #     print("nlin prefactor", nlin_prefactor)
 #     return nlin_prefactor
 
+def plot_case_study_fits():
+    pass
 
 def plot_case_study_noise(use_kappa=False,
                use_smf=False,
@@ -76,28 +76,35 @@ def plot_case_study_noise(use_kappa=False,
         center_frequency=cf_mmf.center_frequency
     )
     freqs_mmf = wdm.frequency_grid()
-    # print("MMF", get_nlin_prefactor_mmf(cf_mmf, 1, 1))
-    # print("SMF", get_nlin_prefactor_smf(cf_smf))
-    # print("aeff1/2", (cf_smf.effective_area/cf_mmf.effective_area)**2)
-    # exit()
-    nlin_mmf                = get_nlin_system(cf_mmf,
-                                       use_kappa=use_kappa,
-                                       use_fB=use_fB,
-                                       use_x_mode_interactions=True,
-                                       use_dBm_scale=use_dBm_scale,
-                                       )
-    nlin_mmf_noninteracting =  get_nlin_system(cf_mmf,
-                                       use_kappa=use_kappa,
-                                       use_fB=use_fB,
-                                       use_x_mode_interactions=False,
-                                       use_dBm_scale=use_dBm_scale,)
-    nlin_smf                = get_nlin_system(cf_smf,
-                                       use_kappa=use_kappa,
-                                       use_fB=use_fB,
-                                       use_x_mode_interactions=True,
-                                       use_dBm_scale=use_dBm_scale,)
-    # for each channel, we compute the total number of collisions that
-    # needs to be computed for evaluating the total noise on that channel.
+
+
+    
+    
+    # FIXME send this to the prefactor methods
+
+    modal_prefactor = kappa  # FIXME check this modal prefactor thing
+    # rescaling for cross-mode interactions
+
+        # modal_prefactor *= 0.9
+    modal_prefactor = modal_prefactor[:cf.n_modes, :cf.n_modes]
+    collision_coeffs = modal_prefactor @ collision_coeffs
+    if use_dBm_scale:
+        modal_prefactor = np.multiply(
+            modal_prefactor,
+            nlin_prefactor(cf, np.array(modes), np.array(modes))
+        )
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     T = 1 / cf_mmf.baud_rate
     L = cf_mmf.fiber_length
 
@@ -196,11 +203,11 @@ def plot_case_study_noise_histogram(use_kappa=False,
     )
     freqs_mmf = wdm.frequency_grid()
 
-    nlin_mmf = get_nlin_system(cf_mmf,
+    nlin_mmf = collision_coeffs_system(cf_mmf,
                         use_kappa=use_kappa,
                         use_fB=use_fB,
                         use_dBm_scale=use_dBm_scale,)
-    nlin_smf = get_nlin_system(cf_smf,
+    nlin_smf = collision_coeffs_system(cf_smf,
                         use_kappa=False,
                         use_fB=True,
                         use_dBm_scale=use_dBm_scale,)
