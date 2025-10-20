@@ -508,9 +508,18 @@ def nlin_prefactor(cf: cfg.Config, mode_a, mode_b):
 def collision_coeffs_system(cf,
                             ipulse: int = 1,
                             recompute: bool = False,):
-    assert (cf.n_modes == 4)
-    assert (cf.launch_power == -5)
-    filename = f"results/collision_coefficients_ipulse{ipulse}.npy"
+    assert cf.launch_power == -5
+    assert cf.raman_gain == 0.0
+    assert cf.baud_rate == 33e9
+    assert cf.channel_spacing == 50e9
+    assert cf.n_channels == 200
+    assert cf.center_frequency == 195.94e12
+    assert cf.fiber_length == 70e3
+    if cf.n_modes == 1:
+        fiber_type = "smf"
+    else:
+        fiber_type = "mmf"
+    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}.npy"
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename}")
         return np.load(filename)

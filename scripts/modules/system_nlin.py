@@ -68,23 +68,26 @@ def plot_case_study_noise(
     )
     freqs_mmf = wdm.frequency_grid()
 
-    ccfs = collision_coeffs_system(cf_mmf,
+    ccfs_mmf = collision_coeffs_system(cf_mmf,
+                                   ipulse=1,
+                                   recompute=False)
+    ccfs_smf = collision_coeffs_system(cf_smf,
                                    ipulse=1,
                                    recompute=False)
     lg.debug(
-        f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0, 0, :, :5]}")
+        f"A few collisions (should be of order 1e-1, 1e-2): {ccfs_mmf[0, 0, :, :5]}")
     nlin_mmf = total_nlin(cf_mmf,
-                          ccfs,
+                          ccfs_mmf,
                           use_kappa=True,
                           use_x_mode=True,
                           )
     nlin_mmf_noninteracting = total_nlin(cf_mmf,
-                                         ccfs,
+                                         ccfs_mmf,
                                          use_kappa=True,
                                          use_x_mode=False,
                                          )
     nlin_smf = total_nlin(cf_smf,
-                          ccfs,
+                          ccfs_smf,
                           use_kappa=True,
                           use_x_mode=False,
                           )
