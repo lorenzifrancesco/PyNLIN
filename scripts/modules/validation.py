@@ -474,7 +474,7 @@ def plot_threshold_fb_extremes(
     gvda: float = 0.0,
     gvdb: float = 0.0,
     m_lo_truncation: int = 4,
-    out_pdf: str = "media/threshold_fbfigure.pdf",
+    out_pdf: str = "media/case-study-threshold.pdf",
 ):
     # ---- config / normalization ---------------------------------------------
     cf_path = "./input/mmf.toml"
@@ -483,16 +483,22 @@ def plot_threshold_fb_extremes(
     nc = cfg.load_nc_toml_to_struct(nc_path)
 
     x_norm = cf.fiber_length * cf.baud_rate
-    y_norm = 1.0 / (cf.fiber_length * cf.baud_rate) ** 2
-
+    y_norm_fit = 1.0 / (cf.fiber_length * cf.baud_rate) ** 2
+    
+    x_norm = 1e12
+    y_norm = 1e-30
+    
     # x-grids (analytic vs numeric sampling)
     n_samples_analytic = 500
     nc.dgd1   = LLW_MIN / (cf.fiber_length * cf.baud_rate)
     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    lg.info(f"nc.dgd1 = {nc.dgd1:.2e}, nc.dgd2_n = {nc.dgd2_n:.2e}")
     nc.dgd2_g = nc.dgd2_n
 
     dgds_analytic = np.geomspace(nc.dgd1, nc.dgd2_n, n_samples_analytic)
-
+    
+    T = 1 / cf.baud_rate
+    L = cf.fiber_length
     # ---- fB (independent of pulse) ------------------------------------------
     _, fB_min, fB_max, _, _ = load_fB(cf)
 
@@ -501,15 +507,19 @@ def plot_threshold_fb_extremes(
     colors  = dict(max="turquoise", min="magenta")
 
     # Raman correction lookup tables (shared)
-    raman_corr_min, raman_corr_max = build_lookup_integral_table_with_raman(
-        cf, m_lo_truncation=m_lo_truncation, recompute=False
+    raman_corr_min_n, raman_corr_max_n = build_lookup_integral_table_with_raman(
+        cf, m_lo_truncation=m_lo_truncation, recompute=False, ipulse = 1
+    )
+    raman_corr_min_g, raman_corr_max_g = build_lookup_integral_table_with_raman(
+        cf, m_lo_truncation=m_lo_truncation, recompute=False, ipulse = 0
     )
 
     # ---- plotting ------------------------------------------------------------
     rc("text", usetex=True)
-    plt.figure(figsize=(3.6, 2.5), dpi=300)
+    plt.figure(figsize=(3.6, 3.2), dpi=300)
 
     # loop pulses only for *numeric/fitted/asymptotic* series
+    pulse_style = ["-", "-."]
     for ipulse, pulse_shape in ((0, "gaussian"), (1, "nyquist")):
         # numeric x-grid for this pulse
         if ipulse == 0:
@@ -527,14 +537,21 @@ def plot_threshold_fb_extremes(
         # load numeric series
         nlin_numeric_max = np.load(f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_max_{gvda}_{gvdb}.npy")
         nlin_numeric_min = np.load(f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_min_{gvda}_{gvdb}.npy")
-        
+        if ipulse == 0: # not really super nice, but that's the way we do it
+            raman_corr_min = raman_corr_min_g
+            raman_corr_max = raman_corr_max_g
+        else:
+            raman_corr_min = raman_corr_min_n
+            raman_corr_max = raman_corr_max_n
         nlin_fit_max = fit_nlin(cf, gvda, gvdb, fB_max,
                                       raman_corr_min, raman_corr_max,
                                       ipulse=ipulse, m_lo_truncation=m_lo_truncation)
         nlin_fit_min = fit_nlin(cf, gvda, gvdb, fB_min,
                                   raman_corr_min, raman_corr_max,
                                   ipulse=ipulse, m_lo_truncation=m_lo_truncation)
-
+        lg.debug(f"Fitted coefficients for {'Gaussian' if ipulse == 0 else 'Nyquist'} pulse, ")
+        lg.debug(f"Some values of fit: nlin_fit(dgds_analytic[:5]) = {nlin_fit_max(dgds_analytic[:5])}")
+        lg.debug(f"Some values of fit: nlin_fit(dgds_analytic[:5]) = {nlin_fit_min(dgds_analytic[:5])}")
         # asymptotics
         n_hi, n_lo = compute_asymptotic_nlin(ipulse=ipulse)
         nlin_hi = n_hi
@@ -543,18 +560,18 @@ def plot_threshold_fb_extremes(
         nlin_hi_correct_min = nlin_hi * raman_integral(cf, "HI", fB_min)
 
         # draw asymptotes and fits (thin gray/orange/green) — once per pulse
-        plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm, lw=1.0,
-                 color="green", ls="--")
-        plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm, lw=1.0,
-                 color="orange")
+        # plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm, lw=1.0,
+        #          color="green", ls="--")
+        # plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm, lw=1.0,
+        #          color="orange")
         plt.plot(dgds_analytic * x_norm, nlin_hi_correct_max * y_norm, lw=1.0,
                  color="orange")
         plt.plot(dgds_analytic * x_norm, nlin_hi_correct_min * y_norm, lw=1.0,
                  color="orange")
 
         lw = 0.7
-        plt.plot(dgds_analytic * x_norm, nlin_fit_max(dgds_analytic), color="gray", lw=lw)
-        plt.plot(dgds_analytic * x_norm, nlin_fit_min(dgds_analytic),  color="gray", lw=lw)
+        plt.plot(dgds_analytic * x_norm, nlin_fit_max(dgds_analytic) / y_norm_fit * y_norm , color="gray",  lw=lw, ls=pulse_style[ipulse])
+        plt.plot(dgds_analytic * x_norm, nlin_fit_min(dgds_analytic) / y_norm_fit * y_norm ,  color="gray", lw=lw, ls=pulse_style[ipulse])
 
         ms = 24
         if ipulse == 1:  # Nyquist (stars)
@@ -571,16 +588,16 @@ def plot_threshold_fb_extremes(
     plt.xscale("log")
     plt.yscale("log")
     ymin, ymax = plt.ylim()
-    plt.ylim(ymin, 1.0)
-    plt.xlabel(r"$L/L_W$")
-    plt.ylabel(r"$\mathcal{N}\,T^{2}/L^{2}$")
+    plt.ylim(ymin, 0.3)
+    plt.xlabel(r"$\Delta \beta_1$ [ps/m]")
+    plt.ylabel(r"$\mathcal{N}$ [km$^2$/ps$^2$]")
     plt.tight_layout()
-    plt.savefig(out_pdf, dpi=300, bbox_inches="tight", pad_inches=0)
+    plt.savefig(out_pdf, dpi=300, bbox_inches="tight", pad_inches=0.02)
     lg.info(f"Saved figure to {out_pdf}")
 
 
 if __name__ == "__main__":
-    plot_threshold_fb_extremes(recompute=True,
+    plot_threshold_fb_extremes(recompute=False,
                 #    use_fB=False,
                 #    fB_simple_interpolation=True,
                    gvda = 20.0e-27,
@@ -606,10 +623,3 @@ if __name__ == "__main__":
     plot_threshold(recompute=True,
                    use_fB=False,
                    fB_simple_interpolation=False)
-
-    # plot the case-study figure
-    # get_nlin_threshold(recompute=True, use_fB=True, fB_simple_interpolation=True)
-
-    # Example utilities (disabled by default):
-    # logger.info("Raman corrections: %s", _safe_repr(get_raman_corrections()))
-    # logger.info("Fit coefficients shapes: %s", _safe_repr([x.shape for x in get_fit_coefficients()]))
