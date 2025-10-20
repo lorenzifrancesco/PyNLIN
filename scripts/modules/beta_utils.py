@@ -12,6 +12,19 @@ from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import ScalarFormatter
 import scripts.modules.cfg as cfg
+from matplotlib.ticker import FuncFormatter
+from loguru import logger as lg
+from scripts.modules.log_init import init_logging
+init_logging()
+
+
+from matplotlib.colors import ListedColormap
+from matplotlib import cm
+base = plt.get_cmap("jet", 256)
+newcolors = base(np.linspace(0, 1, 256))
+newcolors[0, :] = np.array([1, 1, 1, 1])  # set lowest color to white
+whited_cm = ListedColormap(newcolors)
+
 
 rc('text', usetex=True)
 
@@ -241,7 +254,7 @@ def fig3_fig4(cf_file="./input/mmf.toml"):
     # plt.savefig(f"media/dispersion/beta2.png", dpi=300)
 
 
-def get_fig4(cf_file = "./input/mmf.toml"):
+def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
     cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,
@@ -251,10 +264,10 @@ def get_fig4(cf_file = "./input/mmf.toml"):
     oi_fit = np.load('results/oi_fit.npy')
     beta1_params = load_group_delay()
     fiber = MMFiber(
-        effective_area=80e-12,
+        effective_area=cf.effective_area,
         overlap_integrals=oi_fit,
         group_delay=beta1_params,
-        length=100e3
+        length=cf.fiber_length
     )
 
     freqs = wdm.frequency_grid()
@@ -272,92 +285,168 @@ def get_fig4(cf_file = "./input/mmf.toml"):
 
     x_norm = cf.fiber_length * cf.baud_rate
     mask = (beta1_differences < 200 * 1e-1)
+    
+    total_pairs = np.sum(mask) # unique pairs only
     hist, edges = np.histogram(np.log(beta1_differences[mask] * 1e12), bins=50)
     hist = hist / 2.0
-    print(edges)
-    print(hist)
+
     plt.clf()
-    plt.figure(figsize=(3.6, 2.4))
-    plt.bar(np.power(10, edges[:-1]),
-            hist,
-            width=np.diff(np.power(10, edges)) / 1.5,
-            zorder=3,
-            edgecolor='blue',
-            facecolor='none')
+    fig, ax = plt.subplots(figsize=(3.6, 3))
+
+    ax.bar(np.power(10, edges[:-1]),
+        hist,
+        width=np.diff(np.power(10, edges)) / 1.5,
+        zorder=3,
+        edgecolor='blue',
+        facecolor='none')
 
     x_start = 0.2 / x_norm * 1e12
     x_end = 3.0 / x_norm * 1e12
-    # x_start = 1e-4
-    # x_end  = 2e-2
-    plt.axvline(x_start, color='red', lw=1, ls='--')
-    plt.axvline(x_end, color='red', lw=1, ls='--')
-    plt.axvspan(x_start, x_end, color='red', alpha=0.3)
-    # count how many channel pairs are between x_start and x_end
+    ax.axvline(x_start, color='red', lw=1, ls='--')
+    ax.axvline(x_end, color='red', lw=1, ls='--')
+    ax.axvspan(x_start, x_end, color='red', alpha=0.3)
+
+    # count in-window and total
     count = np.sum((beta1_differences * 1e12 > x_start) & (beta1_differences * 1e12 < x_end))
     total = np.sum(mask)
-    print(f"Number of channel pairs with DGD between {x_start:.2f} and {x_end:.2f} ps/m: {count} over {total} -> {count/total:.2%}")
-    plt.xlabel(r'$\Delta\beta_1$ [ps/m]')
-    # plt.xlabel(r'$L_W/L$')
-    plt.ylabel('channel pair count')
-    plt.grid(axis='y', zorder=1)
+    total_pairs = total / 2.0  # match the /2 applied to hist
+    print(f"Number of channel pairs with DGD between {x_start:.2e} and {x_end:.2e} ps/m: "
+        f"{count/2:.0f} over {total_pairs:.0f} -> {(count/2)/total_pairs:.2%}")
+
+    # labels/scales on left axis
+    ax.set_xlabel(r'$\Delta\beta_1$ [ps/m]')
+    ax.set_ylabel('channel pair count')
+    ax.grid(axis='y', zorder=1)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+
+    # # --- RIGHT Y AXIS (percent of total unique pairs) ---
+    # ax_right = ax.twinx()
+    # ax_right.set_yscale('log')           # keep scales aligned
+    # ax_right.set_ylim(ax.get_ylim())     # match limits to left axis
+
+    # def to_percent(y, pos):
+    #     if total_pairs == 0:
+    #         return "0%"
+    #     return f"{(y / total_pairs) * 100:.0f}%"
+
+    # ax_right.yaxis.set_major_formatter(FuncFormatter(to_percent))
+    # ax_right.set_ylabel('of channel pairs [%]')
+
+    fig.tight_layout()
+    fig.savefig("media/dgd-statistics.pdf", dpi=300)
+    plt.close(fig)
+    print("Saved figure 4 to media/dgd-statistics.pdf")
+
+
+def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
+    from scripts.modules.collision import get_systems_dispersions
+    cf = cfg.load_toml_to_struct(cf_file)
+    wdm = pynlin.wdm.WDM(
+        spacing=cf.channel_spacing,
+        num_channels=cf.n_channels,
+        center_frequency=cf.center_frequency
+    )
+    oi_fit = np.load('results/oi_fit.npy')
+    beta1_params = load_group_delay()
+    fiber = MMFiber(
+        effective_area=cf.effective_area,
+        overlap_integrals=oi_fit,
+        group_delay=beta1_params,
+        length= cf.fiber_length
+    )
+
+    freqs = wdm.frequency_grid()
+    X, Y = get_systems_dispersions()
+    max_gvd = np.max(np.abs(X))
+    lg.info(f"max val X: {np.max(X):.2e}, max val Y: {np.max(Y):.2e}")
+    
+    
+    
+    plt.clf()
+    # --- Scatter plot ---
+    plt.figure(figsize=(3.2, 2.4))
+    plt.scatter(X, Y, s=1, alpha=0.15, color='black')
+    ax = plt.gca()
+    ax.set_aspect('equal')
+    # ax.set_xlim(0, 2)
+    # ax.set_ylim(0, 2)
+    ax.set_xlabel(r'$L/L_{DA}$')
+    ax.set_ylabel(r'$L/L_{DB}$')
+    ax.set_xticks(np.linspace(0, 2, 5))
+    ax.set_yticks(np.linspace(0, 2, 5))
+    plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.savefig(f"media/4-statistics.pdf", dpi=300)
-    print("Saved figure 4 to media/4-statistics.pdf")
-    # mask = (beta1_differences < 0.1 * 1e-12)
-    # print("Average DGD: ", np.mean(beta1_differences * 1e12))
-    # hist, edges = np.histogram(beta1_differences[mask]*1e12, bins=20)
-    # hist = hist / 2.0
-    # plt.clf()
-    # plt.figure(figsize=(4, 3.5))
-    # plt.bar(edges[:-1], hist, width=np.diff(edges), zorder=3)
-    # plt.xlabel('DGD (ps/m)')
-    # plt.ylabel('channel pair count')
-    # plt.grid(axis='y', zorder=0)
-    # plt.tight_layout()
-    # plt.savefig(f"media/dispersion/DGD_histogram_zoom.png", dpi=dpi)
+    plt.savefig("media/gvdab_scatter.pdf", dpi=300)
+    print("Saved scatter plot → media/gvdab_scatter.pdf")
+    plt.clf()
 
-    # fig = plt.figure(figsize=(3.6, 2.5))  # Overall figure size
-    # # gs = GridSpec(nrows=2, ncols=1, height_ratios=[2, 1], hspace=0.1)  # The height_ratios adjust the relative sizes
-    # gs = GridSpec(nrows=1, ncols=1, height_ratios=[1], hspace=0.1)  # The height_ratios adjust the relative sizes
-    # hist, edges = np.histogram(beta1_differences[mask]*1e12, bins=200)
-    # hist = hist / 2.0
-    # # Create subplots
-    # ax1 = fig.add_subplot(gs[0])  # Top subplot (smaller)
-    # # ax2 = fig.add_subplot(gs[1])  # Bottom subplot (larger)
-    # # ax3 = fig.add_subplot(gs[2])  # Bottom subplot (larger)
-    # # Plot histogram on the top subplot
-    # ax1.bar(edges[:-1], hist, width=np.diff(edges), zorder=3)
-    # print("WARN: we are handling edges in a strange way!")
-    # edges = edges *1e-12
-    # ax1.set_ylabel('channel pair count')
-    # ax1.grid(axis='y', zorder=0)
-    # ax1.set_xticklabels([])
-    # ax1.yaxis.set_major_formatter(formatter)
-    # # ax2.plot(edges[:-1]*1e12, edges[:-1]*L/T, color='blue')
-    # # ax2.set_ylabel(r'$m_{\mathrm{max}}$')
-    # # ax2.semilogy(edges[:-1]*1e12, L/T / edges[:-1] * 1e-30, color='red')
-    # # ax2.set_ylabel(r'$N \; [\mathrm{km}^2/\mathrm{ps}^2$]')
-    # ax1.set_xlabel(r'$\Delta{\beta_1} [\mathrm{ps}/\mathrm{m}]$')
-    # # ax2.legend(loc='upper right')
-    # # plt.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-    # # plt.tight_layout()
-    # plt.subplots_adjust(left=0.2, right=0.95, top=0.93, bottom=0.15, hspace=0.3)
-    # plt.savefig(f"media/4-statistics.pdf", dpi=dpi)
+    # --- 2D histogram (heatmap) ---
+    # --- 2D histogram (heatmap) : upper triangle only ---
+    mask = Y >= X  # use Y <= X for the lower triangle
 
-    # plt.clf()
-    # plt.figure(figsize=(4.6, 4))
-    # for i in range(4):
-    #     plt.plot(freqs * 1e12, (beta1[i, :] - beta1[1, :])
-    #              * 1e12, label=mode_names[i])
-    # plt.xlabel(r'$f \; [\mathrm{THz}]$')
-    # plt.ylabel(r'$\Delta\beta_1 \; [ps/m]$')
-    # plt.legend(labelspacing=0.1)
-    # plt.grid(grid)
-    # plt.tight_layout()
-    # plt.savefig(f"media/dispersion/DMGD_LP01.png", dpi=dpi)
+    fig, ax = plt.subplots(figsize=(2, 2))
+    H, xedges, yedges, im = plt.hist2d(
+        X, Y,
+        bins=15, range=[[0, max_gvd], [0, max_gvd]], cmap=whited_cm
+    )
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, aspect=20)
+    cbar.set_label('pair count')
+    cbar.set_ticks([0,10000])
+    cbar.set_ticklabels(['0', r'$10^4$'])
+    # plt.colorbar(im, label='pair count')
+
+    ax = plt.gca()
+    ax.set_aspect('equal')
+    ax.plot([0, max_gvd], [0, max_gvd], color='gray', lw=0.5, ls='--', alpha=0.6)  # diagonal guide
+    ax.set_xlabel(r'$L/L_{DA}$')
+    ax.set_ylabel(r'$L/L_{DB}$')
+    ax.set_xticks(np.linspace(0, 2, 2))
+    ax.set_yticks(np.linspace(0, 2, 2))
+
+    plt.tight_layout()
+    plt.savefig("media/gvdab_hist2d_upper.pdf", dpi=300, bbox_inches ="tight", pad_inches=0.02 )  # or keep your original name
+    print("Saved 2D histogram (upper triangle) → media/gvdab_hist2d_upper.pdf")
+    plt.clf()
+
+    
+    
+    T = 1 / cf.baud_rate
+    beta2A = X * T**2 / cf.fiber_length
+    beta2B = Y * T**2 / cf.fiber_length
+
+    # keep only positive values
+    mask = (beta2A > 0) & (beta2B > 0)
+    beta2A = beta2A[mask]
+    beta2B = beta2B[mask]
+
+    # rotate to u,v coordinates (in ps²/km)
+    u = (beta2A + beta2B) * 1e24
+    v = (beta2B - beta2A) * 1e24
+
+    plt.figure(figsize=(3.2, 2.4))
+    plt.hist2d(u, v, bins=30,
+            range=[[0, np.percentile(u, 99)], [0, np.percentile(v, 99)]],
+            cmap='nipy_spectral')
+    plt.colorbar(label='pair count')
+    ax = plt.gca()
+    ax.set_aspect('auto')
+    ax.axhline(0, color='red', lw=0.8, ls='--', alpha=0.6)
+    ax.set_xlabel(r'$\beta_{2A} + \beta_{2B} \; [\mathrm{ps^2/km}]$')
+    ax.set_ylabel(r'$\beta_{2B} - \beta_{2A} \; [\mathrm{ps^2/km}]$')
+    plt.tight_layout()
+    plt.savefig("media/gvdab_uv_beta2.pdf", dpi=300)
+    plt.clf()
+
+
+    
+    fig = plt.figure(figsize=(3.6, 2.4))
+    fig.tight_layout()
+    fig.savefig("media/dgd-statistics.pdf", dpi=300)
+    print("Saved figure 4 to media/dgd-statistics.pdf")
+
 
 
 if __name__ == "__main__":
-    get_fig4()
+    plot_channel_dgd_distribution()
+    # plot_channel_gvd_distribution()
