@@ -26,8 +26,7 @@ init_logging()
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
 LLW_MAX = 100.0
-MU0 = 1.3809  # 64-QAM <|b_0|^4>/<|b_0|^2>^2
-
+MU0 = 1.3809  # 64-QAM <|b_0|^4>/<|b_0|^2>^2 this is compatible with the (mu_0 - 1)=0.32*1.19 previously used.
 
 # --- module-level globals that workers will read ---
 _G = {
@@ -128,7 +127,7 @@ def work_A(task_A):
 def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
     assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
     # all the information about the numerosity and stuff is here.
-    sol_path = "results/ct_solution-5_gain_0.0.npy"
+    sol_path = "results/ct_solution-5_gain_0.0.npy" # Beware, -5dBm is right: it is obtained using the -2dBm solutions so to have equalizaiton without recomputing all
     solutions = np.load(sol_path, allow_pickle=True).item()
 
     signal_powers = solutions['signal_sol']

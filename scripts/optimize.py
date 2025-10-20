@@ -202,11 +202,11 @@ def repropagate_numpy(fiber,
 
 if __name__ == "__main__":    
     # Configuration
-    recompute   = True
+    recompute   = False
     # activate this is you want to use an optimization obtained with a differnt launch power
-    set_improper_power = True
-    repropagate = True
-    use_smf     = True
+    set_improper_power = False
+    repropagate = False
+    use_smf     = False
     use_avg_oi  = False
     
     # -10 -> true
@@ -321,6 +321,18 @@ if __name__ == "__main__":
             pump_solution      = variables_dict['pump_sol'],
             cf                 = cf
         )
+        # for i in range(cf.n_modes):
+        #     plot_profiles(
+        #         signal_wavelengths = wdm.wavelength_grid(),
+        #         signal_solution    = variables_dict['signal_sol'],
+        #         ase_solution       = variables_dict['ase_sol'],
+        #         pump_wavelengths   = variables_dict['pump_wavelengths'],
+        #         pump_powers        = variables_dict['pump_powers'],
+        #         pump_solution      = variables_dict['pump_sol'],
+        #         cf                 = cf,
+        #         single_out_mode=i
+        #     )
+        
         analyze_optimization(
             signal_wavelengths = wdm.wavelength_grid(),
             signal_solution    = variables_dict['signal_sol'],

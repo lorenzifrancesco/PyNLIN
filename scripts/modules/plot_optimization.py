@@ -16,20 +16,27 @@ def plot_profiles(signal_wavelengths,
                   pump_solution,
                   pump_powers,
                   cf: Config,
-                  wallpaper_mode=False):
+                  wallpaper_mode=False, 
+                  single_out_mode = None):
     plt.clf()
     plt.figure(figsize=(2.5, 2))
     cmap = viridis
     z_plot = np.linspace(0, cf.fiber_length, len(pump_solution[:, 0, 0])) * 1e-3
     # lss = ["-", "--", "-.", ":", "-"]
     mode_labels = ["LP01", "LP11", "LP21", "LP02"]
-    for i in range(cf.n_modes):
+    
+    if single_out_mode is not None:
+        submodes = [single_out_mode]
+    else:
+        submodes = range(cf.n_modes)
+        
+    for i in submodes:
         if wallpaper_mode:
           plt.plot(z_plot,
                    watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes), alpha=0.9, lw=0.01)
         else:
            plt.plot(z_plot,
-                   watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.3), alpha=0.1, lw=0.1)
+                   watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.3), alpha=0.1, lw=0.3)
         # try:
         #   plt.plot(z_plot,
         #          watt2dBm(ase_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.7, ls="-")

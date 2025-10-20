@@ -137,38 +137,6 @@ def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
     nlin_lo[nlin_lo > 1e100] = np.nan
     return nlin_hi, nlin_lo
 
-
-# def compute_fitted_nlin(gvda: float,
-#                         gvdb: float,
-#                         fB_mode: str,
-#                         ipulse: int,
-#                         recompute: bool = False,):
-#     # this should use the methods from the nlin_estimator
-#     cf_path = "./input/mmf.toml"
-#     nc_path = "./input/numerical_config.toml"
-#     cf = cfg.load_toml_to_struct(cf_path)
-#     nc = cfg.load_nc_toml_to_struct(nc_path)
-
-#     n_samples_analytic = 500
-#     nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
-#     nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
-#     dgd2 = nc.dgd2_n
-#     dgds_analytic = np.geomspace(nc.dgd1, dgd2, n_samples_analytic)
-
-#     x_norm = cf.fiber_length * cf.baud_rate
-#     y_norm = x_norm**(-2)
-
-#     # this is the smart fit.
-#     ps = ideal_fit_coefficients(gvda=0.0, gvdb=0.0, ipulse=ipulse)
-#     lda = 1 / (gvda * cf.baud_rate**2) if gvda != 0 else 1e30
-#     ldb = 1 / (gvdb * cf.baud_rate**2) if gvdb != 0 else 1e30
-    
-#     lo_value = gvd_correction(lda, ldb, cf.fiber_length, ipulse=ipulse)
-#     ps = apply_fit_correction(ps, lo_value)
-#     fitted_nlin = softplus2(dgds_analytic * x_norm, *ps) / y_norm
-#     return fitted_nlin
-
-
 def simple_plot_threshold(gvda: float = 0.0,
                           gvdb: float = 0.0,
                           fB_mode: str = "perfect",
@@ -290,7 +258,6 @@ def fB_undepleted(z):
     return np.exp(exponent)
 
 
-# FIXME need to apply Raman
 def plot_threshold(
     recompute: bool = False,
     use_fB: bool = False,
@@ -497,7 +464,129 @@ def plot_threshold(
             lg.info(f"Saved figure to {err_pdf}")
 
 
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import rc
+
+
+def plot_threshold_fb_extremes(
+    recompute: bool = False,
+    gvda: float = 0.0,
+    gvdb: float = 0.0,
+    m_lo_truncation: int = 4,
+    out_pdf: str = "media/threshold_fbfigure.pdf",
+):
+    # ---- config / normalization ---------------------------------------------
+    cf_path = "./input/mmf.toml"
+    nc_path = "./input/numerical_config.toml"
+    cf = cfg.load_toml_to_struct(cf_path)
+    nc = cfg.load_nc_toml_to_struct(nc_path)
+
+    x_norm = cf.fiber_length * cf.baud_rate
+    y_norm = 1.0 / (cf.fiber_length * cf.baud_rate) ** 2
+
+    # x-grids (analytic vs numeric sampling)
+    n_samples_analytic = 500
+    nc.dgd1   = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_g = nc.dgd2_n
+
+    dgds_analytic = np.geomspace(nc.dgd1, nc.dgd2_n, n_samples_analytic)
+
+    # ---- fB (independent of pulse) ------------------------------------------
+    _, fB_min, fB_max, _, _ = load_fB(cf)
+
+    # cyan = fB_max; magenta = fB_min
+    fB_refs = dict(max=fB_max, min=fB_min)
+    colors  = dict(max="turquoise", min="magenta")
+
+    # Raman correction lookup tables (shared)
+    raman_corr_min, raman_corr_max = build_lookup_integral_table_with_raman(
+        cf, m_lo_truncation=m_lo_truncation, recompute=False
+    )
+
+    # ---- plotting ------------------------------------------------------------
+    rc("text", usetex=True)
+    plt.figure(figsize=(3.6, 2.5), dpi=300)
+
+    # loop pulses only for *numeric/fitted/asymptotic* series
+    for ipulse, pulse_shape in ((0, "gaussian"), (1, "nyquist")):
+        # numeric x-grid for this pulse
+        if ipulse == 0:
+            dgd2 = nc.dgd2_g
+            n_samples_numeric = nc.n_samples_numeric_g
+        else:
+            dgd2 = nc.dgd2_n
+            n_samples_numeric = nc.n_samples_numeric_n
+
+        dgds_numeric = np.logspace(np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
+
+        compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
+        compute_numeric_nlin(gvda=0.0, gvdb=0.0, ipulse=ipulse,   recompute=recompute)
+
+        # load numeric series
+        nlin_numeric_max = np.load(f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_max_{gvda}_{gvdb}.npy")
+        nlin_numeric_min = np.load(f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_min_{gvda}_{gvdb}.npy")
+        
+        nlin_fit_max = fit_nlin(cf, gvda, gvdb, fB_max,
+                                      raman_corr_min, raman_corr_max,
+                                      ipulse=ipulse, m_lo_truncation=m_lo_truncation)
+        nlin_fit_min = fit_nlin(cf, gvda, gvdb, fB_min,
+                                  raman_corr_min, raman_corr_max,
+                                  ipulse=ipulse, m_lo_truncation=m_lo_truncation)
+
+        # asymptotics
+        n_hi, n_lo = compute_asymptotic_nlin(ipulse=ipulse)
+        nlin_hi = n_hi
+        nlin_lo = n_lo
+        nlin_hi_correct_max = nlin_hi * raman_integral(cf, "HI", fB_max)
+        nlin_hi_correct_min = nlin_hi * raman_integral(cf, "HI", fB_min)
+
+        # draw asymptotes and fits (thin gray/orange/green) — once per pulse
+        plt.plot(dgds_analytic * x_norm, nlin_lo * y_norm, lw=1.0,
+                 color="green", ls="--")
+        plt.plot(dgds_analytic * x_norm, nlin_hi * y_norm, lw=1.0,
+                 color="orange")
+        plt.plot(dgds_analytic * x_norm, nlin_hi_correct_max * y_norm, lw=1.0,
+                 color="orange")
+        plt.plot(dgds_analytic * x_norm, nlin_hi_correct_min * y_norm, lw=1.0,
+                 color="orange")
+
+        lw = 0.7
+        plt.plot(dgds_analytic * x_norm, nlin_fit_max(dgds_analytic), color="gray", lw=lw)
+        plt.plot(dgds_analytic * x_norm, nlin_fit_min(dgds_analytic),  color="gray", lw=lw)
+
+        ms = 24
+        if ipulse == 1:  # Nyquist (stars)
+            marker = "*"
+        else:            # Gaussian (crosses)
+            marker = "x"
+
+        plt.scatter(dgds_numeric * x_norm, nlin_numeric_max * y_norm,
+                    s=ms, lw=1.0, marker=marker, color=colors["max"])
+        plt.scatter(dgds_numeric * x_norm, nlin_numeric_min * y_norm,
+                    s=ms, lw=1.0, marker=marker, color=colors["min"])
+
+    # axes/labels
+    plt.xscale("log")
+    plt.yscale("log")
+    ymin, ymax = plt.ylim()
+    plt.ylim(ymin, 1.0)
+    plt.xlabel(r"$L/L_W$")
+    plt.ylabel(r"$\mathcal{N}\,T^{2}/L^{2}$")
+    plt.tight_layout()
+    plt.savefig(out_pdf, dpi=300, bbox_inches="tight", pad_inches=0)
+    lg.info(f"Saved figure to {out_pdf}")
+
+
 if __name__ == "__main__":
+    plot_threshold_fb_extremes(recompute=True,
+                #    use_fB=False,
+                #    fB_simple_interpolation=True,
+                   gvda = 20.0e-27,
+                   gvdb = 20.0e-27,
+                   m_lo_truncation=4)
+    exit()
     plot_threshold(recompute=False,
                    use_fB=False,
                    fB_simple_interpolation=True,
