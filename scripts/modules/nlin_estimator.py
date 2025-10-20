@@ -617,8 +617,9 @@ def get_kappa2_matrix(cf,
         kappa = np.loadtxt('input/kappa.csv', delimiter=',')
         kappa2 = kappa**2
     else:
-        kappa2 = np.ones((cf.n_modes, cf.n_modes))
+        kappa2 = np.ones((cf.n_modes, cf.n_modes)) # kind of innatural, but ok
     switchoff_matrix = np.eye(cf.n_modes)
+    
     if not use_x_mode:
         kappa2 = np.multiply(kappa2, switchoff_matrix)
     return kappa2
@@ -633,27 +634,27 @@ def total_nlin(cf,
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
     lg.info(f"Normalization units: x_norm = {x_norm:.2e} s, y_norm = {y_norm:.2e} s^2/m^2")
-    collision_coeffs /= y_norm # bring back to SI units
+    collision_coeffs_si = collision_coeffs / y_norm # bring back to SI units
     
     P_in = dBm2watt(cf.launch_power)
     omega_0 = 2 * np.pi * cf.center_frequency
     n2 = 2.6e-20  # constant of SiO2
     omega_0 = 2 * np.pi * cf.center_frequency
     gamma = n2 * omega_0 / (cf.effective_area * c)  # Delta f / f << 1
-    lg.debug(f"Computed gamma: {gamma:.2e} 1/(W m), P_in: {P_in:.2e} W / {watt2dBm(P_in):.2f} dBm")
+    lg.trace(f"Computed gamma: {gamma:.2e} 1/(W m), P_in: {P_in:.2e} W / {watt2dBm(P_in):.2f} dBm")
     constant_prefactor = P_in**3 * gamma**2 / (cf.baud_rate**2)
     
-    lg.debug(f"Computed constant prefactor: {constant_prefactor:.2e} W * s^2 / m^2")
+    lg.trace(f"Computed constant prefactor: {constant_prefactor:.2e} W * s^2 / m^2")
     kappa2 = get_kappa2_matrix(cf, use_kappa, use_x_mode)
 
-    n_modes, n_freqs, _, _ = collision_coeffs.shape
+    n_modes, n_freqs, _, _ = collision_coeffs_si.shape
     total_nlin = np.zeros((n_modes, n_freqs))
     for mA in range(n_modes):
         for nuA in range(n_freqs):
             for mB in range(n_modes):
                 for nuB in range(n_freqs):
                     prefactor = nlin_prefactor(cf, mA, mB)
-                    total_nlin[mA, nuA] += collision_coeffs[mA,
+                    total_nlin[mA, nuA] += collision_coeffs_si[mA,
                                                             nuA, mB, nuB] * kappa2[mA, mB] * prefactor
     total_nlin *= constant_prefactor
     return total_nlin
@@ -669,7 +670,7 @@ if __name__ == "__main__":
     ttnl = total_nlin(cfg.load_toml_to_struct("./input/mmf.toml"),
                ccfs,
                use_kappa=True,
-               use_x_mode=True,
+               use_x_mode=False,
                )
     lg.debug(f"Total NLIN shape: {ttnl.shape}")
     lg.debug(f"A few total NLIN: \n {ttnl[0,0:5]} W, \n {watt2dBm(ttnl[0,0:5])} dBm")

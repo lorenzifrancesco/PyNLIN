@@ -1,26 +1,17 @@
+from scripts.modules.nlin_estimator import collision_coeffs_system, total_nlin
+from pynlin.utils import watt2dBm, dBm2watt
+import scripts.modules.cfg as cfg
+from matplotlib.ticker import ScalarFormatter
+import pynlin.wdm
+from matplotlib import rc
+import matplotlib.pyplot as plt
+import numpy as np
 from loguru import logger as lg
 from scripts.modules.log_init import init_logging
 init_logging()
 
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import rc
 # import plotly.graph_objects as go
 # import seaborn as sns
-import pynlin.wdm
-from pynlin.utils import nu2lambda
-from scripts.modules.load_fiber_values import load_group_delay, load_dummy_group_delay, load_rms_gvd
-from scripts.modules.validation import get_raman_corrections, ideal_fit_coefficients, softplus2
-from numpy import polyval
-from pynlin.fiber import MMFiber
-from matplotlib.gridspec import GridSpec
-from matplotlib.ticker import ScalarFormatter
-import scripts.modules.cfg as cfg
-from pynlin.utils import watt2dBm, dBm2watt
-from scipy.optimize import curve_fit
-from scipy.constants import c
-
-from scripts.modules.nlin_estimator import collision_coeffs_system, total_nlin
 
 
 # # SMF
@@ -36,12 +27,12 @@ from scripts.modules.nlin_estimator import collision_coeffs_system, total_nlin
 def plot_case_study_fits():
     pass
 
-def plot_case_study_noise(use_kappa=False,
-               use_smf=False,
-               use_fB=False,
-               use_dBm_scale=False,
-               use_plot_without_x_mode=True, 
-               name = "xxx"):
+
+def plot_case_study_noise(
+        use_dBm_scale=False,
+        also_plot_smf=False,
+        also_plot_noninteracting=True,
+        name="xxx"):
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -77,37 +68,32 @@ def plot_case_study_noise(use_kappa=False,
     )
     freqs_mmf = wdm.frequency_grid()
 
-
-    
-    
-    # FIXME send this to the prefactor methods
-
-    modal_prefactor = kappa  # FIXME check this modal prefactor thing
-    # rescaling for cross-mode interactions
-
-        # modal_prefactor *= 0.9
-    modal_prefactor = modal_prefactor[:cf.n_modes, :cf.n_modes]
-    collision_coeffs = modal_prefactor @ collision_coeffs
-    if use_dBm_scale:
-        modal_prefactor = np.multiply(
-            modal_prefactor,
-            nlin_prefactor(cf, np.array(modes), np.array(modes))
-        )
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    T = 1 / cf_mmf.baud_rate
-    L = cf_mmf.fiber_length
-
+    ccfs = collision_coeffs_system(cf_mmf,
+                                   ipulse=1,
+                                   recompute=False)
+    lg.debug(
+        f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0, 0, :, :5]}")
+    nlin_mmf = total_nlin(cf_mmf,
+                          ccfs,
+                          use_kappa=True,
+                          use_x_mode=True,
+                          )
+    nlin_mmf_noninteracting = total_nlin(cf_mmf,
+                                         ccfs,
+                                         use_kappa=True,
+                                         use_x_mode=False,
+                                         )
+    nlin_smf = total_nlin(cf_smf,
+                          ccfs,
+                          use_kappa=True,
+                          use_x_mode=False,
+                          )
+    lg.debug(
+        f"A few NLIN coeffs MMF (should be of order ... W): {nlin_mmf[0, :5]} W, {watt2dBm(nlin_mmf[0, :5])} dBm")
+    lg.debug(
+        f"A few NLIN coeffs MMF noninteracting (should be larger): {nlin_mmf_noninteracting[0, :5]} W, {watt2dBm(nlin_mmf_noninteracting[0, :5])} dBm")
+    lg.debug(
+        f"A few NLIN coeffs SMF (should be of order ... W): {nlin_smf[0, :5]} W, {watt2dBm(nlin_smf[0, :5])} dBm")
     colors = ["blue", "orange", "green", "red", "gray"]
     linestyles = ["-", "-", "-", "-", "--"]
     labels = ["LP01", "LP1", "LP11", "LP11", "SMF(LP01)"]
@@ -133,13 +119,13 @@ def plot_case_study_noise(use_kappa=False,
                       color=colors[i],
                       ls=linestyles[i],
                       label=labels[i])
-        if use_plot_without_x_mode:
+        if also_plot_noninteracting:
             plot_function(freqs_mmf * 1e-12,
                           y_function_mmf(nlin_mmf_noninteracting[i, :]),
                           lw=lw,
                           color=colors[i],
                           ls='-.')
-    if use_smf:
+    if also_plot_smf:
         plot_function(freqs_smf * 1e-12,
                       y_function_smf(nlin_smf[0, :]),
                       lw=lw,
@@ -170,9 +156,9 @@ def plot_case_study_noise(use_kappa=False,
 
 
 def plot_case_study_noise_histogram(use_kappa=False,
-                    use_smf=False,
-                    use_fB=False,
-                    use_dBm_scale=False):
+                                    use_smf=False,
+                                    use_fB=False,
+                                    use_dBm_scale=False):
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -204,13 +190,13 @@ def plot_case_study_noise_histogram(use_kappa=False,
     freqs_mmf = wdm.frequency_grid()
 
     nlin_mmf = collision_coeffs_system(cf_mmf,
-                        use_kappa=use_kappa,
-                        use_fB=use_fB,
-                        use_dBm_scale=use_dBm_scale,)
+                                       use_kappa=use_kappa,
+                                       use_fB=use_fB,
+                                       use_dBm_scale=use_dBm_scale,)
     nlin_smf = collision_coeffs_system(cf_smf,
-                        use_kappa=False,
-                        use_fB=True,
-                        use_dBm_scale=use_dBm_scale,)
+                                       use_kappa=False,
+                                       use_fB=True,
+                                       use_dBm_scale=use_dBm_scale,)
     # for each channel, we compute the total number of collisions that
     # needs to be computed for evaluating the total noise on that channel.
     T = 1 / cf_mmf.baud_rate
@@ -239,9 +225,9 @@ def plot_case_study_noise_histogram(use_kappa=False,
     n_bins = 25
     bin_width = (y_extremes[1] - y_extremes[0]) / n_bins
     bins = np.arange(y_extremes[0], y_extremes[1] + bin_width, bin_width)
-    alpha   = 0.1
-    alpha2  = 0.99
-    lw      = 5
+    alpha = 0.1
+    alpha2 = 0.99
+    lw = 5
     for i in range(cf_mmf.n_modes):
         plot_function(y_data[i, :],
                       bins=bins,
@@ -280,20 +266,22 @@ def plot_case_study_noise_histogram(use_kappa=False,
     plt.savefig(f"media/6-noise.pdf", dpi=dpi)
     print("The figure is saved as media/6-noise.pdf")
 
+
 if __name__ == "__main__":
-    for realistic in [True, False]:
-        if realistic: 
-            name = "realistic"
-        else:
-            name = "idealized"
-        plot_case_study_noise(use_kappa=realistic,
-               use_smf=realistic,
-               use_fB=realistic,
-               use_dBm_scale=realistic,
-               use_plot_x_mode=not realistic,
-               name = name)
-        
-    plot_case_study_noise_histogram(use_kappa=True, 
-                    use_smf=True,
-                    use_fB=True,
-                    use_dBm_scale=True)
+    plot_case_study_noise(
+        use_dBm_scale=True,
+        also_plot_smf=True,
+        also_plot_noninteracting=True,  # FIXME check
+        name="realistic")
+
+    # for realistic in [True, False]:
+    #     if realistic:
+    #         name = "realistic"
+    #     else:
+    #         name = "idealized"
+
+    exit()
+    plot_case_study_noise_histogram(use_kappa=True,
+                                    use_smf=True,
+                                    use_fB=True,
+                                    use_dBm_scale=True)

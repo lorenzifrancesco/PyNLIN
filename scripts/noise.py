@@ -72,15 +72,15 @@ if 2 in fig_to_generate:
                        fB_simple_interpolation=False)
 if 3 in fig_to_generate:
     plot_case_study_noise(use_kappa=True,
-               use_smf=True,
+               also_plot_smf=True,
                use_fB=True,
                use_dBm_scale=True,
-               use_plot_without_x_mode=False)
+               also_plot_noninteracting=False)
     plot_case_study_noise(use_kappa=True,
-               use_smf=True,
+               also_plot_smf=True,
                use_fB=True,
                use_dBm_scale=True,
-               use_plot_without_x_mode=True)
+               also_plot_noninteracting=True)
 if 4 in fig_to_generate:
     plot_case_study_noise_histogram(dgd_threshold=3e-15,
                     use_kappa=True,
