@@ -1,11 +1,6 @@
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import itertools
-import threading
 import itertools as it
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pynlin.utils import watt2dBm
-import matplotlib.pyplot as plt
 import os
 from scripts.modules.collision import build_I_low_interpolator, MAX_LLD
 import scripts.modules.cfg as cfg
@@ -16,17 +11,19 @@ from pynlin.fiber import MMFiber
 import pynlin
 import numpy as np
 from typing import Tuple
-from scipy.optimize import curve_fit
 from scipy.integrate import quad
-from scipy.interpolate import RegularGridInterpolator
 from loguru import logger as lg
 from scripts.modules.log_init import init_logging
 init_logging()
 
+from scripts.modules.nlin_estimation.raman_integrals import build_lookup_integral_table_with_raman
+from scripts.modules.nlin_estimation.ideal_fits import softplus2
+
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
 LLW_MAX = 100.0
-MU0 = 1.3809  # 64-QAM <|b_0|^4>/<|b_0|^2>^2 this is compatible with the (mu_0 - 1)=0.32*1.19 previously used.
+# 64-QAM <|b_0|^4>/<|b_0|^2>^2 this is compatible with the (mu_0 - 1)=0.32*1.19 previously used.
+MU0 = 1.3809
 
 # --- module-level globals that workers will read ---
 _G = {
@@ -124,250 +121,6 @@ def work_A(task_A):
     return mA, nuA, block, time.time() - start
 
 
-def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
-    assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
-    # all the information about the numerosity and stuff is here.
-    sol_path = "results/ct_solution-5_gain_0.0.npy" # Beware, -5dBm is right: it is obtained using the -2dBm solutions so to have equalizaiton without recomputing all
-    solutions = np.load(sol_path, allow_pickle=True).item()
-
-    signal_powers = solutions['signal_sol']
-    # indices: (z, mode, channel)
-    signal_powers = np.swapaxes(signal_powers, 1, 2)
-    fB = signal_powers / signal_powers[0, :, :]  # normalize to input power
-    assert np.all(fB[0, :, :] == 1.0)
-    fB_max = np.max(fB, axis=(1, 2))
-    fB_min = np.min(fB, axis=(1, 2))
-    z_axis = np.linspace(0, cf.fiber_length, len(fB_max))
-    assert ((fB_min <= fB_max).all())
-    assert (fB.shape[0] == len(z_axis))
-
-    coeffs_max = np.polyfit(z_axis, fB_max, 6)
-    coeffs_min = np.polyfit(z_axis, fB_min, 6)
-
-    def fB_max_function(z):
-        return np.polyval(coeffs_max, z)
-
-    def fB_min_function(z):
-        return np.polyval(coeffs_min, z)
-
-    return fB, fB_min, fB_max, fB_min_function, fB_max_function
-
-
-def softplus2(x, a, b, c):
-    return a * (1 + (x / b)**(1 / c))**(-c)
-
-
-def raman_integral(cf,
-                   regime: str,
-                   fB: np.ndarray):
-    z_axis = np.linspace(0, cf.fiber_length, len(fB))
-    dz = z_axis[1] - z_axis[0]
-    if regime == "LO":
-        return (np.sum(fB) * dz / cf.fiber_length)**2
-    else:
-        return np.sum(fB**2) * dz / cf.fiber_length
-
-
-def load_raman_integral_extremes(cf,
-                                 ) -> Tuple[float, float, float, float]:
-    _, fB_min, fB_max, _, _ = load_fB(cf)
-    r_lo_min = raman_integral(cf, "LO", fB_min)
-    r_lo_max = raman_integral(cf, "LO", fB_max)
-    r_hi_min = raman_integral(cf, "HI", fB_min)
-    r_hi_max = raman_integral(cf, "HI", fB_max)
-
-    return r_lo_min, r_lo_max, r_hi_min, r_hi_max
-
-
-def build_lookup_integral_table_with_raman(cf,
-                                           m_lo_truncation: int = 2,
-                                           ipulse: int = 1,
-                                           recompute=False) -> Tuple[callable, callable]:
-    # sampling the gvda, gvdb space, build the callable function
-    # giving the correction integrals for fB_max and fB_min: integral(L/gvda, L/gvdb).
-    _, _, _, fB_min, fB_max = load_fB(cf)
-    n_samples = 20
-    fiber_length = cf.fiber_length
-    lld = np.linspace(1e-30, MAX_LLD, n_samples)
-    ld = fiber_length / lld
-    lg.debug(
-        f"Useful range of L/LD from LO time integral data: {lld[0]:.2e} to {lld[-1]:.2e}")
-    raman_correction_grid_max = np.zeros((n_samples, n_samples))
-    raman_correction_grid_min = np.zeros((n_samples, n_samples))
-
-    # plot max and min fB
-    # exit()
-    # save to file with exhaustive namefile information
-    filename = f"results/raman_correction_grid_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.npy"
-
-    if os.path.exists(filename) and not recompute:
-        lg.info(f"Loading precomputed Raman correction grid from {filename}")
-        data = np.load(filename, allow_pickle=True).item()
-        raman_correction_grid_max = data['raman_correction_grid_max']
-        raman_correction_grid_min = data['raman_correction_grid_min']
-    else:
-        lg.info(f"Computing Raman correction grid and saving to {filename}")
-        for m_lo in range(m_lo_truncation+1):
-            add_min = np.zeros((n_samples, n_samples))
-            add_max = np.zeros((n_samples, n_samples))
-            lg.info(f"Calculating m_lo={m_lo}")
-            I_low_dataset = np.load(
-                f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
-            interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
-            for ida, lda in enumerate(ld):
-                for idb, ldb in enumerate(ld):
-                    # apply symmetry:
-                    if idb < ida:
-                        add_max[ida, idb] = add_max[idb, ida]
-                        add_min[ida, idb] = add_min[idb, ida]
-                    else:
-                        lg.debug(
-                            f"Point {ida*n_samples+idb+1}/{n_samples*n_samples}, spanning LLDA={cf.fiber_length/lda:.2e}, LLDB={cf.fiber_length/ldb:.2e}")
-                        # this is also in normalized units
-                        def I_specific(x): return interp(x/lda, x/ldb)
-                        # compute the integral
-                        add_max[ida, idb] += (
-                            quad(lambda x: I_specific(x) * fB_max(x), 0, fiber_length)[0] / fiber_length)**2
-                        add_min[ida, idb] += (
-                            quad(lambda x: I_specific(x) * fB_min(x), 0, fiber_length)[0] / fiber_length)**2
-                        lg.trace(
-                            f"Contribution of the m_lo={m_lo} integral: max       {add_max[ida, idb]:.2e}, min {add_min[ida, idb]:.2e}")
-            if m_lo != 0:
-                add_max *= 2
-                add_min *= 2
-            raman_correction_grid_max += add_max
-            raman_correction_grid_min += add_min
-
-            plt.figure(figsize=(4, 4))
-            plt.imshow(raman_correction_grid_max, extent=(
-                lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-            plt.colorbar()
-            plt.title(
-                f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-            plt.xlabel("L/LDa")
-            plt.ylabel("L/LD b")
-            plt.savefig(
-                f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-            plt.close()
-            plt.figure(figsize=(4, 4))
-            plt.imshow(raman_correction_grid_min, extent=(
-                lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-            plt.colorbar()
-            plt.title(
-                f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-            plt.xlabel("L/LDa")
-            plt.ylabel("L/LD b")
-            plt.savefig(
-                f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-            plt.close()
-            # raman_correction_grid_max = np.zeros((n_samples, n_samples))
-            # raman_correction_grid_min = np.zeros((n_samples, n_samples))
-        np.save(filename, {
-            'raman_correction_grid_max': raman_correction_grid_max,
-            'raman_correction_grid_min': raman_correction_grid_min,
-        })
-
-    # build the interpolator and return it
-    # checking
-    plt.figure(figsize=(4, 4))
-    plt.imshow(raman_correction_grid_max, extent=(
-        lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-    plt.colorbar()
-    plt.title(
-        f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-    plt.xlabel("L/LDa")
-    plt.ylabel("L/LD b")
-    plt.savefig(
-        f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-    plt.close()
-    plt.figure(figsize=(4, 4))
-    plt.imshow(raman_correction_grid_min, extent=(
-        lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-    plt.colorbar()
-    plt.title(
-        f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-    plt.xlabel("L/LDa")
-    plt.ylabel("L/LD b")
-    plt.savefig(
-        f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-    plt.close()
-
-    interp_func_max = RegularGridInterpolator(
-        (lld, lld),
-        raman_correction_grid_max,
-        bounds_error=False,
-        fill_value=None)
-
-    interp_func_min = RegularGridInterpolator(
-        (lld, lld),
-        raman_correction_grid_min,
-        bounds_error=False,
-        fill_value=None)
-
-    def func_wrapper(func):
-        def func_wrapper(x, y):
-            assert (x <= 1.01 * lld[-1] and y <= 1.01 * lld[-1]
-                    ), f"Input {x} exceeds the 110% of the interpolation range [{lld[0]}, {lld[-1]}]"
-            assert (x >= 0 and y >=
-                    0), f"Input has negative values check that your LD is positive"
-            return func((x, y))
-        return func_wrapper
-
-    return func_wrapper(interp_func_min), func_wrapper(interp_func_max)
-
-
-"""
-ideal := no Raman, no GVD. It is flexible to also compute the GVD, but it is not recommended.
-"""
-
-
-def ideal_fit_coefficients(gvda: float = 0.0,
-                           gvdb: float = 0.0,
-                           ipulse: int = 1) -> Tuple[np.ndarray, np.ndarray]:
-    cf = cfg.load_toml_to_struct("./input/mmf.toml")
-    nc = cfg.load_nc_toml_to_struct("./input/numerical_config.toml")
-
-    # Override DGD ranges using global targets
-    # lg.warning(f"Overriding DGD ranges to [{LLW_MIN}, {LLW_MAX}] ps/sqrt(km)")
-    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
-    # build the fit from the minimum to the maximum
-    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
-    dgd2 = nc.dgd2_n
-
-    cf_path = "./input/mmf.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
-
-    dgds_numeric = np.logspace(
-        np.log10(nc.dgd1), np.log10(dgd2), nc.n_samples_numeric_n)
-
-    T = 1 / cf.baud_rate
-    L = cf.fiber_length
-    x_norm = L / T
-    y_norm = x_norm**(-2)
-    p0 = [0.4, 4.5, 0.5]
-
-    if ipulse == 0:
-        pulse_shape = "gaussian"
-    else:
-        pulse_shape = "nyquist"
-
-    nlin_numeric = None
-    if gvda != 0.0 or gvdb != 0.0:
-        raise ("You are trying to cheat! Instead of fitting from a case computed with dispersion, you should use the dispersion correction given by correct_fit_coefficients")
-        nlin_numeric = np.load(
-            f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
-    else:
-        nlin_numeric = np.load(
-            f"results/partial_nlin_{pulse_shape}_perfect_0.0_0.0.npy")
-
-    assert len(dgds_numeric) == len(
-        nlin_numeric), f"Nyquist: {len(dgds_numeric)} vs {len(nlin_numeric)}"
-    popt, _ = curve_fit(softplus2,
-                        dgds_numeric * x_norm,
-                        nlin_numeric * y_norm,
-                        p0=p0)
-    return popt
-
 
 def gvd_correction(cf,
                    gvda,
@@ -433,8 +186,10 @@ def fit_nlin(cf,
 
     if np.all(fB == 1.0):
         lo_value_perfect = gvd_correction(cf,
-        gvda, gvdb, cf.fiber_length, ipulse=ipulse, m_lo_truncation=m_lo_truncation) # FIXME this is the sucker
-        ps_ramanless = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
+                                          # FIXME this is the sucker
+                                          gvda, gvdb, cf.fiber_length, ipulse=ipulse, m_lo_truncation=m_lo_truncation)
+        ps_ramanless = apply_plateau_correction(
+            ps_ideal.copy(), lo_value_perfect)
         lg.info("You are using a flat fB, no Raman correction will be applied")
         ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
         return lambda dgd: softplus2(dgd * cf.fiber_length * cf.baud_rate, *ps)
@@ -474,12 +229,9 @@ def fit_nlin(cf,
         return softplus2(d, *ps_ramanless) * raman_integral_fB_lo
     return nlin_megafit
 
-
 """
 corrections due to mode multiplicity
 """
-
-
 def nlin_prefactor_general(cf: cfg.Config, mode_a: int, mode_b: int):
     prefactor = 1
     if mode_a == mode_b:
@@ -625,34 +377,39 @@ def get_kappa2_matrix(cf,
         kappa = np.loadtxt('input/kappa.csv', delimiter=',')
         kappa2 = kappa**2
     else:
-        kappa2 = np.ones((cf.n_modes, cf.n_modes)) # kind of innatural, but ok
+        kappa2 = np.ones((cf.n_modes, cf.n_modes))  # kind of innatural, but ok
     switchoff_matrix = np.eye(cf.n_modes)
-    
+
     if not use_x_mode:
         kappa2 = np.multiply(kappa2, switchoff_matrix)
     return kappa2
 
-## all in SI units
+# all in SI units
+
+
 def total_nlin(cf,
-               collision_coeffs: np.ndarray, # warn: in normalized units
+               collision_coeffs: np.ndarray,  # warn: in normalized units
                use_kappa: bool = False,
                use_x_mode: bool = False,
                ) -> np.ndarray:
-    
+
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
-    lg.info(f"Normalization units: x_norm = {x_norm:.2e} s, y_norm = {y_norm:.2e} s^2/m^2")
-    collision_coeffs_si = collision_coeffs / y_norm # bring back to SI units
-    
+    lg.info(
+        f"Normalization units: x_norm = {x_norm:.2e} s, y_norm = {y_norm:.2e} s^2/m^2")
+    collision_coeffs_si = collision_coeffs / y_norm  # bring back to SI units
+
     P_in = dBm2watt(cf.launch_power)
     omega_0 = 2 * np.pi * cf.center_frequency
     n2 = 2.6e-20  # constant of SiO2
     omega_0 = 2 * np.pi * cf.center_frequency
     gamma = n2 * omega_0 / (cf.effective_area * c)  # Delta f / f << 1
-    lg.trace(f"Computed gamma: {gamma:.2e} 1/(W m), P_in: {P_in:.2e} W / {watt2dBm(P_in):.2f} dBm")
+    lg.trace(
+        f"Computed gamma: {gamma:.2e} 1/(W m), P_in: {P_in:.2e} W / {watt2dBm(P_in):.2f} dBm")
     constant_prefactor = P_in**3 * gamma**2 / (cf.baud_rate**2)
-    
-    lg.trace(f"Computed constant prefactor: {constant_prefactor:.2e} W * s^2 / m^2")
+
+    lg.trace(
+        f"Computed constant prefactor: {constant_prefactor:.2e} W * s^2 / m^2")
     kappa2 = get_kappa2_matrix(cf, use_kappa, use_x_mode)
 
     n_modes, n_freqs, _, _ = collision_coeffs_si.shape
@@ -663,7 +420,7 @@ def total_nlin(cf,
                 for nuB in range(n_freqs):
                     prefactor = nlin_prefactor(cf, mA, mB)
                     total_nlin[mA, nuA] += collision_coeffs_si[mA,
-                                                            nuA, mB, nuB] * kappa2[mA, mB] * prefactor
+                                                               nuA, mB, nuB] * kappa2[mA, mB] * prefactor
     total_nlin *= constant_prefactor
     return total_nlin
 
@@ -674,15 +431,17 @@ if __name__ == "__main__":
     ccfs = collision_coeffs_system(cfg.load_toml_to_struct("./input/mmf.toml"),
                                    ipulse=1,
                                    recompute=False)
-    lg.debug(f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0,0, :, :5]}")
+    lg.debug(
+        f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0, 0, :, :5]}")
     ttnl = total_nlin(cfg.load_toml_to_struct("./input/mmf.toml"),
-               ccfs,
-               use_kappa=True,
-               use_x_mode=False,
-               )
+                      ccfs,
+                      use_kappa=True,
+                      use_x_mode=False,
+                      )
     lg.debug(f"Total NLIN shape: {ttnl.shape}")
-    lg.debug(f"A few total NLIN: \n {ttnl[0,0:5]} W, \n {watt2dBm(ttnl[0,0:5])} dBm")
-    exit() 
+    lg.debug(
+        f"A few total NLIN: \n {ttnl[0, 0:5]} W, \n {watt2dBm(ttnl[0, 0:5])} dBm")
+    exit()
     import scripts.modules.cfg as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
 
