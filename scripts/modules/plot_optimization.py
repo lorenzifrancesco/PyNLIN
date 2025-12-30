@@ -1,10 +1,10 @@
-from .cfg import Config, get_next_filename
+from scripts.modules.cfg import Config, get_next_filename
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.cm import viridis
 from pynlin.utils import watt2dBm
 import matplotlib.colors as mcolors
-
+from pynlin.utils import dBm2watt
 def adjust_luminosity(color, factor):
     rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB
     return np.clip(rgb * factor, 0, 1)  # Scale and clip values
@@ -19,7 +19,9 @@ def plot_profiles(signal_wavelengths,
                   wallpaper_mode=False, 
                   single_out_mode = None):
     plt.clf()
-    plt.figure(figsize=(2.5, 2))
+    # plt.figure(figsize=(2.5, 2))
+    plt.figure(figsize=(3.6, 2))
+
     cmap = viridis
     z_plot = np.linspace(0, cf.fiber_length, len(pump_solution[:, 0, 0])) * 1e-3
     # lss = ["-", "--", "-.", ":", "-"]
@@ -37,11 +39,11 @@ def plot_profiles(signal_wavelengths,
         else:
            plt.plot(z_plot,
                    watt2dBm(signal_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.3), alpha=0.1, lw=0.3)
-        # try:
-        #   plt.plot(z_plot,
-        #          watt2dBm(ase_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.7, ls="-")
-        # except:
-        #   print(f"got data without ASE.")
+        try:
+          plt.plot(z_plot,
+                 watt2dBm(ase_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.7, ls="-")
+        except:
+          print(f"got data without ASE.")
     
     if wallpaper_mode:
        lww = 1
@@ -56,7 +58,7 @@ def plot_profiles(signal_wavelengths,
     plt.tight_layout()
     plt.grid(False)
     name = get_next_filename("media/optimization/signal_ase_profile", "pdf", use_active_naming=True)
-    plt.savefig(name)
+    plt.savefig(name, bbox_inches='tight', pad_inches=0.01)
     print(f"Plot saved as {name}")
     plt.clf()
     #
@@ -108,15 +110,15 @@ def analyze_optimization(
   pump_solution_dBm = watt2dBm(pump_solution)
   flatness = np.max(signal_solution_dBm[-1, :, :]) - np.min(signal_solution_dBm[-1, :, :])
   approx_loss = -0.2e-3 * cf.fiber_length
-  avg_pump_power_0 = np.mean(pump_solution_dBm[0, :, :])
-  avg_pump_power_L = np.mean(pump_solution_dBm[-1, :, :])
+  avg_pump_power_0 = watt2dBm(np.mean(dBm2watt(pump_solution_dBm[0, :, :])))
+  avg_pump_power_L = watt2dBm(np.mean(dBm2watt(pump_solution_dBm[-1, :, :])))
   print(f"\n{'Optimization metric':<30} | {'Value':>10}")
   print("-" * 43)
   print(f"{'Flatness':<30} | {flatness:7.3f} dB")
   print(f"{'Attenuation':<30} | {approx_loss:7.3f} dB")
   try:
     ase_solution_dBm = watt2dBm(ase_solution)
-    avg_ase = np.mean(ase_solution_dBm[-1, :, :])
+    avg_ase = watt2dBm(np.mean(dBm2watt(ase_solution_dBm[-1, :, :])))
     print(f"{'Average ASE':<30} | {avg_ase:7.3f} dBm")
   except:
     print(f"got data without ASE.")
@@ -127,3 +129,4 @@ def analyze_optimization(
   # print(f" ° Wavel [m] : {repr(pump_wavelengths)}")
   # print(f" ° Pow. [dBm] : {repr(pump_powers)}")
   return
+

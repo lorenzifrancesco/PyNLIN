@@ -3,6 +3,7 @@ import numpy as np
 from typing import Tuple
 from scipy.optimize import curve_fit
 from scripts.modules.log_init import init_logging
+from loguru import logger as lg
 init_logging()
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
@@ -12,11 +13,8 @@ LLW_MAX = 100.0
 MU0 = 1.3809
 
 
-
 def softplus(x, a, b, c):
     return a * (1 + (x / b)**(1 / c))**(-c)
-
-
 
 """
 ideal := no Raman, no GVD. It is flexible to also compute the GVD, but it is not recommended.
@@ -66,5 +64,12 @@ def ideal_fit_coefficients(gvda: float = 0.0,
                         dgds_numeric * x_norm,
                         nlin_numeric * y_norm,
                         p0=p0)
+    lg.debug(f"Fitting ideal case with gvda={gvda}, gvdb={gvdb}, pulse_shape={pulse_shape}")
+    lg.info(
+        f"Ideal fit coefficients (a, b, c): {popt[0]:.3e}, {popt[1]:.3e}, {popt[2]:.3e}")
+    lg.info(f"Ideal fit coefficients (a, b, c): {popt[0]*L**2/T**2 * 1e-30:.3e} km^2/ps^2, {popt[1]*T/L * 1e12:.3e} ps/m, {popt[2]}")
     return popt
 
+if __name__ == "__main__":
+    for ipulse in [0, 1]:
+        gf = ideal_fit_coefficients(ipulse=ipulse)

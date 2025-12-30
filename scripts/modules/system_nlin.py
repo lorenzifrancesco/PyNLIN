@@ -327,11 +327,13 @@ def plot_case_study_noise_histogram(
 
 
 if __name__ == "__main__":
-    plot_case_study_noise_histogram(also_plot_smf=True)
-    exit()
-
     plot_case_study_noise(
         use_dBm_scale=True,
         also_plot_smf=True,
         also_plot_noninteracting=True,  # FIXME check
         name="realistic")
+    exit()
+    plot_case_study_noise_histogram(use_dBm_scale=True,
+                                    also_plot_noninteracting=True,
+                                    also_plot_smf=True)
+    exit()

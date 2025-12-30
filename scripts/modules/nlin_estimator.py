@@ -5,6 +5,7 @@ import os
 from scripts.modules.collision import build_I_low_interpolator, MAX_LLD
 import scripts.modules.cfg as cfg
 from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
+from scripts.modules.nlin_estimation.raman_integrals import load_fB
 from scipy.constants import c
 from pynlin.utils import dBm2watt
 from pynlin.fiber import MMFiber
@@ -16,8 +17,9 @@ from loguru import logger as lg
 from scripts.modules.log_init import init_logging
 init_logging()
 
-from scripts.modules.nlin_estimation.raman_integrals import build_lookup_integral_table_with_raman
-from scripts.modules.nlin_estimation.ideal_fits import softplus2
+from scripts.modules.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
+from scripts.modules.nlin_estimation.ideal_fits import softplus, ideal_fit_coefficients
+from scripts.modules.nlin_estimation.raman_integrals import load_raman_integral_extremes, raman_integral
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
@@ -192,7 +194,7 @@ def fit_nlin(cf,
             ps_ideal.copy(), lo_value_perfect)
         lg.info("You are using a flat fB, no Raman correction will be applied")
         ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
-        return lambda dgd: softplus2(dgd * cf.fiber_length * cf.baud_rate, *ps)
+        return lambda dgd: softplus(dgd * cf.fiber_length * cf.baud_rate, *ps)
 
     # correct in the LO regime (Raman + GVD)
     lo_value_max = raman_gvd_correction_max(
@@ -222,12 +224,12 @@ def fit_nlin(cf,
         DGD_MAX = LLW_MAX
         DGD_MIN = LLW_MIN
         xi = (d-DGD_MIN)/(DGD_MAX-DGD_MIN)
-        return softplus2(d, *ps_ramanful)
-        return ((softplus2(d, *ps_ramanless) * raman_integral_fB_hi))
-        return softplus2(d, *ps_ramanful) * (1-xi) + softplus2(d, *ps_ramanless) * xi * raman_integral_fB_hi
-        return softplus2(d, *ps_ramanful)
-        return softplus2(d, *ps_ramanless) * raman_integral_fB_lo
-    return nlin_megafit
+        return softplus(d, *ps_ramanful)
+        return ((softplus(d, *ps_ramanless) * raman_integral_fB_hi))
+        return softplus(d, *ps_ramanful) * (1-xi) + softplus(d, *ps_ramanless) * xi * raman_integral_fB_hi
+        return softplus(d, *ps_ramanful)
+        return softplus(d, *ps_ramanless) * raman_integral_fB_lo
+    return nlin_megafit, ps_ramanful
 
 """
 corrections due to mode multiplicity
@@ -272,7 +274,7 @@ def collision_coeffs_system(cf,
         fiber_type = "mmf"
     filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}.npy"
     if os.path.exists(filename) and not recompute:
-        lg.info(f"Loading precomputed collision coefficients from {filename}")
+        lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
     else:
         lg.info(f"Computing collision coefficients from scratch")
@@ -420,7 +422,7 @@ def total_nlin(cf,
                 for nuB in range(n_freqs):
                     prefactor = nlin_prefactor(cf, mA, mB)
                     total_nlin[mA, nuA] += collision_coeffs_si[mA,
-                                                               nuA, mB, nuB] * kappa2[mA, mB] * prefactor
+                                                               nuA, mB, nuB] * kappa2[mA, mB]  * prefactor 
     total_nlin *= constant_prefactor
     return total_nlin
 

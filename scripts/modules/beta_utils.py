@@ -283,16 +283,25 @@ def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
         beta1[:, :, np.newaxis, np.newaxis] - beta1[np.newaxis, np.newaxis, :, :])
     beta1_differences = beta1_differences[beta1_differences != 0]
 
+    ##
+    
+    
+    
+    
+    assert    cf.baud_rate == 33e9, "Adjust DGD window lines for different baud rates"
+    assert cf.fiber_length == 70e3, "Adjust DGD window lines for different fiber lengths"
+   
     x_norm = cf.fiber_length * cf.baud_rate
     mask = (beta1_differences < 200 * 1e-1)
-    
+    lg.debug(f"Min and max DGD (all pairs):  {np.min(beta1_differences)*1e12:.2e} ps/m,     {np.max(beta1_differences)*1e12:.2e} ps/m")
+    lg.debug(f"Average DGD (all pairs):  {np.mean(beta1_differences)*1e12:.2f} ps/m")
+    lg.debug(f"Average L/LW :  {np.mean(beta1_differences* x_norm):.2f}")
     total_pairs = np.sum(mask) # unique pairs only
-    hist, edges = np.histogram(np.log(beta1_differences[mask] * 1e12), bins=50)
+    hist, edges = np.histogram(np.log10(beta1_differences[mask]*x_norm), bins=50)
     hist = hist / 2.0
 
     plt.clf()
     fig, ax = plt.subplots(figsize=(3.6, 3))
-
     ax.bar(np.power(10, edges[:-1]),
         hist,
         width=np.diff(np.power(10, edges)) / 1.5,
@@ -300,26 +309,58 @@ def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
         edgecolor='blue',
         facecolor='none')
 
-    x_start = 0.2 / x_norm * 1e12
-    x_end = 3.0 / x_norm * 1e12
-    ax.axvline(x_start, color='red', lw=1, ls='--')
-    ax.axvline(x_end, color='red', lw=1, ls='--')
-    ax.axvspan(x_start, x_end, color='red', alpha=0.3)
-
+    x_start = 2.89 # ideal value no raman no dispersion at 20% of the relative precision 0.6
+    x_end   = 12 # ideal value no raman no dispersion at 20% of the relative precision 20.0
     # count in-window and total
-    count = np.sum((beta1_differences * 1e12 > x_start) & (beta1_differences * 1e12 < x_end))
+    count = np.sum((beta1_differences * x_norm > x_start) & (beta1_differences * x_norm < x_end))
     total = np.sum(mask)
     total_pairs = total / 2.0  # match the /2 applied to hist
     print(f"Number of channel pairs with DGD between {x_start:.2e} and {x_end:.2e} ps/m: "
         f"{count/2:.0f} over {total_pairs:.0f} -> {(count/2)/total_pairs:.2%}")
 
     # labels/scales on left axis
-    ax.set_xlabel(r'$\Delta\beta_1$ [ps/m]')
+    # L/LW = \Delta\beta_1 * L * Rb
+    ax.set_xlabel(r'$L/L_W$')
     ax.set_ylabel('channel pair count')
     ax.grid(axis='y', zorder=1)
     ax.set_xscale('log')
     ax.set_yscale('log')
+    ax.axvline(x_start, color='red', lw=1, ls='--', zorder=4)
+    ax.axvline(x_end, color='red', lw=1, ls='--')
+    ax.axvspan(x_start, x_end, color='red', alpha=0.3)
+    ### ANDAMENTO
+    #     # --- log-log least squares fit on histogram (ignore zero-count bins) ---
+    # # bin centers in log space (geometric mean of edges)
+    # log_edges = np.log10(edges)
+    # log_centers = 0.5 * (log_edges[:-1] + log_edges[1:])
+    # centers = 10**log_centers
 
+    # # remove zero/negative bins to avoid -inf in logs
+    # valid = hist > 0
+    # x_fit = log_centers[valid]           # log10(x)
+    # y_fit = np.log10(hist[valid])        # log10(y)
+
+    # if x_fit.size >= 2:
+    #     # linear LS in log space: y = a*x + b
+    #     a, b = np.polyfit(x_fit, y_fit, 1)
+
+    #     # R^2 in log space
+    #     y_pred = a * x_fit + b
+    #     ss_res = np.sum((y_fit - y_pred)**2)
+    #     ss_tot = np.sum((y_fit - np.mean(y_fit))**2)
+    #     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    #     # smooth x for plotting the fitted power law on the same axes
+    #     x_plot = np.logspace(log_edges[0], log_edges[-1], 400)
+    #     y_plot = 10**b * x_plot**a
+
+    #     ax.plot(x_plot, y_plot, lw=1.5, label=f"LS fit: y ≈ C x^{a:.2f}")
+    #     ax.legend(frameon=False)
+    #     lg.info(f"Histogram log-log LS fit: slope a={a:.6f}, intercept b={b:.6f} (base-10 logs), R^2={r2:.4f}")
+    # else:
+    #     lg.warning("Not enough nonzero histogram bins to perform log-log fit.")
+
+    
     # # --- RIGHT Y AXIS (percent of total unique pairs) ---
     # ax_right = ax.twinx()
     # ax_right.set_yscale('log')           # keep scales aligned
@@ -444,7 +485,6 @@ def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
     fig.tight_layout()
     fig.savefig("media/dgd-statistics.pdf", dpi=300)
     print("Saved figure 4 to media/dgd-statistics.pdf")
-
 
 
 if __name__ == "__main__":

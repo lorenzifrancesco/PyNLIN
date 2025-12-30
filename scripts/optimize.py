@@ -206,7 +206,7 @@ if __name__ == "__main__":
     # activate this is you want to use an optimization obtained with a differnt launch power
     set_improper_power = False
     repropagate = False
-    use_smf     = False
+    use_smf     = True
     use_avg_oi  = False
     
     # -10 -> true

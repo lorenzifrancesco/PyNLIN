@@ -11,6 +11,7 @@ from scripts.modules.log_init import init_logging
 init_logging()
 from scripts.modules.nlin_estimation.raman_integrals import load_fB, raman_integral, load_raman_integral_extremes
 from scripts.modules.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset, zoomed_inset_axes
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
@@ -282,7 +283,7 @@ def  validate_maxmin_interpolation(cf):
 
     # plotting together
     # --- Combined side-by-side figure ---
-    fig, axes = plt.subplots(1, 2, figsize=(6*0.75, 3*0.75))
+    fig, axes = plt.subplots(2, 1, figsize=(3, 6))
 
     # Left: Raman correction vs α
     ax1 = axes[0]
@@ -305,8 +306,8 @@ def  validate_maxmin_interpolation(cf):
     ax1.ticklabel_format(style='sci', scilimits=(0,0), axis='both')
     ax1.text(0.89, 0.01, fr"(a)"),
     ax1.set_xlabel(r"$\alpha$")
-    ax1.set_ylabel(r"$\overline{\mathcal{P}}_B(\alpha)$")
-    ax1.legend(fontsize=6, loc="upper left", title=r"$L/L_{{DB}}$")
+    ax1.set_ylabel(r"$\overline{\mathcal{P}}_B^{\mathrm{LO}}$")
+    ax1.legend(fontsize=8, loc="upper left", title=r"$L/L_{{DB}}$")
 
     # Right: scatter comparison
     ax2 = axes[1]
@@ -314,7 +315,7 @@ def  validate_maxmin_interpolation(cf):
         ax2.scatter(
             lo_value_fB_custom[:, :, i].flatten(),
             lo_value_fB_maxmin[:, :, i].flatten(),
-            s=7,
+            s=17,
             facecolors='none',
             lw=0.3,
             edgecolors=plt.cm.ocean(1 - (i / (n_samples - 1))),
@@ -329,8 +330,8 @@ def  validate_maxmin_interpolation(cf):
     )
     ax2.ticklabel_format(style='sci', scilimits=(0,0), axis='both')
     ax2.set_aspect('equal', adjustable='box')
-    ax2.set_xlabel(rf"$\overline{{\mathcal{{P}}}}_B$")
-    ax2.set_ylabel(rf"${{\mathcal{{P}}}}_B ...$")
+    ax2.set_xlabel(rf"$\overline{{\mathcal{{P}}}}_B^{{\mathrm{{LO}}}}$")
+    ax2.set_ylabel(rf"approx. $\overline{{\mathcal{{P}}}}_B^{{\mathrm{{LO}}}}$")
     # ax2.text(0.0, np.max(lo_value_fB_custom[:, :])*0.96, fr"(b)"),
     ax2.text(0.089, 0.0, fr"(b)"),
 
@@ -346,9 +347,99 @@ def  validate_maxmin_interpolation(cf):
     fig.savefig("media/raman-validation-right.pdf", bbox_inches=extent2, dpi=300)
     lg.info("Saved to media/raman-validation-right.pdf")
     plt.close(fig)
-
-
     
+    fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
+
+    # === Left panel content (your original ax1) ===
+    skipping = 4
+    for i in range(len(lldas)//skipping):
+        color = plt.cm.jet(1 - (skipping * i / (len(lldas) - 1)))
+        ax1.plot(
+            np.linspace(0, 1, n_samples),
+            lo_value_fB_custom[r_index, skipping * i, :],
+            lw=0.7,
+            color=color,
+            label=fr"{lldas[skipping*i]:.1f}"
+        )
+        ax1.plot(
+            np.linspace(0, 1, n_samples),
+            lo_value_fB_maxmin[r_index, skipping * i, :],
+            'k--',
+            lw=0.5
+        )
+
+    ax1.ticklabel_format(style='sci', scilimits=(0,0), axis='both')
+    ax1.set_xlabel(r"$\alpha$")
+    ax1.set_ylabel(r"$\overline{\mathcal{P}}_B(\alpha)$")
+    ax1.legend(fontsize=8, loc="upper left", title=r"$L/L_{\mathrm{DB}}$")
+    ax1.text(0.95, 0.02, "(a)", ha='right', va='bottom')
+
+    # === Inset axis (your original ax2) ===
+    # Position is in figure fraction coordinates relative to ax1
+    ax2 = inset_axes(ax1, width="45%", height="45%", loc="lower right",
+                    borderpad=1.2)  # adjust width/height/loc as needed
+
+    # --- Scatter comparison (original ax2 content) ---
+    for i in range(n_samples):
+        ax2.scatter(
+            lo_value_fB_custom[:, :, i].flatten(),
+            lo_value_fB_maxmin[:, :, i].flatten(),
+            s=7, facecolors='none', lw=0.3,
+            edgecolors=plt.cm.ocean(1 - (i / (n_samples - 1))),
+            alpha=0.3
+        )
+
+    ax2.plot(
+        [0, np.max(lo_value_fB_maxmin)],
+        [0, np.max(lo_value_fB_maxmin)],
+        color='red', lw=0.5
+    )
+    ax2.ticklabel_format(style='sci', scilimits=(0,0), axis='both')
+    ax2.set_aspect('equal', adjustable='box')
+    ax2.set_xlabel(rf"$\overline{{\mathcal{{P}}}}_B$", fontsize=7)
+    ax2.set_ylabel(rf"${{\mathcal{{P}}}}_B$", fontsize=7)
+    ax2.tick_params(labelsize=6)
+    ax2.text(0.05, 0.05, "(b)", transform=ax2.transAxes, fontsize=7)
+
+    # --- Save ---
+    plt.tight_layout()
+    plt.savefig("media/raman-validation-inset.pdf",
+                dpi=300, bbox_inches='tight', pad_inches=0.01)
+    lg.info("Saved to media/raman-validation-inset.pdf")
+    plt.close(fig)
+    
+    
+    
+    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    # --- Compute difference (residual) ---
+    diff = lo_value_fB_maxmin - lo_value_fB_custom
+
+    # --- Scatter all results across all parameters ---
+    for i in range(n_samples):
+        ax.scatter(
+            lo_value_fB_custom[:, :, i].flatten(),   # x-axis: actual P_B
+            diff[:, :, i].flatten()/lo_value_fB_custom[:, :, i].flatten(),                 # y-axis: difference (approx - actual)
+            s=7, facecolors='none', lw=0.3,
+            edgecolors=plt.cm.ocean(1 - (i / (n_samples - 1))),
+            alpha=0.3
+        )
+
+    # --- Reference line y = 0 ---
+    ax.axhline(0, color='red', lw=0.5)
+
+    # --- Labels and formatting ---
+    ax.ticklabel_format(style='sci', scilimits=(0,0), axis='both')
+    ax.set_xlabel(r"$\overline{\mathcal{P}}_B$")
+    ax.set_ylabel(r"$\Delta\overline{\mathcal{P}}_B$")
+    # ax.text(0.05, 0.92, "(c)", transform=ax.transAxes, fontsize=9)
+    ax.set_aspect('auto', adjustable='box')
+
+    plt.tight_layout()
+    plt.savefig("media/raman-validation-residuals.pdf", dpi=300, bbox_inches='tight', pad_inches=0.01)
+    lg.info("Saved to media/raman-validation-residuals.pdf")
+    plt.close(fig)
+
+        
 
 if __name__ == "__main__":
     validate_maxmin_interpolation(cfg.load_toml_to_struct("./input/mmf.toml")) 

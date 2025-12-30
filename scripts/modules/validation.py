@@ -1,4 +1,7 @@
-from scripts.modules.nlin_estimator import ideal_fit_coefficients, softplus2, fit_nlin, build_lookup_integral_table_with_raman, LLW_MAX, LLW_MIN, ideal_fit_coefficients, softplus2, load_fB, raman_integral
+from scripts.modules.nlin_estimator import fit_nlin, LLW_MAX, LLW_MIN
+from scripts.modules.nlin_estimation.raman_integrals import load_fB, raman_integral
+from scripts.modules.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from scripts.modules.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman, build_I_low_interpolator, build_lookup_integral_table_with_raman_custom
 from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
 from scripts.modules.log_init import init_logging
 import matplotlib.colors as mcolors
@@ -14,6 +17,8 @@ import os
 import numpy as np
 from loguru import logger as lg
 init_logging()
+from scipy.interpolate import interp1d
+from scipy.optimize import brentq
 
 
 # ==========================
@@ -194,7 +199,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(cf, m_lo_truncation=m_lo_truncation)
     
     # -- analytic and fitted
-    nlin_fitted = fit_nlin(cf,
+    nlin_fitted, ps_ramanful = fit_nlin(cf,
                            gvda,
                            gvdb,
                            fB,
@@ -230,6 +235,11 @@ def simple_plot_threshold(gvda: float = 0.0,
     plt.xlabel(r'$L/L_W$')
     plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
     plt.tight_layout()
+    plt.axvline(ps_ramanful[1], color='red', lw=1, ls='--')
+    plt.axhline(ps_ramanful[0], color='blue', lw=1, ls='--')
+    lg.info(f"threshold at L/LW = {1/ps_ramanful[2]:.2f}")
+    lg.debug(f"(ramanful) Fitted parameters: a={ps_ramanful[0]:.4f}, b={ps_ramanful[1]:.4f}, c={ps_ramanful[2]:.4f}")
+    
     plt.savefig(f"media/simple_threshold_{pulse_shape}_{llda:.2f}_{lldb:.2f}.pdf", dpi=dpi)
     lg.info(f"Saved figure to media/simple_threshold_{pulse_shape}_{llda:.2f}_{lldb:.2f}.pdf")
     return
@@ -411,7 +421,6 @@ def plot_threshold(
         plt.savefig(out_pdf, dpi=dpi, bbox_inches="tight", pad_inches=0)
         lg.info(f"Saved figure to {out_pdf}")
     
-        exit()
         # ----------------------------------
         # plotting the error (only without Raman)
         # ----------------------------------
@@ -419,54 +428,115 @@ def plot_threshold(
             plt.clf()
             plt.figure(figsize=(3.6, 2))
             lw = 1
-            ss = 5
+            ss = 8
 
-            interp_g = interp1d(dgds_analytic, gauss, kind='cubic',
-                                bounds_error=False, fill_value=(gauss[0], gauss[-1]))
-            interp_n = interp1d(dgds_analytic, nyquist, kind='cubic',
-                                bounds_error=False, fill_value=(nyquist[0], nyquist[-1]))
-            interp_a = interp1d(dgds_analytic, analytic_nlin, kind='linear',
-                                bounds_error=False, fill_value=(analytic_nlin[0], analytic_nlin[-1]))
+            # Numeric (no Raman) in normalized units
+            numeric_bare_norm = nlin_numeric_bare * y_norm
 
-            gauss_sampled = interp_g(dgds_numeric_g)
-            nyquist_sampled = interp_n(dgds_numeric_n)
-            analytic_nlin_sampled = interp_a(dgds_numeric_g)
+            # Sample the fitted curves on the numeric grid (fits already return normalized values)
+            fit_bare_on_numeric = nlin_fit_bare(dgds_numeric)
+            fit_gvd_on_numeric  = nlin_fit_gvd(dgds_numeric)
 
-            for ix, gvd in enumerate(gvds):
-                partial_B2g = np.load(
-                    f"results/partial_nlin_gaussian_perfect_{gvda}_{gvdb}.npy")
-                if ix == 0:
-                    lowest_dgd = partial_B2g[0]
-                plt.plot(dgds_numeric_g * x_norm, np.abs(partial_B2g - gauss_sampled) /
-                         gauss_sampled, color="blue", marker="x", markersize=ss, lw=lw)
-                plt.plot(dgds_numeric_g * x_norm, np.abs(partial_B2g - analytic_nlin_sampled) /
-                         analytic_nlin_sampled, color="blue", marker="x", markersize=ss, lw=lw, ls="-.")
+            # Interpolate asymptotics (normalized) onto the numeric grid
+            lo_interp = interp1d(
+                dgds_analytic,
+                nlin_lo * y_norm,
+                kind="linear",
+                bounds_error=False,
+                fill_value=(nlin_lo[0] * y_norm, nlin_lo[-1] * y_norm),
+            )
+            hi_interp = interp1d(
+                dgds_analytic,
+                nlin_hi * y_norm,
+                kind="linear",
+                bounds_error=False,
+                fill_value=(nlin_hi[0] * y_norm, nlin_hi[-1] * y_norm),
+            )
+            lo_on_numeric = lo_interp(dgds_numeric)
+            hi_on_numeric = hi_interp(dgds_numeric)
 
-                plt.plot(dgds_numeric_n * x_norm, np.abs(partial_B2g * y_norm - softplus2(dgds_numeric_g * x_norm, *ps_g[0, :])) / softplus2(
-                    dgds_numeric_g * x_norm, *ps_g[0, :]), color="gray", ls=":", lw=lw, marker="x", markerfacecolor='none', markersize=ss)
+            # Prevent division by zero
+            eps = 1e-30
 
-                partial_B2n = np.load(
-                    f"results/partial_nlin_nyquist_perfect_{gvda}_{gvdb}.npy")
-                plt.plot(dgds_numeric_n * x_norm, np.abs(partial_B2n - nyquist_sampled) /
-                         nyquist_sampled, color="green", marker="*", markersize=ss, lw=lw)
-                plt.plot(dgds_numeric_n * x_norm, np.abs(partial_B2n - analytic_nlin_sampled) /
-                         analytic_nlin_sampled, color="green", marker="*", markersize=ss, lw=lw, ls="-.")
-                plt.plot(dgds_numeric_n * x_norm, np.abs(partial_B2n * y_norm - softplus2(dgds_numeric_n * x_norm, *ps_n[0, :])) / softplus2(
-                    dgds_numeric_n * x_norm, *ps_n[0, :]), color="gray", lw=lw, ls=":", marker="*", markerfacecolor='none', markersize=ss)
+            # Relative errors
+            relerr_fit_bare = np.abs(numeric_bare_norm - fit_bare_on_numeric) / np.maximum(numeric_bare_norm, eps)
+            relerr_fit_gvd  = np.abs(numeric_bare_norm - fit_gvd_on_numeric)  / np.maximum(numeric_bare_norm,  eps)
+            relerr_lo       = np.abs(numeric_bare_norm - lo_on_numeric)       / np.maximum(numeric_bare_norm,       eps)
+            relerr_hi       = np.abs(numeric_bare_norm - hi_on_numeric)       / np.maximum(numeric_bare_norm,       eps)
 
+            # Plots
+            plt.plot(dgds_numeric * x_norm, relerr_fit_bare, marker="x",  lw=lw, markersize=ss, linestyle="-",  label="vs fit (bare)")
+            plt.plot(dgds_numeric * x_norm, relerr_fit_gvd,  marker="*",  lw=lw, markersize=ss, linestyle="-.", label="vs fit (GVD)")
+            plt.plot(dgds_numeric * x_norm, relerr_lo,       marker=None, lw=lw,               linestyle=":",  label="vs asympt. LO")
+            plt.plot(dgds_numeric * x_norm, relerr_hi,       marker=None, lw=lw,               linestyle="--", label="vs asympt. HI")
+            plt.axhline(0.1, color="grey", lw=0.8, ls="-")
+            plt.axhline(0.2, color="grey", lw=0.8, ls="-")
             plt.xscale('log')
-            plt.ylim([-0.05, 0.3])
+            plt.ylim([-0.05, 0.5])
             plt.xlabel(r'$L/L_W$')
-            plt.ylabel(r'$\\varepsilon$')
+            plt.ylabel(r'$\varepsilon$')
             plt.tight_layout()
-            err_pdf = "media/2-error.pdf"
-            plt.savefig(err_pdf, dpi=dpi)
+            err_pdf = f"media/2-error_{pulse_shape}.pdf"
+            plt.savefig(err_pdf, dpi=dpi, bbox_inches="tight", pad_inches=0)
+
+            # # --- simple linear sweep for 10% crossings vs asymptotics ---
+            # def sweep_crossing_logx(x, y, target=0.1, side="left"):
+            #     """
+            #     Find x* where y(x*) ~ target by scanning for the first sign change
+            #     of (y - target), then doing 2-point linear interpolation in log(x).
+            #     Returns np.nan if no crossing is found.
+            #     """
+            #     x = np.asarray(x)
+            #     y = np.asarray(y)
+            #     ydiff = y - target
+
+            #     # choose sweep direction
+            #     if side == "left":
+            #         idx_range = range(len(x) - 1)
+            #     else:  # "right"
+            #         idx_range = range(len(x) - 2, -1, -1)
+
+            #     for i in idx_range:
+            #         j = i + 1
+            #         a, b = ydiff[i], ydiff[j]
+            #         lg.debug(f"sweep_crossing_logx: i={i}, j={j}, x[i]={x[i]:.3e}, x[j]={x[j]:.3e}, a={a:.3e}, b={b:.3e}")
+            #         if np.isnan(a) or np.isnan(b) or np.isnan(x[i]) or np.isnan(x[j]):
+            #             continue
+            #         # exact hit
+            #         if a == 0:
+            #             return x[i]
+            #         if b == 0:
+            #             return x[j]
+            #         # sign change between i and j?
+            #         if a * b < 0:
+            #             # interpolate in log(x) between the two points
+            #             lx0, lx1 = np.log(x[i]), np.log(x[j])
+            #             # linear interpolation parameter t in y-space
+            #             t = -a / (b - a)
+            #             t = 0.0 if t < 0 else (1.0 if t > 1.0 else t)
+            #             lx_star = lx0 + t * (lx1 - lx0)
+            #             return np.exp(lx_star)
+            #     return np.nan
+
+            # lo_cross_dgds = sweep_crossing_logx(dgds_numeric, relerr_lo, target=0.1, side="left")
+            # hi_cross_dgds = sweep_crossing_logx(dgds_numeric, relerr_hi, target=0.1, side="right")
+
+            # lo_cross_LW = lo_cross_dgds * x_norm if np.isfinite(lo_cross_dgds) else np.nan
+            # hi_cross_LW = hi_cross_dgds * x_norm if np.isfinite(hi_cross_dgds) else np.nan
+
+            # if np.isfinite(lo_cross_dgds) and np.isfinite(hi_cross_dgds):
+            #     lg.info(f"[{pulse_shape}] 10% error thresholds vs asymptotics: "
+            #             f"LO @ dgds={lo_cross_dgds:.6e} (L/L_W={lo_cross_LW:.6e}), "
+            #             f"HI @ dgds={hi_cross_dgds:.6e} (L/L_W={hi_cross_LW:.6e})")
+            # else:
+            #     if not np.isfinite(lo_cross_dgds):
+            #         lg.warning(f"[{pulse_shape}] Could not find 10% crossing for LO asymptotic.")
+            #     if not np.isfinite(hi_cross_dgds):
+            #         lg.warning(f"[{pulse_shape}] Could not find 10% crossing for HI asymptotic.")
+
+            
             lg.info(f"Saved figure to {err_pdf}")
 
-
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import rc
 
 
 def plot_threshold_fb_extremes(
@@ -597,18 +667,41 @@ def plot_threshold_fb_extremes(
 
 
 if __name__ == "__main__":
-    plot_threshold_fb_extremes(recompute=False,
-                #    use_fB=False,
-                #    fB_simple_interpolation=True,
-                   gvda = 20.0e-27,
-                   gvdb = 20.0e-27,
-                   m_lo_truncation=4)
+    
+    simple_plot_threshold(
+        gvda = 0.0e-27,
+        gvdb = 0.0e-27,
+        fB_mode="max",
+        recompute=False,
+        ipulse=1,
+        m_lo_truncation=3)
+    simple_plot_threshold(
+        gvda = 30.0e-27,
+        gvdb = 0.0e-27,
+        fB_mode="min",
+        recompute=False,
+        ipulse=1,
+        m_lo_truncation=3)
+    simple_plot_threshold(
+        gvda = 30.0e-27,
+        gvdb = 30.0e-27,
+        fB_mode="min",
+        recompute=False,
+        ipulse=1,
+        m_lo_truncation=3)
     exit()
     plot_threshold(recompute=False,
                    use_fB=False,
                    fB_simple_interpolation=True,
                    gvda = 30.0e-27,
                    gvdb = 0.0e-27,
+                   m_lo_truncation=4)
+    exit()
+    plot_threshold_fb_extremes(recompute=False,
+                #    use_fB=False,
+                #    fB_simple_interpolation=True,
+                   gvda = 20.0e-27,
+                   gvdb = 20.0e-27,
                    m_lo_truncation=4)
     exit()
     simple_plot_threshold(
