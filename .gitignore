@@ -4,6 +4,8 @@
 /additional
 *.bak
 INSTRUCTIONS.md
+/input
+/output
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,3 +1,4 @@
+# TODO apply the refactoring changes
 python_version_full := $(wordlist 2,4,$(subst ., ,$(shell python --version 2>&1)))
 python_version_major := $(word 1,${python_version_full})
 python_version_minor := $(word 2,${python_version_full})
