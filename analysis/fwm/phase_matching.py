@@ -1,19 +1,14 @@
 import numpy as np
 from scipy.optimize import fsolve, root
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-from analysis.components.load_fiber_values import load_phase_delay
+from analysis.fiber_analysis.load_fiber_values import load_phase_delay
 from matplotlib import pyplot as plt
 from numpy import polyval
 import cvxpy as cp
 from itertools import product
-import pynlin
-import analysis.components.cfg as cfg
-
+import analysis.utils.cfg as cfg
 
 def get_plane(k, p, m):
-    """Return plane coefficients enforcing energy/momentum conservation for a FWM tuple."""
+    """Compute plane coefficients enforcing p·k conservation for a four-mode FWM tuple."""
     a = p[0]*(k[m[3], 1]-k[m[0], 1])
     b = p[0]*(k[m[3], 1]-k[m[1], 1])
     c = p[0]*(k[m[3], 1]-k[m[2], 1])
@@ -21,22 +16,14 @@ def get_plane(k, p, m):
     return a, b, c, d
 
 def main():
-    """Standalone sweep to flag FWM-relevant mode combinations."""
-    cf = cfg.load_toml_to_struct("./input/mmf.toml")
-    oi_fit = np.load('results/oi_fit.npy')
-    wdm = pynlin.wdm.WDM(
-        spacing=cf.channel_spacing,
-        num_channels=cf.n_channels,
-        center_frequency=cf.center_frequency
-        )
-    freqs = wdm.frequency_grid()
-    omin = np.min(freqs)
-    omax = np.max(freqs)
-
-    k = load_phase_delay()
-    modes = range(4)
+    """Plot beta0 polynomials and flag FWM planes intersecting frequency cube."""
+    k = load_phase_delay() # TODO check the conversion
+    omin = 1e12
+    omax = 2e12
+    freq = np.linspace(omin, omax, 1000)  # Frequency range in Hz
+    modes = range(4)  # Modes to consider
     for m in modes:
-        plt.plot(freqs, polyval(k[m, :], freqs), label=f'Mode {m}')
+        plt.plot(freq, polyval(k[m, :], freq), label=f'Mode {m}')
     plt.savefig('media/test/beta0.png')
 
     # Fixed permutation to (1, 1, -1)
@@ -81,7 +68,6 @@ def main():
                 print("N")
                 
     print(flagged)
-    wdm
     N = 400
     x = np.linspace(omin, omax, N)
     y = np.linspace(omin, omax, N)
@@ -101,3 +87,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # print(distances)

@@ -2,10 +2,10 @@ import time
 import itertools as it
 from pynlin.utils import watt2dBm
 import os
-from analysis.components.collision import build_I_low_interpolator, MAX_LLD
-import analysis.components.cfg as cfg
-from analysis.components.load_fiber_values import load_group_delay, load_rms_gvd
-from analysis.components.nlin_estimation.raman_integrals import load_fB
+from analysis.nlin.collision import build_I_low_interpolator, MAX_LLD
+import analysis.utils.cfg as cfg
+from analysis.fiber_analysis.load_fiber_values import load_group_delay, load_rms_gvd
+from analysis.utils.nlin_estimation.raman_integrals import load_fB
 from scipy.constants import c
 from pynlin.utils import dBm2watt
 from pynlin.fiber import MMFiber
@@ -14,12 +14,12 @@ import numpy as np
 from typing import Tuple
 from scipy.integrate import quad
 from loguru import logger as lg
-from analysis.components.log_init import init_logging
+from analysis.log_init import init_logging
 init_logging()
 
-from analysis.components.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
-from analysis.components.nlin_estimation.ideal_fits import softplus, ideal_fit_coefficients
-from analysis.components.nlin_estimation.raman_integrals import load_raman_integral_extremes, raman_integral
+from analysis.utils.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
+from analysis.utils.nlin_estimation.ideal_fits import softplus, ideal_fit_coefficients
+from analysis.utils.nlin_estimation.raman_integrals import load_raman_integral_extremes, raman_integral
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
@@ -452,7 +452,7 @@ if __name__ == "__main__":
     lg.debug(
         f"A few total NLIN: \n {ttnl[0, 0:5]} W, \n {watt2dBm(ttnl[0, 0:5])} dBm")
     exit()
-    import analysis.components.cfg as cfg
+    import analysis.utils.cfg as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
 
     # build the interpolator and pass it to the corrector

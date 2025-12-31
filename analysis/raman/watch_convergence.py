@@ -8,7 +8,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import time
 import os
-from components import cfg
+from utils import cfg
 from pynlin.utils import nu2lambda
 
 class SignalPlotter(FileSystemEventHandler):

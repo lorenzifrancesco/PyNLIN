@@ -8,15 +8,15 @@ Generates figs:
 - NLIN thresholding and approximation
 
 """
-from analysis.components import cfg
-from analysis.components.load_fiber_values import *
-from analysis.components.load_fiber_values import load_group_delay
-from analysis.components.collision import plot_illustrative, plot_dispersion_analysis
-from analysis.components.validation import plot_threshold
-from analysis.components.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
+import analysis.utils.cfg as cfg
+from analysis.fiber_analysis.load_fiber_values import *
+from analysis.fiber_analysis.load_fiber_values import load_group_delay
+from analysis.nlin.collision import plot_illustrative, plot_dispersion_analysis
+from analysis.nlin.validation import plot_threshold
+from analysis.nlin.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
 
 from loguru import logger as lg
-from analysis.components.log_init import init_logging
+from analysis.log_init import init_logging
 init_logging()
 
 def main():

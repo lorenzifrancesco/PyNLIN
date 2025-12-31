@@ -1,16 +1,16 @@
 import matplotlib.pyplot as plt
 import os
-from analysis.components.collision import build_I_low_interpolator, MAX_LLD
-import analysis.components.cfg as cfg
+from analysis.nlin.collision import build_I_low_interpolator, MAX_LLD
+import analysis.utils.cfg as cfg
 import numpy as np
 from typing import Tuple
 from scipy.integrate import quad
 from scipy.interpolate import RegularGridInterpolator
 from loguru import logger as lg
-from analysis.components.log_init import init_logging
+from analysis.log_init import init_logging
 init_logging()
-from analysis.components.nlin_estimation.raman_integrals import load_fB, raman_integral, load_raman_integral_extremes
-from analysis.components.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from analysis.utils.nlin_estimation.raman_integrals import load_fB, raman_integral, load_raman_integral_extremes
+from analysis.utils.nlin_estimation.ideal_fits import ideal_fit_coefficients
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset, zoomed_inset_axes
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])

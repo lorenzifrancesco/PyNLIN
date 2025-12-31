@@ -6,15 +6,15 @@ import matplotlib.pyplot as plt
 from matplotlib import rc
 import pynlin.wdm
 from pynlin.utils import nu2lambda
-from analysis.components.load_fiber_values import load_group_delay, load_dummy_group_delay
+from analysis.fiber_analysis.load_fiber_values import load_group_delay, load_dummy_group_delay
 from numpy import polyval
 from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import ScalarFormatter
-import analysis.components.cfg as cfg
+import analysis.utils.cfg as cfg
 from matplotlib.ticker import FuncFormatter
 from loguru import logger as lg
-from analysis.components.log_init import init_logging
+from analysis.log_init import init_logging
 init_logging()
 
 
@@ -388,7 +388,7 @@ def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
 
 def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
     """Plot distribution of channel GVD across all modes/channels."""
-    from analysis.components.collision import get_systems_dispersions
+    from analysis.nlin.collision import get_systems_dispersions
     cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,
