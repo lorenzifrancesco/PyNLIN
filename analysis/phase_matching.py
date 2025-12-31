@@ -1,11 +1,11 @@
 import numpy as np
 from scipy.optimize import fsolve, root
-from scripts.modules.load_fiber_values import load_phase_delay
+from analysis.modules.load_fiber_values import load_phase_delay
 from matplotlib import pyplot as plt
 from numpy import polyval
 import cvxpy as cp
 from itertools import product
-import scripts.modules.cfg as cfg
+import analysis.modules.cfg as cfg
 
 def get_plane(k, p, m):
     a = p[0]*(k[m[3], 1]-k[m[0], 1])

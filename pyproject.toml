@@ -1,3 +1,39 @@
 [build-system]
-requires = ["setuptools>=75", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "pynlin"
+version = "0.2.0"
+description = "Python tools for nonlinear interference noise modeling"
+requires-python = ">=3.8"
+
+authors = [
+  { name = "Gianluca Marcon, Francesco Lorenzi" }
+]
+
+dependencies = [
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "h5py",
+  "tqdm",
+  "torch",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "black",
+  "isort",
+  "flake8",
+  "mypy",
+  "build",
+  "twine",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

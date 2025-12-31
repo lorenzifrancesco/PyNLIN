@@ -1,7 +1,7 @@
-import scripts.modules.cfg as cfg
+import analysis.modules.cfg as cfg
 import numpy as np
 from typing import Tuple
-from scripts.modules.log_init import init_logging
+from analysis.modules.log_init import init_logging
 init_logging()
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])

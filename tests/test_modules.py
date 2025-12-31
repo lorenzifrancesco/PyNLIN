@@ -1,4 +1,4 @@
-from scripts.modules.load_fiber_values import *
+from analysis.modules.load_fiber_values import *
 
 def test_modules():
   # oi = load_oi()

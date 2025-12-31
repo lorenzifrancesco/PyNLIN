@@ -1,8 +1,8 @@
-import scripts.modules.cfg as cfg
+import analysis.modules.cfg as cfg
 import numpy as np
 from typing import Tuple
 from scipy.optimize import curve_fit
-from scripts.modules.log_init import init_logging
+from analysis.modules.log_init import init_logging
 from loguru import logger as lg
 init_logging()
 

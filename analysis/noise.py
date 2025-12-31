@@ -8,15 +8,15 @@ Generates figs:
 - NLIN thresholding and approximation
 
 """
-from scripts.modules import cfg
-from scripts.modules.load_fiber_values import *
-from scripts.modules.load_fiber_values import load_group_delay
-from scripts.modules.collision import plot_illustrative, plot_dispersion_analysis
-from scripts.modules.validation import plot_threshold
-from scripts.modules.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
+from analysis.modules import cfg
+from analysis.modules.load_fiber_values import *
+from analysis.modules.load_fiber_values import load_group_delay
+from analysis.modules.collision import plot_illustrative, plot_dispersion_analysis
+from analysis.modules.validation import plot_threshold
+from analysis.modules.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
 
 from loguru import logger as lg
-from scripts.modules.log_init import init_logging
+from analysis.modules.log_init import init_logging
 init_logging()
 
 # config_collisions is useful to print the plot of Marco, illustrative one

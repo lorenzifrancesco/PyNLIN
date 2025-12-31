@@ -3,12 +3,12 @@ from scipy.optimize import fsolve, root
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from scripts.modules.load_fiber_values import load_phase_delay
+from analysis.modules.load_fiber_values import load_phase_delay
 from matplotlib import pyplot as plt
 from numpy import polyval
 from itertools import product
 import pynlin
-import scripts.modules.cfg as cfg
+import analysis.modules.cfg as cfg
 import time, random
 import heapq
 

@@ -11,8 +11,8 @@ import numpy as np
 import torch
 from scipy.constants import lambda2nu, nu2lambda
 from matplotlib.cm import viridis
-from scripts.modules.load_fiber_values import load_group_delay
-from scripts.modules import cfg
+from analysis.modules.load_fiber_values import load_group_delay
+from analysis.modules import cfg
 
 import pynlin
 import pynlin.wdm
@@ -25,7 +25,7 @@ from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
 from pynlin.raman.solvers import MMFRamanAmplifier as NumpyMMFRamanAmplifier
 from pynlin.utils import dBm2watt, watt2dBm
 import pynlin.constellations
-from scripts.modules.plot_optimization import plot_profiles, analyze_optimization
+from analysis.modules.plot_optimization import plot_profiles, analyze_optimization
 
 def ct_solver(fiber, 
               wdm, 

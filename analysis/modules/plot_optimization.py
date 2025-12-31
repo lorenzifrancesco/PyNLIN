@@ -1,4 +1,4 @@
-from scripts.modules.cfg import Config, get_next_filename
+from analysis.modules.cfg import Config, get_next_filename
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.cm import viridis

@@ -1,13 +1,13 @@
-from scripts.modules.nlin_estimator import fit_nlin, LLW_MAX, LLW_MIN
-from scripts.modules.nlin_estimation.raman_integrals import load_fB, raman_integral
-from scripts.modules.nlin_estimation.ideal_fits import ideal_fit_coefficients
-from scripts.modules.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman, build_I_low_interpolator, build_lookup_integral_table_with_raman_custom
-from scripts.modules.load_fiber_values import load_group_delay, load_rms_gvd
-from scripts.modules.log_init import init_logging
+from analysis.modules.nlin_estimator import fit_nlin, LLW_MAX, LLW_MIN
+from analysis.modules.nlin_estimation.raman_integrals import load_fB, raman_integral
+from analysis.modules.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from analysis.modules.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman, build_I_low_interpolator, build_lookup_integral_table_with_raman_custom
+from analysis.modules.load_fiber_values import load_group_delay, load_rms_gvd
+from analysis.modules.log_init import init_logging
 import matplotlib.colors as mcolors
 from pynlin.collisions import get_m_values, get_collision_location
 from scipy.interpolate import interp1d
-import scripts.modules.cfg as cfg
+import analysis.modules.cfg as cfg
 from pynlin.nlin import compute_all_collisions_time_integrals, X0mm_space_integral
 from pynlin.pulses import *
 from pynlin.fiber import *
