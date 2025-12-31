@@ -1,7 +1,9 @@
 """
-Optimize the pumps and calculate signal and ASE power evolution
-Generates figs: 
+Optimize the pumps and calculate signal and ASE power evolution.
+Generates figs:
 - Power profiles
+
+All runtime work is inside functions; importing this module has no side effects.
 """
 import os
 import tqdm

@@ -56,29 +56,35 @@ def to_dBm(Pw):
     return 10.0 * np.log10(np.maximum(Pw, 1e-30)) + 30.0
 
 # -------- Compute --------
-Ps_z = Ps_counter(z)
-Ps_dBm = to_dBm(Ps_z)
+def main():
+    """Compute and plot undepleted counter-propagating Raman gain profile."""
+    Ps_z = Ps_counter(z)
+    Ps_dBm = to_dBm(Ps_z)
 
-# -------- Plot (dBm only) --------
-plt.figure(figsize=(7, 4.0))
-plt.plot(z / km, Ps_dBm, label="Signal $P_s(z)$ [dBm]")
-plt.xlabel("Distance z [km]")
-plt.ylabel("Signal power [dBm]")
-plt.grid(True, which="both", alpha=0.3)
+    # -------- Plot (dBm only) --------
+    plt.figure(figsize=(7, 4.0))
+    plt.plot(z / km, Ps_dBm, label="Signal $P_s(z)$ [dBm]")
+    plt.xlabel("Distance z [km]")
+    plt.ylabel("Signal power [dBm]")
+    plt.grid(True, which="both", alpha=0.3)
 
-# Annotate parameters
-txt = (
-    fr"$L={L_km:.1f}\,\mathrm{{km}},\; P_s(0)={P_s0*1e3:.2f}\,\mathrm{{mW}}$" "\n"
-    fr"$\alpha_s={alpha_s_dB_km:.2f}\,\mathrm{{dB/km}},\; \alpha_p={alpha_p_dB_km:.2f}\,\mathrm{{dB/km}}$" "\n"
-    fr"$g_R={g_R:.2e}\,\mathrm{{m/W}},\; A_\mathrm{{eff}}={A_eff*1e12:.0f}\,\mathrm{{\mu m^2}},\; \rho={rho_pol:.2f}$" "\n"
-    fr"$P_{{p,\mathrm{{in}}}}={Pp_in:.3f}\,\mathrm{{W}}\;(\mathrm{{margin}}={margin:.2f})$"
-)
-plt.text(0.02, 0.98, txt, transform=plt.gca().transAxes, va="top", ha="left", fontsize=9,
-         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    # Annotate parameters
+    txt = (
+        fr"$L={L_km:.1f}\,\mathrm{{km}},\; P_s(0)={P_s0*1e3:.2f}\,\mathrm{{mW}}$" "\n"
+        fr"$\alpha_s={alpha_s_dB_km:.2f}\,\mathrm{{dB/km}},\; \alpha_p={alpha_p_dB_km:.2f}\,\mathrm{{dB/km}}$" "\n"
+        fr"$g_R={g_R:.2e}\,\mathrm{{m/W}},\; A_\mathrm{{eff}}={A_eff*1e12:.0f}\,\mathrm{{\mu m^2}},\; \rho={rho_pol:.2f}$" "\n"
+        fr"$P_{{p,\mathrm{{in}}}}={Pp_in:.3f}\,\mathrm{{W}}\;(\mathrm{{margin}}={margin:.2f})$"
+    )
+    plt.text(0.02, 0.98, txt, transform=plt.gca().transAxes, va="top", ha="left", fontsize=9,
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
 
-plt.tight_layout()
-plt.savefig(save_path, dpi=200, bbox_inches="tight", pad_inches=0)
-plt.show()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200, bbox_inches="tight", pad_inches=0)
+    plt.show()
 
-print(f"Chosen pump for flat profile: P_p,in ≈ {Pp_in:.4f} W (margin={margin})")
-print(f"P_s(0) = {to_dBm(P_s0):.2f} dBm,  P_s(L) = {to_dBm(Ps_z[-1]):.2f} dBm")
+    print(f"Chosen pump for flat profile: P_p,in ≈ {Pp_in:.4f} W (margin={margin})")
+    print(f"P_s(0) = {to_dBm(P_s0):.2f} dBm,  P_s(L) = {to_dBm(Ps_z[-1]):.2f} dBm")
+
+
+if __name__ == "__main__":
+    main()

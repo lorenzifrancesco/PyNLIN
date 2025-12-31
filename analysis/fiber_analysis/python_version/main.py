@@ -207,7 +207,7 @@ def find_propagation_constant(
     num_points = int((v_max - v_min) / dv)
     num_points = max(num_points, 256)
     v_ = np.linspace(v_min, v_max, num_points)
-    b_ = np.full_like(v_, np.NaN)
+    b_ = np.full_like(v_, np.nan)
 
     if mode.cutoff_frequency > v_max:
         return PropagationConstant(v_, b_)
