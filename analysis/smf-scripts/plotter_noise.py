@@ -48,6 +48,7 @@ plt.rcParams['font.weight'] = '500'
 plt.rcParams['font.size'] = '24'
 
 def H(n):
+		"""Harmonic number approximation used in closed-form NLIN expression."""
 		s = 0
 		n = int(n)
 		for i in range(n):
@@ -56,10 +57,12 @@ def H(n):
 
 
 def NLIN(n, a, b):
+		"""Closed-form NLIN curve versus channel index for a given slope/intercept."""
 		return [a * (2 * H(np.min([xxx, 50 - xxx + 1]) - 1) + H(50) - H(2 * np.min([xxx, 50 - xxx + 1]))) + b for xxx in n]
 
 
 def OSNR_to_EVM(osnr):
+		"""Convert OSNR (dB) to EVM for square QAM assuming AWGN."""
 		osnr = 10**(osnr / 10)
 		M = 16
 		i_range = [1 + item for item in range(int(np.floor(np.sqrt(M))))]
@@ -74,6 +77,7 @@ def OSNR_to_EVM(osnr):
 
 
 def EVM_to_BER(evm):
+		"""Approximate BER from EVM for square QAM."""
 		M = 16
 		L = 4
 		return (1 - 1 / L) / np.log2(L) * erfc(np.sqrt((3 * np.log2(L) * np.sqrt(2)) / ((L**2 - 1) * np.power(evm, 2) * np.log2(M))))

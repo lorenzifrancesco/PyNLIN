@@ -18,11 +18,13 @@ dt = 1 / baud_rate / samples_per_symbol
 
 
 def generate_symbol_sequence(constellation_symbols, seq_length):
+    """Draw a random symbol sequence from a constellation of length seq_length."""
     symbols = random.choices(constellation_symbols, k=seq_length)
     return np.array(symbols)
 
 
 def generate_train(symbols_seq, samples_per_symbol):
+    """Upsample a symbol sequence by inserting zeros between symbols."""
     seq = np.zeros((len(symbols_seq) * samples_per_symbol,), dtype=complex)
     seq[::samples_per_symbol] = symbols_seq
     return seq

@@ -2,10 +2,10 @@ import time
 import itertools as it
 from pynlin.utils import watt2dBm
 import os
-from analysis.modules.collision import build_I_low_interpolator, MAX_LLD
-import analysis.modules.cfg as cfg
-from analysis.modules.load_fiber_values import load_group_delay, load_rms_gvd
-from analysis.modules.nlin_estimation.raman_integrals import load_fB
+from analysis.components.collision import build_I_low_interpolator, MAX_LLD
+import analysis.components.cfg as cfg
+from analysis.components.load_fiber_values import load_group_delay, load_rms_gvd
+from analysis.components.nlin_estimation.raman_integrals import load_fB
 from scipy.constants import c
 from pynlin.utils import dBm2watt
 from pynlin.fiber import MMFiber
@@ -14,12 +14,12 @@ import numpy as np
 from typing import Tuple
 from scipy.integrate import quad
 from loguru import logger as lg
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 init_logging()
 
-from analysis.modules.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
-from analysis.modules.nlin_estimation.ideal_fits import softplus, ideal_fit_coefficients
-from analysis.modules.nlin_estimation.raman_integrals import load_raman_integral_extremes, raman_integral
+from analysis.components.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
+from analysis.components.nlin_estimation.ideal_fits import softplus, ideal_fit_coefficients
+from analysis.components.nlin_estimation.raman_integrals import load_raman_integral_extremes, raman_integral
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
@@ -39,6 +39,7 @@ _G = {
 
 def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
                  cf, ipulse, raman_min, raman_max, n_workers):
+    """Initializer for multiprocessing workers to mmap shared grids and configs."""
     import os
     import numpy as np
     # keep BLAS threads sane per process
@@ -60,9 +61,7 @@ def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
 
 
 def work_A(task_A):
-    """
-    Top-level, picklable worker. Computes the whole (mB,nuB) block for one (mA,nuA).
-    """
+    """Compute the full NLIN block for a given (mA, nuA) against all (mB, nuB)."""
     import os
     import time
     import numpy as np
@@ -130,6 +129,7 @@ def gvd_correction(cf,
                    fiber_length: float,
                    m_lo_truncation: int = 3,
                    ipulse: int = 1) -> float:
+    """Integrate low-order collision terms to correct the LO plateau with GVD."""
     lda = 1/(cf.baud_rate**2 * gvda) if gvda != 0 else 1e30
     ldb = 1/(cf.baud_rate**2 * gvdb) if gvdb != 0 else 1e30
     lo_value = 0.0
@@ -153,6 +153,7 @@ def gvd_correction(cf,
 def apply_plateau_correction(ps: Tuple[float, float, float],
                              lo_value: float,
                              ) -> Tuple[float, float, float]:
+    """Rescale softplus parameters when the LO plateau value changes."""
     old_lo_value = ps[0]
     lg.trace(
         f"Correcting N^circ (LO val): {old_lo_value:.2e} --> {lo_value:.2e}")
@@ -165,6 +166,7 @@ def apply_plateau_correction(ps: Tuple[float, float, float],
 
 def apply_turning_point_correction(ps: Tuple[float, float, float],
                                    hi_factor: float):
+    """Shift softplus turning point based on Raman HI correction."""
     lg.trace(f"Correcting delta beta 1 of a factor {hi_factor}")
     # beware of the sign of the correction (in log units)
     ps[1] = ps[1] * hi_factor
@@ -181,6 +183,7 @@ def fit_nlin(cf,
              raman_gvd_correction_max: callable,
              ipulse: int,
              m_lo_truncation: int = 3) -> callable:
+    """Return a fitted NLIN curve for a channel pair with given GVDs and Raman profile."""
 
     lda = 1/(cf.baud_rate**2 * gvda) if gvda != 0 else 1e30
     ldb = 1/(cf.baud_rate**2 * gvdb) if gvdb != 0 else 1e30
@@ -235,6 +238,7 @@ def fit_nlin(cf,
 corrections due to mode multiplicity
 """
 def nlin_prefactor_general(cf: cfg.Config, mode_a: int, mode_b: int):
+    """Multiplicity/constellation prefactor for MMF NLIN between two modes."""
     prefactor = 1
     if mode_a == mode_b:
         prefactor *= MU0 * (2*SPATIAL_MODES[mode_a] + 3) - 4
@@ -250,6 +254,7 @@ wrapper for the nlin_prefactor_mmf to handle single-mode case
 
 
 def nlin_prefactor(cf: cfg.Config, mode_a, mode_b):
+    """Wrapper handling SMF vs MMF to compute NLIN prefactors."""
     if cf.n_modes == 1:
         return nlin_prefactor_general(cf, 0, 0)
     else:
@@ -261,6 +266,7 @@ def nlin_prefactor(cf: cfg.Config, mode_a, mode_b):
 def collision_coeffs_system(cf,
                             ipulse: int = 1,
                             recompute: bool = False,):
+    """Compute or load channel-pair collision coefficients for the given config."""
     assert cf.launch_power == -5
     assert cf.raman_gain == 0.0
     assert cf.baud_rate == 33e9
@@ -374,6 +380,7 @@ def get_kappa2_matrix(cf,
                       use_kappa: bool = False,
                       use_x_mode: bool = False,
                       ) -> np.ndarray:
+    """Build squared coupling matrix and optionally disable cross-mode terms."""
     kappa2 = np.zeros((cf.n_modes, cf.n_modes))
     if use_kappa:
         kappa = np.loadtxt('input/kappa.csv', delimiter=',')
@@ -394,6 +401,7 @@ def total_nlin(cf,
                use_kappa: bool = False,
                use_x_mode: bool = False,
                ) -> np.ndarray:
+    """Convert collision coefficients to NLIN power spectral density per channel."""
 
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
@@ -444,7 +452,7 @@ if __name__ == "__main__":
     lg.debug(
         f"A few total NLIN: \n {ttnl[0, 0:5]} W, \n {watt2dBm(ttnl[0, 0:5])} dBm")
     exit()
-    import analysis.modules.cfg as cfg
+    import analysis.components.cfg as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
 
     # build the interpolator and pass it to the corrector

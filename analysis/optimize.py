@@ -11,8 +11,8 @@ import numpy as np
 import torch
 from scipy.constants import lambda2nu, nu2lambda
 from matplotlib.cm import viridis
-from analysis.modules.load_fiber_values import load_group_delay
-from analysis.modules import cfg
+from analysis.components.load_fiber_values import load_group_delay
+from analysis.components import cfg
 
 import pynlin
 import pynlin.wdm
@@ -25,7 +25,7 @@ from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
 from pynlin.raman.solvers import MMFRamanAmplifier as NumpyMMFRamanAmplifier
 from pynlin.utils import dBm2watt, watt2dBm
 import pynlin.constellations
-from analysis.modules.plot_optimization import plot_profiles, analyze_optimization
+from analysis.components.plot_optimization import plot_profiles, analyze_optimization
 
 def ct_solver(fiber, 
               wdm, 
@@ -40,18 +40,7 @@ def ct_solver(fiber,
               optimize=False, 
               use_avg_oi=False
               ):
-    """
-      Script for solve a single instance of pump optimization.
-      All the system variables are set in the config toml file.
-      The initial states for optimization are taken as arguments
-      
-      Input files: 
-        config.toml
-      
-      Output files:
-        opt_pump_wavelengths.npy
-        opt_pump_powers.npy
-    """
+    """Optimize a single counter-propagating Raman pump configuration with PyTorch."""
     cf = cfg.load_toml_to_struct("./input/config.toml")
     #
     integration_steps = 300
@@ -170,6 +159,7 @@ def repropagate_numpy(fiber,
                 cf,
                 output_file
                 ):
+    """Re-run Raman amplification with the NumPy solver and persist the full power evolution."""
     print("Repropagating with Numpy amplifier...")
     amplifier = NumpyMMFRamanAmplifier(fiber)
     pump_powers = pump_powers.reshape((cf.n_pumps, cf.n_modes))

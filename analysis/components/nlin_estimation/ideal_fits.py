@@ -1,8 +1,8 @@
-import analysis.modules.cfg as cfg
+import analysis.components.cfg as cfg
 import numpy as np
 from typing import Tuple
 from scipy.optimize import curve_fit
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 from loguru import logger as lg
 init_logging()
 
@@ -14,6 +14,7 @@ MU0 = 1.3809
 
 
 def softplus(x, a, b, c):
+    """Smoothly increasing three-parameter curve used to fit NLIN vs walk-off."""
     return a * (1 + (x / b)**(1 / c))**(-c)
 
 """
@@ -22,6 +23,7 @@ ideal := no Raman, no GVD. It is flexible to also compute the GVD, but it is not
 def ideal_fit_coefficients(gvda: float = 0.0,
                            gvdb: float = 0.0,
                            ipulse: int = 1) -> Tuple[np.ndarray, np.ndarray]:
+    """Fit NLIN curves for the Raman/GVD-free case and return softplus parameters."""
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
     nc = cfg.load_nc_toml_to_struct("./input/numerical_config.toml")
 

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 def init_logging():
+    """Configure loguru to emit to stdout plus rotating DEBUG/TRACE log files."""
     # Figure out which script is being run directly
     script_name = Path(sys.argv[0]).stem or "interactive"
     log_dir = Path("logs")

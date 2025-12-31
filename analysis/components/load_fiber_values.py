@@ -6,6 +6,7 @@ from pynlin.utils import *
 
 
 def convert_coefficients(p1, p2, p3):
+    """Convert polynomial beta0 coefficients from normalized omega to SI units."""
     beta_file = './results/fitBeta.mat'
     std = scipy.io.loadmat(beta_file)['omega_std'][0][0]
     avg = scipy.io.loadmat(beta_file)['omega_mean'][0][0]
@@ -15,6 +16,7 @@ def convert_coefficients(p1, p2, p3):
     return [p1_new * (2 * np.pi)**2, p2_new * 2 * np.pi, p3_new]
 
 def convert_coefficients_for_beta0(p1, p2, p3):
+    """Convert polynomial beta0 coefficients and keep units for phase delay."""
     beta_file = './results/fitBeta.mat'
     std = scipy.io.loadmat(beta_file)['omega_std'][0][0]
     avg = scipy.io.loadmat(beta_file)['omega_mean'][0][0]
@@ -24,6 +26,7 @@ def convert_coefficients_for_beta0(p1, p2, p3):
     return [p1_new * (2 * np.pi)**2, p2_new * 2 * np.pi, p3_new]
 
 def load_phase_delay() -> np.array:
+    """Load phase-delay polynomial coefficients for each mode from MATLAB fit results."""
     beta_file = './results/fitBeta.mat'
     mat = scipy.io.loadmat(beta_file)['fitParams']
     for i in range(4):
@@ -31,6 +34,7 @@ def load_phase_delay() -> np.array:
     return mat
 
 def load_group_delay() -> np.array:
+    """Load group-delay polynomial coefficients for each mode from MATLAB fit results."""
     beta_file = './results/fitBeta.mat'
     mat = scipy.io.loadmat(beta_file)['fitParams']
     for i in range(4):
@@ -38,12 +42,14 @@ def load_group_delay() -> np.array:
     return mat
 
 def load_dummy_group_delay() -> np.ndarray:
+  """Return a synthetic group-delay matrix useful for tests without MATLAB data."""
   mat = np.zeros((4, 3))
   for i in range(4):
     mat[i, :] = [0.0, -1.1770516856235059e-26, (5.0255297044767565+0.0001*i)*1e-09]
   return mat
 
 def load_gvd() -> np.array:
+    """Load GVD coefficients (not implemented yet)."""
     beta_file = './results/fitBeta.mat'
     mat = scipy.io.loadmat(beta_file)['fitParams'] * 1.0
     assert(False)
@@ -52,6 +58,7 @@ def load_gvd() -> np.array:
     return mat
 
 def load_oi() -> np.array:
+    """Load overlap integrals from MATLAB data and save derived numpy caches."""
     oi_file = 'oi.mat'
     mat = scipy.io.loadmat(oi_file)
     oi_full = mat['OI'] * 1e12
@@ -95,5 +102,6 @@ def load_oi() -> np.array:
 # they are taken to be averaged
 # this only works for the OFC fiber of the JLT paper
 def load_rms_gvd():
+    """Return RMS GVD matrix for the JLT OFC fiber example."""
     avg_gvd = np.array([-24.0, -24.0, -20.0, -2]) * 1e-27
     return np.sqrt((avg_gvd[:, None]**2 + avg_gvd[None, :]**2)/2)

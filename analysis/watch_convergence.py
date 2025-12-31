@@ -8,11 +8,12 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import time
 import os
-from modules import cfg
+from components import cfg
 from pynlin.utils import nu2lambda
 
 class SignalPlotter(FileSystemEventHandler):
     def __init__(self, file_path, n_modes=2):
+        """Initialize live plotter for on-off gain stored in a .npy file."""
         self.file_path = file_path
         self.n_modes = n_modes
         self.cf = cfg.load_toml_to_struct("./input/config.toml")
@@ -28,6 +29,7 @@ class SignalPlotter(FileSystemEventHandler):
         self.last_save_time = time.time()
 
     def update_plot(self):
+        """Refresh plot lines from the saved numpy array and persist a PNG snapshot."""
         try:
             signals = np.load(self.file_path)
             for i, line in enumerate(self.lines):
@@ -53,10 +55,12 @@ class SignalPlotter(FileSystemEventHandler):
             print(f"Error updating plot: {e}")
 
     def on_modified(self, event):
+        """Watchdog hook to update the plot when the source file changes."""
         if event.src_path == self.file_path:
             self.update_plot()
 
 def monitor_file(file_path, n_modes=2):
+    """Continuously monitor a .npy gain file and show a live on-off gain plot."""
     event_handler = SignalPlotter(file_path, n_modes=n_modes)
     observer = Observer()
     observer.schedule(event_handler, path=os.path.dirname(file_path) or ".", recursive=False)

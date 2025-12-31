@@ -1,13 +1,13 @@
-from analysis.modules.nlin_estimator import collision_coeffs_system, total_nlin
+from analysis.components.nlin_estimator import collision_coeffs_system, total_nlin
 from pynlin.utils import watt2dBm, dBm2watt
-import analysis.modules.cfg as cfg
+import analysis.components.cfg as cfg
 from matplotlib.ticker import ScalarFormatter
 import pynlin.wdm
 from matplotlib import rc
 import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger as lg
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 init_logging()
 
 # import plotly.graph_objects as go
@@ -25,6 +25,7 @@ init_logging()
 #     return nlin_prefactor
 
 def plot_case_study_fits():
+    """Placeholder for NLIN fitting visualization (not yet implemented)."""
     pass
 
 
@@ -33,6 +34,7 @@ def plot_case_study_noise(
         also_plot_smf=False,
         also_plot_noninteracting=True,
         name="xxx"):
+    """Plot NLIN per channel for MMF (and optionally SMF) case studies."""
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -166,6 +168,7 @@ def plot_case_study_noise_histogram(
         n_bins=25,
         dBm_range=(-53, -40),
         coeff_range=None):
+    """Visualize NLIN distributions across channels with optional cross-mode variants."""
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])

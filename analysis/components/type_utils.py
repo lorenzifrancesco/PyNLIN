@@ -16,6 +16,7 @@ class PulseShape(Enum):
         
     # specify the line style:
     def line_style(self):
+        """Matplotlib line style associated with the pulse shape."""
         if self == PulseShape.GAU:
             return "-"
         elif self == PulseShape.NYQ:

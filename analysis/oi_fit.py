@@ -20,6 +20,7 @@ oi_max = np.zeros_like(oi_avg)
 oi_min = np.zeros_like(oi_avg)
 
 def expression(l1i, l1f, params):
+    """Analytical average of the overlap integral over a wavelength interval."""
     l2i = l1i
     l2f = l1f
     Lambda = (l1f - l1i)
@@ -30,6 +31,7 @@ def expression(l1i, l1f, params):
 
 
 def polix(f):
+    """Return slice indices selecting the f-th polarization block in the MATLAB OI tensor."""
     ll = [2, 4, 4, 2]
     st = [0, 2, 6, 10]
     return (st[f], st[f] + ll[f])

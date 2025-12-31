@@ -1,16 +1,16 @@
 import matplotlib.pyplot as plt
 import os
-from analysis.modules.collision import build_I_low_interpolator, MAX_LLD
-import analysis.modules.cfg as cfg
+from analysis.components.collision import build_I_low_interpolator, MAX_LLD
+import analysis.components.cfg as cfg
 import numpy as np
 from typing import Tuple
 from scipy.integrate import quad
 from scipy.interpolate import RegularGridInterpolator
 from loguru import logger as lg
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 init_logging()
-from analysis.modules.nlin_estimation.raman_integrals import load_fB, raman_integral, load_raman_integral_extremes
-from analysis.modules.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from analysis.components.nlin_estimation.raman_integrals import load_fB, raman_integral, load_raman_integral_extremes
+from analysis.components.nlin_estimation.ideal_fits import ideal_fit_coefficients
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset, zoomed_inset_axes
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
@@ -26,6 +26,7 @@ def build_lookup_integral_table_with_raman_custom(cf,
                                                   ipulse: int = 1,
                                                   recompute=False,
                                                   index=0) -> Tuple[callable, callable]:
+    """Precompute LO correction grid for an arbitrary Raman profile and return an interpolator."""
     # sampling the gvda, gvdb space, build the callable function
     # giving the correction integrals for fB_max and fB_min: integral(L/gvda, L/gvdb).
     _, _, _, fB_min, fB_max = load_fB(cf)
@@ -93,6 +94,7 @@ def build_lookup_integral_table_with_raman(cf,
                                            m_lo_truncation: int = 2,
                                            ipulse: int = 1,
                                            recompute=False) -> Tuple[callable, callable]:
+    """Generate interpolants for Raman-inclusive LO corrections at fB_min and fB_max."""
     # sampling the gvda, gvdb space, build the callable function
     # giving the correction integrals for fB_max and fB_min: integral(L/gvda, L/gvdb).
     _, _, _, fB_min, fB_max = load_fB(cf)
@@ -227,6 +229,7 @@ def build_lookup_integral_table_with_raman(cf,
 
 
 def  validate_maxmin_interpolation(cf):
+    """Validate interpolated Raman corrections against custom fB profiles."""
     lldas = np.linspace(0, 2.3, 20)
     ps_ideal = ideal_fit_coefficients(0.0, 0.0)
     raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(

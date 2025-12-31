@@ -28,10 +28,12 @@ class NumericalConfig(BaseModel):
 
 # Deserialize TOML file into a Pydantic model
 def load_toml_to_struct(filepath: str) -> Config:
+    """Load simulation configuration from a TOML file into a Config object."""
     data = toml.load(filepath)
     return Config(**data)
 
 def load_nc_toml_to_struct(filepath: str) -> NumericalConfig:
+    """Load numerical configuration overrides from TOML into a NumericalConfig object."""
     data = toml.load(filepath)
     return NumericalConfig(**data)
 

@@ -1,13 +1,13 @@
-from analysis.modules.nlin_estimator import fit_nlin, LLW_MAX, LLW_MIN
-from analysis.modules.nlin_estimation.raman_integrals import load_fB, raman_integral
-from analysis.modules.nlin_estimation.ideal_fits import ideal_fit_coefficients
-from analysis.modules.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman, build_I_low_interpolator, build_lookup_integral_table_with_raman_custom
-from analysis.modules.load_fiber_values import load_group_delay, load_rms_gvd
-from analysis.modules.log_init import init_logging
+from analysis.components.nlin_estimator import fit_nlin, LLW_MAX, LLW_MIN
+from analysis.components.nlin_estimation.raman_integrals import load_fB, raman_integral
+from analysis.components.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from analysis.components.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman, build_I_low_interpolator, build_lookup_integral_table_with_raman_custom
+from analysis.components.load_fiber_values import load_group_delay, load_rms_gvd
+from analysis.components.log_init import init_logging
 import matplotlib.colors as mcolors
 from pynlin.collisions import get_m_values, get_collision_location
 from scipy.interpolate import interp1d
-import analysis.modules.cfg as cfg
+import analysis.components.cfg as cfg
 from pynlin.nlin import compute_all_collisions_time_integrals, X0mm_space_integral
 from pynlin.pulses import *
 from pynlin.fiber import *
@@ -26,6 +26,7 @@ from scipy.optimize import brentq
 # ==========================
 
 def adjust_luminosity(color, factor):
+    """Lighten or darken an RGB/hex color by a multiplicative factor."""
     rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB
     return np.clip(rgb * factor, 0, 1)  # Scale and clip values
 
@@ -34,6 +35,7 @@ def compute_numeric_nlin(gvda: float,
                          gvdb: float,
                          ipulse: int,
                          recompute: bool = False,):
+    """Compute NLIN via numerical collision integrals across a DGD sweep."""
     cf_path = "./input/mmf.toml"
     nc_path = "./input/numerical_config.toml"
     cf = cfg.load_toml_to_struct(cf_path)
@@ -117,6 +119,7 @@ def compute_numeric_nlin(gvda: float,
 
 
 def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
+    """Return asymptotic NLIN expressions for large and small walk-off."""
     cf_path = "./input/mmf.toml"
     nc_path = "./input/numerical_config.toml"
     cf = cfg.load_toml_to_struct(cf_path)
@@ -148,6 +151,7 @@ def simple_plot_threshold(gvda: float = 0.0,
                           recompute: bool = False,
                           ipulse: int = 1,
                           m_lo_truncation: int = 0):
+    """Plot fitted and numeric NLIN vs walk-off for a single pulse family."""
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
     cf = cfg.load_toml_to_struct(cf_path)
@@ -246,10 +250,7 @@ def simple_plot_threshold(gvda: float = 0.0,
 
 
 def fB_undepleted(z):
-    """
-    f_B(z) = exp[-α_s z + (g * Pp_in * e^{-α_p L} / α_p) * (e^{α_p z} - 1)]
-    Parameters are tuned so f_B(70 km) ≈ f_B(0) = 1.
-    """
+    """Undepleted Raman gain profile tuned to keep signal power roughly flat."""
     z = z/ 1000
     # --- Parameters giving approximate gain-loss balance ---
     alpha_s = 0.023   # signal loss [1/km]
@@ -276,6 +277,7 @@ def plot_threshold(
     gvdb: float = 0.0,
     m_lo_truncation: int = 0
 ):
+    """Compare NLIN fits and numerics (with optional Raman gain) across walk-off."""
     if not use_fB:
         fB_simple_interpolation = True
         lg.trace("Disabling fB_simple_interpolation since use_fB is False")

@@ -1,7 +1,7 @@
-import analysis.modules.cfg as cfg
+import analysis.components.cfg as cfg
 import numpy as np
 from typing import Tuple
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 init_logging()
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
@@ -12,6 +12,7 @@ MU0 = 1.3809
 
 
 def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
+    """Load normalized Raman gain profiles fB(z) and polynomial approximations from a cached solution."""
     assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
     # all the information about the numerosity and stuff is here.
     # Beware, -5dBm is right: it is obtained using the -2dBm solutions so to have equalizaiton without recomputing all
@@ -43,6 +44,7 @@ def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callabl
 def raman_integral(cf,
                    regime: str,
                    fB: np.ndarray):
+    """Compute LO or HI Raman integrals for a given longitudinal gain profile."""
     z_axis = np.linspace(0, cf.fiber_length, len(fB))
     dz = z_axis[1] - z_axis[0]
     if regime == "LO":
@@ -53,6 +55,7 @@ def raman_integral(cf,
 
 def load_raman_integral_extremes(cf,
                                  ) -> Tuple[float, float, float, float]:
+    """Return LO/HI Raman integrals for minimum and maximum gain envelopes."""
     _, fB_min, fB_max, _, _ = load_fB(cf)
     r_lo_min = raman_integral(cf, "LO", fB_min)
     r_lo_max = raman_integral(cf, "LO", fB_max)

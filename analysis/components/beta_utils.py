@@ -6,15 +6,15 @@ import matplotlib.pyplot as plt
 from matplotlib import rc
 import pynlin.wdm
 from pynlin.utils import nu2lambda
-from analysis.modules.load_fiber_values import load_group_delay, load_dummy_group_delay
+from analysis.components.load_fiber_values import load_group_delay, load_dummy_group_delay
 from numpy import polyval
 from pynlin.fiber import MMFiber
 from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import ScalarFormatter
-import analysis.modules.cfg as cfg
+import analysis.components.cfg as cfg
 from matplotlib.ticker import FuncFormatter
 from loguru import logger as lg
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 init_logging()
 
 
@@ -30,24 +30,29 @@ rc('text', usetex=True)
 
 
 def beta2rms(beta2a, beta2b):
+    """RMS combination of two beta2 values (negative for normal dispersion)."""
     return -np.sqrt((beta2a**2 + beta2b**2)/2)
 
 
 def beta2rms_complementary(beta2rms, beta2a):
+    """Return beta2b such that rms(beta2a, beta2b) equals the target rms value."""
     tmp = 2 * beta2rms**2 - beta2a**2
     assert (tmp > 0)
     return -np.sqrt(tmp)
 
 
 def beta2avg(beta2a, beta2b):
+    """Arithmetic mean of two beta2 values."""
     return (beta2a + beta2b) / 2
 
 
 def beta2avg_complementary(beta2avg, beta2a):
+    """Return beta2b such that average(beta2a, beta2b) equals the target average."""
     return beta2avg - beta2a
 
 
 def fig3_fig4(cf_file="./input/mmf.toml"):
+    """Recreate dispersion/NLIN plots used in figures 3 and 4."""
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -255,6 +260,7 @@ def fig3_fig4(cf_file="./input/mmf.toml"):
 
 
 def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
+    """Plot distribution of channel walk-offs (L/LW) across all mode pairs."""
     cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,
@@ -381,7 +387,8 @@ def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
 
 
 def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
-    from analysis.modules.collision import get_systems_dispersions
+    """Plot distribution of channel GVD across all modes/channels."""
+    from analysis.components.collision import get_systems_dispersions
     cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,

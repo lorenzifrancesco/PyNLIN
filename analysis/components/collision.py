@@ -1,5 +1,5 @@
 from loguru import logger as lg
-from analysis.modules.log_init import init_logging
+from analysis.components.log_init import init_logging
 init_logging()
 
 import sys
@@ -8,15 +8,15 @@ from pynlin.nlin import m_th_time_integral_general
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 import os
-from analysis.modules.beta_utils import beta2rms, beta2rms_complementary, beta2avg_complementary
+from analysis.components.beta_utils import beta2rms, beta2rms_complementary, beta2avg_complementary
 from pynlin.pulses import NyquistPulse, GaussianPulse
 from scipy.interpolate import RegularGridInterpolator
 import pynlin
 
-import analysis.modules.cfg as cfg
+import analysis.components.cfg as cfg
 from pynlin.fiber import MMFiber
 from pynlin.wdm import WDM
-from analysis.modules.load_fiber_values import load_oi, load_group_delay
+from analysis.components.load_fiber_values import load_oi, load_group_delay
 
 formatter = ScalarFormatter()
 formatter.set_scientific(True)
@@ -27,10 +27,12 @@ PULSE_LINE_STYLE = ["-", "--"]
 MAX_LLD = 2.3
         
 def get_space_integrals(m, z, I):
+    """(wrapper) Compute spatial collision integral X0mm for a given time integral profile."""
     X0mm = pynlin.nlin.X0mm_space_integral(z, I, amplification_function=None)
     return X0mm
 
 def plot_illustrative(fiber, wdm, cf, recompute=False):
+    """Reproduce illustrative pulse-collision plots (Fig.1-style) for Gaussian/Nyquist pulses."""
     lg.debug("Plotting Fig.1 (pulse collisions)...")
     nyquist_pulse = NyquistPulse(
         baud_rate=cf.baud_rate,
@@ -216,6 +218,7 @@ def plot_illustrative(fiber, wdm, cf, recompute=False):
 
 # range of the evaluation is hardcoded in the function to L/LDA=2
 def get_I_low(fiber, m_lo, recompute=False):
+    """Precompute I_low tables over dispersion ranges for Gaussian and Nyquist pulses."""
     nyquist_pulse = NyquistPulse(
         baud_rate=cf.baud_rate,
         num_symbols=220,
@@ -273,6 +276,7 @@ def get_I_low(fiber, m_lo, recompute=False):
 
 # TODO implement the argument exchange symmetry, somehow
 def build_I_low_interpolator(I_low_dataset, ipulse: int):
+    """Wrap RegularGridInterpolator for I_low values with basic input validation."""
     lld_range = I_low_dataset['lld_range']
     I_low_values = I_low_dataset['I_low_values']
     interp_func = RegularGridInterpolator(
@@ -289,6 +293,7 @@ def build_I_low_interpolator(I_low_dataset, ipulse: int):
 
 
 def get_systems_dispersions():
+    """Return normalized dispersion (L/L_D) combinations for all mode/channel pairs."""
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
     fiber = MMFiber(
         effective_area=cf.effective_area,
@@ -320,6 +325,7 @@ def plot_dispersion_analysis(fiber,
                              m_lo=3, 
                              recompute=True, 
                              with_system_data=False):
+    """Plot contour maps of I_low over dispersion ranges and optionally overlay system points."""
     lg.debug("Plotting Fig.1 (pulse collisions)...")
     I_low_values, lld_range = get_I_low(fiber, m_lo, recompute=recompute)
     if with_system_data:

@@ -86,14 +86,17 @@ class StepIndexFiber:
 
 
 def normalized_frequency(fiber: StepIndexFiber, wavelength: float) -> float:
+    """Compute V-number for a step-index fiber at a given wavelength."""
     return 2 * np.pi * fiber.core_radius / wavelength * fiber.NA
 
 def denormalize_frequency(fiber: StepIndexFiber, v: float) -> float:
+    """Convert a normalized frequency back to optical frequency (Hz)."""
     wavelength = 2 * np.pi * fiber.core_radius * fiber.NA / v
     return lambda2nu(wavelength)
 
 
 def denormalize_propagation_constant(fiber: StepIndexFiber, b: float, v: float) -> float:
+    """Convert normalized propagation constant b(v) into absolute k (1/m)."""
     freq = denormalize_frequency(fiber, v)
     wavelength = nu2lambda(freq)
     k_cl = 2 * np.pi * fiber.n_cl / wavelength
@@ -101,10 +104,12 @@ def denormalize_propagation_constant(fiber: StepIndexFiber, b: float, v: float) 
     return (b * (k_co**2 - k_cl**2) + k_cl**2) ** 0.5
 
 def cof_lhs(v, n):
+    """Left-hand side of LP mode cutoff equation."""
     return v * J(n + 1, v)
 
 
 def cof_rhs(v, n):
+    """Right-hand side of LP mode cutoff equation."""
     return 2 * n * J(n, v)
 
 
@@ -122,16 +127,7 @@ def cutoff_frequency_equation(v: float, n: int) -> float:
 
 
 def characteristic_equation(b: float, v: float, n: int) -> float:
-    """Compute difference between lhs and rhs of the characteristic equation.
-
-    Args:
-        b (float): _description_
-        v (float): the normalized frequency
-        n (int): the azimuthal order
-
-    Returns:
-        float: _description_
-    """
+    """Difference between characteristic-equation sides for a given b, v, and azimuthal order."""
     v1b = v * (1 - b) ** 0.5
     vb = v * b**0.5
     lhs = v1b * J(n + 1, v1b) / J(n, v1b)
@@ -140,6 +136,7 @@ def characteristic_equation(b: float, v: float, n: int) -> float:
 
 
 def find_zeros(fun, v_min: float, v_max: float, debug: bool = False):
+    """Bracket and refine zeros of fun over [v_min, v_max] using coarse scanning."""
     num_intervals = 200
     interval = (v_max - v_min) / num_intervals
 
@@ -167,6 +164,7 @@ def find_zeros(fun, v_min: float, v_max: float, debug: bool = False):
 
 
 def find_all_modes(v_max: float) -> List[LPModeFamily]:
+    """Enumerate LP mode families up to a maximum normalized frequency."""
     m = 0
     first_mode = False
     modes = [LPModeFamily(azimuthal_order=0, radial_order=1, cutoff_frequency=0)]
@@ -204,6 +202,7 @@ def find_all_modes(v_max: float) -> List[LPModeFamily]:
 def find_propagation_constant(
     mode: LPModeFamily, v_min: float, v_max: float
 ) -> PropagationConstant:
+    """Tabulate the normalized propagation constant b(v) for a mode over [v_min, v_max]."""
     dv = 0.01
     num_points = int((v_max - v_min) / dv)
     num_points = max(num_points, 256)
@@ -235,6 +234,7 @@ def find_propagation_constant(
     return PropagationConstant(v_, b_)
 
 def mode_intensity(fiber: StepIndexFiber, mode: LPModeFamily, b: float, v: float, type: str = "even", debug: bool = False):
+    """Compute the transverse intensity profile of an LP mode."""
 
     accepted_types = ("even", "odd")
     if type not in accepted_types:
@@ -279,11 +279,13 @@ def mode_intensity(fiber: StepIndexFiber, mode: LPModeFamily, b: float, v: float
 
 
 def double_integral(xx, yy, f) -> float:
+    """Numerically integrate a 2D field over x/y using trapezoids."""
     iy = np.trapz(f, axis=0)
     ix = np.trapz(iy, axis=0)
     return ix
 
 def effective_mode_area(xx, yy, intensity) -> float:
+    """Compute effective area from a sampled intensity profile."""
     aeff =  double_integral(xx, yy, intensity) ** 2 / double_integral(xx, yy, intensity ** 2)
     return aeff
     
@@ -330,9 +332,5 @@ if __name__ == "__main__":
 
     plt.figure()
     plt.plot(wavelengths*1e9, b_s)
-
-
-
-
     
     plt.show()

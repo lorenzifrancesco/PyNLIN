@@ -1,4 +1,4 @@
-from analysis.modules.cfg import Config, get_next_filename
+from analysis.components.cfg import Config, get_next_filename
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.cm import viridis
@@ -6,6 +6,7 @@ from pynlin.utils import watt2dBm
 import matplotlib.colors as mcolors
 from pynlin.utils import dBm2watt
 def adjust_luminosity(color, factor):
+    """Scale an RGB color toward lighter or darker variants."""
     rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB
     return np.clip(rgb * factor, 0, 1)  # Scale and clip values
 
@@ -18,6 +19,7 @@ def plot_profiles(signal_wavelengths,
                   cf: Config,
                   wallpaper_mode=False, 
                   single_out_mode = None):
+    """Plot signal, ASE, and pump power profiles and save flatness snapshots."""
     plt.clf()
     # plt.figure(figsize=(2.5, 2))
     plt.figure(figsize=(3.6, 2))
@@ -106,6 +108,7 @@ def analyze_optimization(
   pump_solution, # in Watt
   pump_powers, # in Watt
   cf):
+  """Print quick metrics to judge optimization quality and noise impact."""
   signal_solution_dBm = watt2dBm(signal_solution)
   pump_solution_dBm = watt2dBm(pump_solution)
   flatness = np.max(signal_solution_dBm[-1, :, :]) - np.min(signal_solution_dBm[-1, :, :])
@@ -129,4 +132,3 @@ def analyze_optimization(
   # print(f" ° Wavel [m] : {repr(pump_wavelengths)}")
   # print(f" ° Pow. [dBm] : {repr(pump_powers)}")
   return
-

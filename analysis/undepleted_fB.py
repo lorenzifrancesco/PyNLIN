@@ -26,6 +26,7 @@ km = 1e3
 L = L_km * km
 
 def dB_per_km_to_np_per_m(val_db_km):
+    """Convert attenuation from dB/km to nepers per meter."""
     return (val_db_km * np.log(10) / 10.0) / 1e3
 
 alpha_s = dB_per_km_to_np_per_m(alpha_s_dB_km)  # [1/m]
@@ -40,15 +41,18 @@ Pp_in = margin * Pp_in_flat
 z = np.linspace(0.0, L, num_points)
 
 def Pp_counter(z):
+    """Backward-propagating pump launched at z=L."""
     # Pump launched at z=L, propagates toward -z
     return Pp_in * np.exp(-alpha_p * (L - z))
 
 def Ps_counter(z):
+    """Closed-form signal power under an undepleted counter-propagating pump."""
     # Closed-form solution for undepleted counter-prop pump
     integral = (g * Pp_in * np.exp(-alpha_p * L) / alpha_p) * (np.exp(alpha_p * z) - 1.0)
     return P_s0 * np.exp(-alpha_s * z) * np.exp(integral)
 
 def to_dBm(Pw):
+    """Convert Watts to dBm while avoiding log of zero."""
     return 10.0 * np.log10(np.maximum(Pw, 1e-30)) + 30.0
 
 # -------- Compute --------

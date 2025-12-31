@@ -15,6 +15,7 @@ plt.rcParams['font.size'] = '26'
 
 
 def arity_coefficient():
+    """Plot modulation-order dependent kurtosis factors for QAM/PSK constellations."""
     m_QAM = [4, 16, 64, 256, 1024]
     m_PSK = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
     arity_list = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
@@ -68,6 +69,7 @@ def arity_coefficient():
 
 
 def constellation_statistics():
+    """Compute and plot symbol-energy variance scaling versus QAM order."""
     average_energy = 1
     power_dBm_list = np.linspace(-20, 0, 3)
     arity_list = [16, 64, 256]
