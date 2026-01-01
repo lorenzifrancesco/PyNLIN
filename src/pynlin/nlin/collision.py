@@ -1,22 +1,29 @@
 from loguru import logger as lg
-from analysis.log_init import init_logging
+
+from pynlin.log_init import init_logging
+
 init_logging()
 
-import sys
-import numpy as np
-from pynlin.nlin import m_th_time_integral_general
-import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
 import os
-from analysis.fiber_analysis.beta_utils import beta2rms, beta2rms_complementary, beta2avg_complementary
-from pynlin.pulses import NyquistPulse, GaussianPulse
-from scipy.interpolate import RegularGridInterpolator
-import pynlin
+import sys
 
-import analysis.utils.cfg as cfg
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.ticker import ScalarFormatter
+from scipy.interpolate import RegularGridInterpolator
+
+import pynlin.utils as cfg
+import pynlin
+from pynlin.fiber_data.beta_utils import (
+    beta2avg_complementary,
+    beta2rms,
+    beta2rms_complementary,
+)
+from pynlin.fiber_data.load_fiber_values import load_group_delay, load_oi
 from pynlin.fiber import MMFiber
+from pynlin.nlin import m_th_time_integral_general
+from pynlin.pulses import GaussianPulse, NyquistPulse
 from pynlin.wdm import WDM
-from analysis.fiber_analysis.load_fiber_values import load_oi, load_group_delay
 
 formatter = ScalarFormatter()
 formatter.set_scientific(True)

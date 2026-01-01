@@ -1,16 +1,22 @@
-import numpy as np
-from scipy.optimize import fsolve, root
 import sys
 from pathlib import Path
+
+import numpy as np
+from scipy.optimize import fsolve, root
+
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from analysis.fiber_analysis.load_fiber_values import load_phase_delay
+import heapq
+import random
+import time
+from itertools import product
+
 from matplotlib import pyplot as plt
 from numpy import polyval
-from itertools import product
-import pynlin
+
 import analysis.utils.cfg as cfg
-import time, random
-import heapq
+import pynlin
+from analysis.fiber_analysis.load_fiber_values import load_phase_delay
+
 
 def main():
     """Demo brute-force heap selection of top random samples."""

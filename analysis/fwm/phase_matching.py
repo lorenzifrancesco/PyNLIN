@@ -1,11 +1,14 @@
+from itertools import product
+
+import cvxpy as cp
 import numpy as np
-from scipy.optimize import fsolve, root
-from analysis.fiber_analysis.load_fiber_values import load_phase_delay
 from matplotlib import pyplot as plt
 from numpy import polyval
-import cvxpy as cp
-from itertools import product
+from scipy.optimize import fsolve, root
+
 import analysis.utils.cfg as cfg
+from analysis.fiber_analysis.load_fiber_values import load_phase_delay
+
 
 def get_plane(k, p, m):
     """Compute plane coefficients enforcing p·k conservation for a four-mode FWM tuple."""

@@ -1,25 +1,30 @@
-import numpy as np
 import logging
-import scipy.io
-import numpy as np
+
 import matplotlib.pyplot as plt
-from matplotlib import rc
-import pynlin.wdm
-from pynlin.utils import nu2lambda
-from analysis.fiber_analysis.load_fiber_values import load_group_delay, load_dummy_group_delay
-from numpy import polyval
-from pynlin.fiber import MMFiber
-from matplotlib.gridspec import GridSpec
-from matplotlib.ticker import ScalarFormatter
-import analysis.utils.cfg as cfg
-from matplotlib.ticker import FuncFormatter
+import numpy as np
+import scipy.io
 from loguru import logger as lg
-from analysis.log_init import init_logging
+from matplotlib import rc
+from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import FuncFormatter, ScalarFormatter
+from numpy import polyval
+
+import pynlin.utils.cfg as cfg
+import pynlin.wdm
+from pynlin.fiber_data.load_fiber_values import (
+    load_dummy_group_delay,
+    load_group_delay,
+)
+from pynlin.log_init import init_logging
+from pynlin.fiber import MMFiber
+from pynlin.utils import nu2lambda
+
 init_logging()
 
 
-from matplotlib.colors import ListedColormap
 from matplotlib import cm
+from matplotlib.colors import ListedColormap
+
 base = plt.get_cmap("jet", 256)
 newcolors = base(np.linspace(0, 1, 256))
 newcolors[0, :] = np.array([1, 1, 1, 1])  # set lowest color to white
@@ -388,7 +393,7 @@ def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
 
 def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
     """Plot distribution of channel GVD across all modes/channels."""
-    from analysis.nlin.collision import get_systems_dispersions
+    from pynlin.nlin.collision import get_systems_dispersions
     cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,

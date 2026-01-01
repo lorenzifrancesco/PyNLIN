@@ -1,17 +1,19 @@
-import matplotlib.pyplot as plt
-from matplotlib import cm
-import numpy as np
-import os
-import pynlin
-import pynlin.wdm
-import pynlin.pulses
-import pynlin.nlin
-import pynlin.utils
-from pynlin.utils import dBm2watt, watt2dBm
-import pynlin.constellations
-from matplotlib.lines import Line2D
-import matplotlib as mpl
 import json
+import os
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib import cm
+from matplotlib.lines import Line2D
+
+import pynlin
+import pynlin.constellations
+import pynlin.nlin
+import pynlin.pulses
+import pynlin.utils
+import pynlin.wdm
+from pynlin.utils import dBm2watt, watt2dBm
 
 f = open("./input/sim_config.json")
 data = json.load(f)

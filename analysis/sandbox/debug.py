@@ -1,8 +1,9 @@
 """
 Just a debug script for functionalities
 """
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 
 def main():
     """Plot stored debug integrals if present."""

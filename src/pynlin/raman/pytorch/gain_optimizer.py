@@ -7,8 +7,9 @@ from torch import nn
 from torch.nn import MSELoss
 from torch.optim.adam import Adam
 from torch.optim.sgd import SGD
-from pynlin.utils import dBm2watt, watt2dBm
+
 from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
+from pynlin.utils import dBm2watt, watt2dBm
 
 
 def dBm(x: torch.Tensor) -> torch.Tensor:

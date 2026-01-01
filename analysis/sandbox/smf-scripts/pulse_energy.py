@@ -1,8 +1,10 @@
-from argparse import ArgumentParser
-import numpy as np
 import random
+from argparse import ArgumentParser
+
 import matplotlib.pyplot as plt
+import numpy as np
 import scipy.signal
+
 import pynlin.constellations
 import pynlin.pulses
 

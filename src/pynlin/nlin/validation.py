@@ -1,25 +1,31 @@
-from analysis.nlin.nlin_estimator import fit_nlin, LLW_MAX, LLW_MIN
-from analysis.utils.nlin_estimation.raman_integrals import load_fB, raman_integral
-from analysis.utils.nlin_estimation.ideal_fits import ideal_fit_coefficients
-from analysis.utils.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman, build_I_low_interpolator, build_lookup_integral_table_with_raman_custom
-from analysis.fiber_analysis.load_fiber_values import load_group_delay, load_rms_gvd
-from analysis.log_init import init_logging
-import matplotlib.colors as mcolors
-from pynlin.collisions import get_m_values, get_collision_location
-from scipy.interpolate import interp1d
-import analysis.utils.cfg as cfg
-from pynlin.nlin import compute_all_collisions_time_integrals, X0mm_space_integral
-from pynlin.pulses import *
-from pynlin.fiber import *
-from matplotlib import rc
-import matplotlib.pyplot as plt
 import os
+
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger as lg
+from matplotlib import rc
+from scipy.interpolate import interp1d
+
+import pynlin.utils as cfg
+from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
+from pynlin.log_init import init_logging
+from pynlin.nlin.nlin_estimator import LLW_MAX, LLW_MIN, fit_nlin
+from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from pynlin.nlin.nlin_estimation.lo_correction import (
+    build_I_low_interpolator,
+    build_lookup_integral_table_with_raman,
+    build_lookup_integral_table_with_raman_custom,
+)
+from pynlin.nlin.nlin_estimation.raman_integrals import load_fB, raman_integral
+from pynlin.collisions import get_collision_location, get_m_values
+from pynlin.fiber import *
+from pynlin.nlin import X0mm_space_integral, compute_all_collisions_time_integrals
+from pynlin.pulses import *
+
 init_logging()
 from scipy.interpolate import interp1d
 from scipy.optimize import brentq
-
 
 # ==========================
 # Core functions

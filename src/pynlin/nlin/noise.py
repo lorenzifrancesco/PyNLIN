@@ -8,15 +8,19 @@ Generates figs:
 - NLIN thresholding and approximation
 
 """
-import analysis.utils.cfg as cfg
-from analysis.fiber_analysis.load_fiber_values import *
-from analysis.fiber_analysis.load_fiber_values import load_group_delay
-from analysis.nlin.collision import plot_illustrative, plot_dispersion_analysis
-from analysis.nlin.validation import plot_threshold
-from analysis.nlin.system_nlin import plot_case_study_noise, plot_case_study_noise_histogram
-
 from loguru import logger as lg
-from analysis.log_init import init_logging
+
+import pynlin.utils.cfg as cfg
+from pynlin.fiber_data..load_fiber_values import *
+from pynlin.fiber_data..load_fiber_values import load_group_delay
+from pynlin.log_init import init_logging
+from pynlin.nlin.collision import plot_dispersion_analysis, plot_illustrative
+from pynlin.nlin.system_nlin import (
+    plot_case_study_noise,
+    plot_case_study_noise_histogram,
+)
+from pynlin.nlin.validation import plot_threshold
+
 init_logging()
 
 def main():
@@ -36,7 +40,7 @@ def main():
         center_frequency=cf.center_frequency
     )
 
-    fiber = pynlin.fiber.MMFiber(
+    fiber = pynlin.fiber_data.MMFiber(
         effective_area=80e-12,
         overlap_integrals=oi_fit,
         group_delay=load_group_delay(),

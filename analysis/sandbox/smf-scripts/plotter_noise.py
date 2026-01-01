@@ -7,20 +7,22 @@
 # OSNR vs channel
 # ASE vs channel
 
+import json
+import os
+
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-import h5py
-import os
-import pynlin
-import pynlin.wdm
-import pynlin.pulses
-import pynlin.nlin
-import pynlin.utils
-from pynlin.utils import dBm2watt, watt2dBm, nu2lambda
-import pynlin.constellations
-from scipy.special import erfc
-import json
 from matplotlib.lines import Line2D
+from scipy.special import erfc
+
+import pynlin
+import pynlin.constellations
+import pynlin.nlin
+import pynlin.pulses
+import pynlin.utils
+import pynlin.wdm
+from pynlin.utils import dBm2watt, nu2lambda, watt2dBm
 
 f = open("./input/sim_config.json")
 data = json.load(f)

@@ -1,7 +1,8 @@
 import numpy as np
-import pynlin.utils
 import scipy
 from scipy.optimize import curve_fit
+
+import pynlin.utils
 from pynlin.utils import *
 
 

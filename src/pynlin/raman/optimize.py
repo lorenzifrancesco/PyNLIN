@@ -6,28 +6,23 @@ Generates figs:
 All runtime work is inside functions; importing this module has no side effects.
 """
 import os
-import tqdm
-from multiprocessing import Pool
-from matplotlib import pyplot as plt
+
 import numpy as np
 import torch
-from scipy.constants import lambda2nu, nu2lambda
 from matplotlib.cm import viridis
-from analysis.fiber_analysis.load_fiber_values import load_group_delay
-import analysis.utils.cfg as cfg
+from scipy.constants import lambda2nu, nu2lambda
 
+import pynlin.utils as cfg
 import pynlin
-import pynlin.wdm
-import pynlin.pulses
-import pynlin.nlin
-import pynlin.utils
 import pynlin.fiber
+import pynlin.wdm
+from pynlin.fiber_data.load_fiber_values import load_group_delay
+from pynlin.raman.plot_optimization import analyze_optimization, plot_profiles
 from pynlin.raman.pytorch.gain_optimizer import GainOptimizer
 from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
 from pynlin.raman.solvers import MMFRamanAmplifier as NumpyMMFRamanAmplifier
-from pynlin.utils import dBm2watt, watt2dBm
-import pynlin.constellations
-from analysis.raman.plot_optimization import plot_profiles, analyze_optimization
+from pynlin.utils import dBm2watt
+
 
 def ct_solver(fiber, 
               wdm, 
@@ -225,7 +220,7 @@ if __name__ == "__main__":
         oi_set = oi_fit
     oi_fit = oi_avg_complete
     #
-    fiber = pynlin.fiber.MMFiber(
+    fiber = pynlin.fiber_data.MMFiber(
         effective_area=80e-12,
         n_modes=cf.n_modes,
         overlap_integrals=oi_set,

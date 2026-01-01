@@ -1,19 +1,21 @@
-import matplotlib.pyplot as plt
-from matplotlib import cm
-import numpy as np
-import h5py
-import os
-from scipy.interpolate import interp1d
-from scipy.integrate import quad
-import tqdm
-import pynlin
-import pynlin.wdm
-import pynlin.pulses
-import pynlin.nlin
-import pynlin.utils
-from pynlin.utils import dBm2watt
-import pynlin.constellations
 import json
+import os
+
+import h5py
+import matplotlib.pyplot as plt
+import numpy as np
+import tqdm
+from matplotlib import cm
+from scipy.integrate import quad
+from scipy.interpolate import interp1d
+
+import pynlin
+import pynlin.constellations
+import pynlin.nlin
+import pynlin.pulses
+import pynlin.utils
+import pynlin.wdm
+from pynlin.utils import dBm2watt
 
 f = open("./input/sim_config.json")
 data = json.load(f)

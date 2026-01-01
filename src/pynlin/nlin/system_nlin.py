@@ -1,13 +1,15 @@
-from analysis.nlin.nlin_estimator import collision_coeffs_system, total_nlin
-from pynlin.utils import watt2dBm, dBm2watt
-import analysis.utils.cfg as cfg
-from matplotlib.ticker import ScalarFormatter
-import pynlin.wdm
-from matplotlib import rc
 import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger as lg
-from analysis.log_init import init_logging
+from matplotlib import rc
+from matplotlib.ticker import ScalarFormatter
+
+import pynlin.utils.cfg as cfg
+import pynlin.wdm
+from pynlin.log_init import init_logging
+from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin
+from pynlin.utils import dBm2watt, watt2dBm
+
 init_logging()
 
 # import plotly.graph_objects as go

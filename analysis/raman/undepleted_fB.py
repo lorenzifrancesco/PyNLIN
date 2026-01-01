@@ -4,8 +4,8 @@ Signal power in dBm under counter-propagating Raman pump (undepleted pump).
 Pump power is chosen to (approximately) compensate signal loss => ~flat Ps(z).
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 # -------- Parameters --------
 L_km = 20.0               # fiber length [km]

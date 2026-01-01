@@ -2,14 +2,17 @@
 When run in background, continously
 update a plot of the final channel on off gain. 
 """
-import numpy as np
-import matplotlib.pyplot as plt
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-import time
 import os
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np
 from utils import cfg
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
 from pynlin.utils import nu2lambda
+
 
 class SignalPlotter(FileSystemEventHandler):
     def __init__(self, file_path, n_modes=2):

@@ -1,9 +1,12 @@
-import analysis.utils.cfg as cfg
-import numpy as np
 from typing import Tuple
-from scipy.optimize import curve_fit
-from analysis.log_init import init_logging
+
+import numpy as np
 from loguru import logger as lg
+from scipy.optimize import curve_fit
+
+import pynlin.utils as cfg
+from pynlin.log_init import init_logging
+
 init_logging()
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])

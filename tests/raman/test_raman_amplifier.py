@@ -6,10 +6,11 @@ import pynlin.fiber
 import pynlin.raman.pytorch
 import pynlin.raman.pytorch.solvers
 import pynlin.raman.solvers
-from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
 import pynlin.utils
 import pynlin.wdm
+from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
 from pynlin.utils import dBm2watt, watt2dBm
+
 
 def test_raman_amplifier():
     Ps0 = pynlin.utils.dBm2watt(-5)

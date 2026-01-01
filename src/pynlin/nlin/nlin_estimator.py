@@ -1,25 +1,32 @@
-import time
 import itertools as it
-from pynlin.utils import watt2dBm
 import os
-from analysis.nlin.collision import build_I_low_interpolator, MAX_LLD
-import analysis.utils.cfg as cfg
-from analysis.fiber_analysis.load_fiber_values import load_group_delay, load_rms_gvd
-from analysis.utils.nlin_estimation.raman_integrals import load_fB
-from scipy.constants import c
-from pynlin.utils import dBm2watt
-from pynlin.fiber import MMFiber
-import pynlin
-import numpy as np
+import time
 from typing import Tuple
-from scipy.integrate import quad
+
+import numpy as np
 from loguru import logger as lg
-from analysis.log_init import init_logging
+from scipy.constants import c
+from scipy.integrate import quad
+
+import pynlin.utils
+import pynlin
+from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
+from pynlin.log_init import init_logging
+from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
+from pynlin.nlin.nlin_estimation.raman_integrals import load_fB
+from pynlin.fiber import MMFiber
+from pynlin.utils import dBm2watt, watt2dBm
+
 init_logging()
 
-from analysis.utils.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
-from analysis.utils.nlin_estimation.ideal_fits import softplus, ideal_fit_coefficients
-from analysis.utils.nlin_estimation.raman_integrals import load_raman_integral_extremes, raman_integral
+from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients, softplus
+from pynlin.nlin.nlin_estimation.lo_correction import (
+    build_lookup_integral_table_with_raman,
+)
+from pynlin.nlin.nlin_estimation.raman_integrals import (
+    load_raman_integral_extremes,
+    raman_integral,
+)
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
@@ -41,6 +48,7 @@ def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
                  cf, ipulse, raman_min, raman_max, n_workers):
     """Initializer for multiprocessing workers to mmap shared grids and configs."""
     import os
+
     import numpy as np
     # keep BLAS threads sane per process
     os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -64,6 +72,7 @@ def work_A(task_A):
     """Compute the full NLIN block for a given (mA, nuA) against all (mB, nuB)."""
     import os
     import time
+
     import numpy as np
     mA, nuA = task_A
     pid = os.getpid()
@@ -452,7 +461,7 @@ if __name__ == "__main__":
     lg.debug(
         f"A few total NLIN: \n {ttnl[0, 0:5]} W, \n {watt2dBm(ttnl[0, 0:5])} dBm")
     exit()
-    import analysis.utils.cfg as cfg
+    import pynlin.utils as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
 
     # build the interpolator and pass it to the corrector

@@ -1,17 +1,29 @@
-import matplotlib.pyplot as plt
 import os
-from analysis.nlin.collision import build_I_low_interpolator, MAX_LLD
-import analysis.utils.cfg as cfg
-import numpy as np
 from typing import Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+from loguru import logger as lg
 from scipy.integrate import quad
 from scipy.interpolate import RegularGridInterpolator
-from loguru import logger as lg
-from analysis.log_init import init_logging
+
+import pynlin.utils.cfg as cfg
+from pynlin.log_init import init_logging
+from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
+
 init_logging()
-from analysis.utils.nlin_estimation.raman_integrals import load_fB, raman_integral, load_raman_integral_extremes
-from analysis.utils.nlin_estimation.ideal_fits import ideal_fit_coefficients
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset, zoomed_inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import (
+    inset_axes,
+    mark_inset,
+    zoomed_inset_axes,
+)
+
+from pynlin.utils.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from pynlin.utils.nlin_estimation.raman_integrals import (
+    load_fB,
+    load_raman_integral_extremes,
+    raman_integral,
+)
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW

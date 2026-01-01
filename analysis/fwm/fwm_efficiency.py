@@ -1,15 +1,19 @@
-import numpy as np
-from scipy.optimize import fsolve, root
 import sys
 from pathlib import Path
+
+import numpy as np
+from scipy.optimize import fsolve, root
+
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from analysis.fiber_analysis.load_fiber_values import load_phase_delay
+from itertools import product
+
+import cvxpy as cp
 from matplotlib import pyplot as plt
 from numpy import polyval
-import cvxpy as cp
-from itertools import product
+
+import pynlin.utils as cfg
 import pynlin
-import analysis.utils.cfg as cfg
+from pynlin.fiber_data.load_fiber_values import load_phase_delay
 
 
 def get_plane(k, p, m):

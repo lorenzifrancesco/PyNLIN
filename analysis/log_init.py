@@ -1,7 +1,9 @@
-from loguru import logger
-import sys
 import os
+import sys
 from pathlib import Path
+
+from loguru import logger
+
 
 def init_logging():
     """Configure loguru to emit to stdout plus rotating DEBUG/TRACE log files."""

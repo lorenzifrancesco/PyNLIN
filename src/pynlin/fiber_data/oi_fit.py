@@ -1,11 +1,13 @@
-import scipy.io
-from scipy.optimize import curve_fit
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import rc
+import numpy as np
 import plotly.graph_objects as go
-from pynlin.utils import oi_law_fit, oi_law
+import scipy.io
+from matplotlib import rc
 from matplotlib.cm import viridis
+from scipy.optimize import curve_fit
+
+from pynlin.utils import oi_law, oi_law_fit
+
 rc('text', usetex=False)
 
 # ================== copied

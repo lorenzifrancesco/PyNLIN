@@ -1,10 +1,12 @@
-from analysis.utils.cfg import Config, get_next_filename
+import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.cm import viridis
-from pynlin.utils import watt2dBm
-import matplotlib.colors as mcolors
-from pynlin.utils import dBm2watt
+
+from pynlin.utils import Config, get_next_filename
+from pynlin.utils import dBm2watt, watt2dBm
+
+
 def adjust_luminosity(color, factor):
     """Scale an RGB color toward lighter or darker variants."""
     rgb = np.array(mcolors.to_rgb(color))  # Convert to RGB

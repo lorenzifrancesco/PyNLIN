@@ -1,24 +1,20 @@
 import math
 from typing import Union
 
+# tmp 
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import NDArray
+import seaborn as sns
 import torch
-from scipy.constants import speed_of_light
+from matplotlib.cm import viridis
 from numpy import polyval
+from numpy.typing import NDArray
+from scipy.constants import speed_of_light
 
 from pynlin.fiber import Fiber, MMFiber
 from pynlin.raman.pytorch._torch_ode import torch_rk4
 from pynlin.raman.response import impulse_response
 from pynlin.utils import nu2lambda, watt2dBm
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# tmp 
-import matplotlib.pyplot as plt
-from matplotlib.cm import viridis
 
 
 class RamanAmplifier(torch.nn.Module):

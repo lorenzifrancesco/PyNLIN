@@ -1,12 +1,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
+
 import pynlin
-import pynlin.wdm
-import pynlin.pulses
-import pynlin.nlin
-import pynlin.utils
-from pynlin.utils import dBm2watt
 import pynlin.constellations
+import pynlin.nlin
+import pynlin.pulses
+import pynlin.utils
+import pynlin.wdm
+from pynlin.utils import dBm2watt
 
 plt.rcParams['mathtext.fontset'] = 'stix'
 plt.rcParams['font.family'] = 'STIXGeneral'

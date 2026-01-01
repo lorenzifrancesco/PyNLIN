@@ -1,12 +1,14 @@
 from typing import Tuple
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import scipy.integrate
 import scipy.optimize
+import seaborn as sns
 from numpy import polyval
-from scipy.constants import nu2lambda, lambda2nu
+from scipy.constants import Boltzmann as kB
+from scipy.constants import Planck as h_planck
+from scipy.constants import lambda2nu, nu2lambda
 
 import pynlin.utils
 from pynlin.fiber import Fiber, MMFiber
@@ -15,12 +17,10 @@ from pynlin.raman.response import gain_spectrum, impulse_response
 from pynlin.utils import (
     alpha_to_linear,
     dBm2watt,
+    oi_law,
     watt2dBm,
     wavelength_to_frequency,
-    oi_law
 )
-from scipy.constants import Boltzmann as kB
-from scipy.constants import Planck as h_planck
 
 
 class TimeOut(Exception):

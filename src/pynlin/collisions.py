@@ -1,10 +1,12 @@
-import numpy as np
-from typing import Generator, List, Tuple
-from pynlin.fiber import Fiber
 import math
-from pynlin.fiber import Fiber, SMFiber, MMFiber
-from pynlin.wdm import WDM
+from typing import Generator, List, Tuple
+
+import numpy as np
+
+from pynlin.fiber import Fiber, MMFiber, SMFiber
 from pynlin.pulses import Pulse
+from pynlin.wdm import WDM
+
 
 def get_interfering_frequencies(
     channel_of_interest: float,

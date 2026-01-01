@@ -1,7 +1,10 @@
-import analysis.utils.cfg as cfg
-import numpy as np
 from typing import Tuple
-from analysis.log_init import init_logging
+
+import numpy as np
+
+import pynlin.utils as cfg
+from pynlin.log_init import init_logging
+
 init_logging()
 
 SPATIAL_MODES = np.array([1, 2, 2, 1])

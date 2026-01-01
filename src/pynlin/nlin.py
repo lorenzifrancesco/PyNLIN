@@ -1,26 +1,33 @@
 import functools
 import math
-from typing import Tuple, List
-from numba import njit, prange
+import time
+from itertools import product
+from typing import List, Tuple
 
 import h5py
 import numpy as np
-
 import scipy.integrate
 import tqdm
+from loguru import logger as lg
+from numba import njit, prange
 from scipy.constants import nu2lambda
 from tqdm.contrib.concurrent import process_map
-from itertools import product
 
-from pynlin.fiber import Fiber, SMFiber, MMFiber
-from pynlin.pulses import Pulse, RaisedCosinePulse, GaussianPulse, NyquistPulse
-from pynlin.wdm import WDM
-from pynlin.collisions import get_interfering_frequencies, get_m_values, get_frequency_spacing, get_collision_location, get_z_walkoff, get_dgd, get_gvd
-import time
-from pynlin.utils import beta2rms
-
-from loguru import logger as lg
+from pynlin.collisions import (
+    get_collision_location,
+    get_dgd,
+    get_frequency_spacing,
+    get_gvd,
+    get_interfering_frequencies,
+    get_m_values,
+    get_z_walkoff,
+)
+from pynlin.fiber import Fiber, MMFiber, SMFiber
 from pynlin.log_init import init_logging
+from pynlin.pulses import GaussianPulse, NyquistPulse, Pulse, RaisedCosinePulse
+from pynlin.utils import beta2rms
+from pynlin.wdm import WDM
+
 init_logging()
 
 

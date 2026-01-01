@@ -1,16 +1,16 @@
-import logging  
-from typing import List, Tuple
+import logging
 from dataclasses import dataclass, field
+from typing import List, Tuple
 
-import numpy as np
-from numpy.typing import NDArray
 import matplotlib.pyplot as plt
-from scipy.constants import lambda2nu, nu2lambda
-import scipy.interpolate
-from scipy.special import jv as J, kv as K
-from scipy.optimize import fminbound
+import numpy as np
 import scipy.integrate
-
+import scipy.interpolate
+from numpy.typing import NDArray
+from scipy.constants import lambda2nu, nu2lambda
+from scipy.optimize import fminbound
+from scipy.special import jv as J
+from scipy.special import kv as K
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
