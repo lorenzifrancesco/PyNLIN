@@ -11,7 +11,7 @@ import cvxpy as cp
 from matplotlib import pyplot as plt
 from numpy import polyval
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 import pynlin
 from pynlin.fiber_data.load_fiber_values import load_phase_delay
 

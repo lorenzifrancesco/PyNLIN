@@ -7,7 +7,7 @@ from loguru import logger as lg
 from matplotlib import rc
 from scipy.interpolate import interp1d
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
 from pynlin.nlin.nlin_estimator import LLW_MAX, LLW_MIN, fit_nlin

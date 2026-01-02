@@ -7,7 +7,7 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 

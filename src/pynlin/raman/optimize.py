@@ -12,7 +12,7 @@ import torch
 from matplotlib.cm import viridis
 from scipy.constants import lambda2nu, nu2lambda
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 import pynlin
 import pynlin.fiber
 import pynlin.wdm

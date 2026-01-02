@@ -7,7 +7,7 @@ from loguru import logger as lg
 from scipy.integrate import quad
 from scipy.interpolate import RegularGridInterpolator
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
 
@@ -30,7 +30,6 @@ LLW_MIN = 0.01  # target L/LW
 LLW_MAX = 100.0
 # 64-QAM <|b_0|^4>/<|b_0|^2>^2 this is compatible with the (mu_0 - 1)=0.32*1.19 previously used.
 MU0 = 1.3809
-
 
 def build_lookup_integral_table_with_raman_custom(cf,
                                                   fB: callable,

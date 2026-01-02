@@ -4,7 +4,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate
 import scipy.optimize
-import seaborn as sns
+try:
+    import seaborn as sns
+except Exception:  # plotting-only dependency
+    sns = None
 from numpy import polyval
 from scipy.constants import Boltzmann as kB
 from scipy.constants import Planck as h_planck
@@ -55,7 +58,7 @@ class RamanAmplifier:
 
         f = np.arange(num_samples) * dF
 
-        resp, t = impulse_response(None, fs, num_samples=num_samples)
+        resp, t = impulse_response(fs=fs, num_samples=int(num_samples), normalize=False)
 
         resp -= resp.mean()
 

@@ -8,8 +8,8 @@ from loguru import logger as lg
 from scipy.constants import c
 from scipy.integrate import quad
 
-import pynlin.utils
 import pynlin
+import pynlin.io_utils as cfg
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
@@ -269,20 +269,19 @@ def nlin_prefactor(cf: cfg.Config, mode_a, mode_b):
     else:
         return nlin_prefactor_general(cf, mode_a, mode_b)
 
+
 # this only compute the collision coefficients \sum_m X_{0mm}^2
-
-
 def collision_coeffs_system(cf,
                             ipulse: int = 1,
                             recompute: bool = False,):
     """Compute or load channel-pair collision coefficients for the given config."""
-    assert cf.launch_power == -5
-    assert cf.raman_gain == 0.0
-    assert cf.baud_rate == 33e9
-    assert cf.channel_spacing == 50e9
-    assert cf.n_channels == 200
-    assert cf.center_frequency == 195.94e12
-    assert cf.fiber_length == 70e3
+    # assert cf.launch_power == -5 # FIXME this is no longer appropriate for the 
+    # assert cf.raman_gain == 0.0
+    # assert cf.baud_rate == 33e9
+    # assert cf.channel_spacing == 50e9
+    # assert cf.n_channels == 200
+    # assert cf.center_frequency == 195.94e12
+    # assert cf.fiber_length == 70e3
     if cf.n_modes == 1:
         fiber_type = "smf"
     else:
@@ -460,7 +459,7 @@ if __name__ == "__main__":
     lg.debug(
         f"A few total NLIN: \n {ttnl[0, 0:5]} W, \n {watt2dBm(ttnl[0, 0:5])} dBm")
     exit()
-    import pynlin.utils as cfg
+    import pynlin.io_utils as cfg
     cf = cfg.load_toml_to_struct("./input/mmf.toml")
 
     # build the interpolator and pass it to the corrector

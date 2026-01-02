@@ -10,12 +10,12 @@ Generates figs:
 """
 from loguru import logger as lg
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 from pynlin.fiber_data.load_fiber_values import *
 from pynlin.fiber_data.load_fiber_values import load_group_delay
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import plot_dispersion_analysis, plot_illustrative
-from pynlin.nlin.system_nlin import (
+from analysis.system_nlin import (
     plot_case_study_noise,
     plot_case_study_noise_histogram,
 )

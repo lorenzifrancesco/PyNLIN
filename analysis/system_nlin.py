@@ -4,21 +4,19 @@ from loguru import logger as lg
 from matplotlib import rc
 from matplotlib.ticker import ScalarFormatter
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 import pynlin.wdm
 from pynlin.log_init import init_logging
 from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin
 from pynlin.utils import dBm2watt, watt2dBm
-
+from pathlib import Path
 init_logging()
 
 # import plotly.graph_objects as go
 # import seaborn as sns
 
-
 # # SMF
 # def get_nlin_prefactor_smf(cf):
-
 #     print("Using gamma = ", gamma)
 #     P_in = dBm2watt(cf.launch_power)
 #     constellation_factor = 0.32 * 1.19 # 64-QAM (<|b|^4>/<|b|^2>^2 - 1)
@@ -29,7 +27,6 @@ init_logging()
 def plot_case_study_fits():
     """Placeholder for NLIN fitting visualization (not yet implemented)."""
     pass
-
 
 def plot_case_study_noise(
         use_dBm_scale=False,
@@ -44,8 +41,8 @@ def plot_case_study_noise(
     dpi = 300
     grid = False
 
-    smf_file = "./input/smf.toml"
-    mmf_file = "./input/mmf.toml"
+    smf_file = Path("./input/smf.toml")
+    mmf_file = Path("./input/mmf.toml")
     cf_smf = cfg.load_toml_to_struct(smf_file)
     cf_mmf = cfg.load_toml_to_struct(mmf_file)
     print(
@@ -147,7 +144,7 @@ def plot_case_study_noise(
     plt.tight_layout()
     # plt.ylim([2e-2, 1e0])
     plt.savefig(f"media/nlin"+name+".pdf", dpi=dpi)
-    print("The figure is saved as media/nlin"+name+".pdf")
+    lg.info("The figure is saved as media/nlin"+name+".pdf")
 
     functions = [np.mean, np.median, np.max, np.min]
     function_names = ["mean  ", "median", "max   ", "min   "]

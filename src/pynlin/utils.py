@@ -7,8 +7,24 @@ from scipy.constants import lambda2nu, nu2lambda
 from scipy.constants import speed_of_light as c0
 
 import os
-import toml
-from pydantic import BaseModel
+try:
+    import tomllib as toml  # Python 3.11+
+except ModuleNotFoundError:
+    import toml  # type: ignore
+
+try:
+    from pydantic import BaseModel as _PydanticBase
+    # probe that dependencies are present by defining a trivial subclass
+    class _PydanticProbe(_PydanticBase):
+        x: int = 1
+    BaseModel = _PydanticBase
+except Exception:
+    class BaseModel:  # minimal fallback
+        def __init__(self, **data):
+            self.__dict__.update(data)
+
+        def model_dump(self):
+            return dict(self.__dict__)
 
 def wavelength_to_frequency(lambdas):
     """Convert wavelength to frequency."""
@@ -164,14 +180,13 @@ class OpticalBands(Enum):
 
 
 """
-O-band 	1260 – 1360 nm 	Original band, PON upstream
-E-band 	1360 – 1460 nm 	Water peak band
-S-band 	1460 – 1530 nm 	PON downstream
-C-band 	1530 – 1565 nm 	Lowest attenuation, original DWDM band, compatible with fiber amplifiers, CATV
-L-band 	1565 – 1625 nm 	Low attenuation, expanded DWDM band
-U-band 	1625 – 1675 nm 	Ultra-long wavelength
+O-band \t1260 – 1360 nm \tOriginal band, PON upstream
+E-band \t1360 – 1460 nm \tWater peak band
+S-band \t1460 – 1530 nm \tPON downstream
+C-band \t1530 – 1565 nm \tLowest attenuation, original DWDM band, compatible with fiber amplifiers, CATV
+L-band \t1565 – 1625 nm \tLow attenuation, expanded DWDM band
+U-band \t1625 – 1675 nm \tUltra-long wavelength
 """
-
 
 
 class Config(BaseModel):
@@ -199,14 +214,25 @@ class NumericalConfig(BaseModel):
    n_samples_numeric_n : int
 
 # Deserialize TOML file into a Pydantic model
-def load_toml_to_struct(filepath: str) -> Config:
+def _toml_load(filepath):
+    """
+    Load TOML data handling both stdlib tomllib (expects a binary file object)
+    and the third-party toml package (accepts paths or file-like objects).
+    """
+    if getattr(toml, "__name__", "") == "tomllib" and isinstance(filepath, (str, os.PathLike)):
+        with open(filepath, "rb") as f:
+            return toml.load(f)
+    return toml.load(filepath)
+
+
+def load_toml_to_struct(filepath) -> Config:
     """Load simulation configuration from a TOML file into a Config object."""
-    data = toml.load(filepath)
+    data = _toml_load(filepath)
     return Config(**data)
 
-def load_nc_toml_to_struct(filepath: str) -> NumericalConfig:
+def load_nc_toml_to_struct(filepath) -> NumericalConfig:
     """Load numerical configuration from TOML into a NumericalConfig object."""
-    data = toml.load(filepath)
+    data = _toml_load(filepath)
     return NumericalConfig(**data)
 
 # Serialize a Pydantic model into a TOML file

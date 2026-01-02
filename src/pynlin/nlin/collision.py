@@ -12,7 +12,7 @@ import numpy as np
 from matplotlib.ticker import ScalarFormatter
 from scipy.interpolate import RegularGridInterpolator
 
-import pynlin.utils as cfg
+import pynlin.io_utils as cfg
 import pynlin
 from pynlin.fiber_data.beta_utils import (
     beta2avg_complementary,
