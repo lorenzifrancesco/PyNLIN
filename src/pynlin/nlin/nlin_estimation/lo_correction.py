@@ -7,7 +7,7 @@ from loguru import logger as lg
 from scipy.integrate import quad
 from scipy.interpolate import RegularGridInterpolator
 
-import pynlin.utils.cfg as cfg
+import pynlin.utils as cfg
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
 
@@ -18,8 +18,8 @@ from mpl_toolkits.axes_grid1.inset_locator import (
     zoomed_inset_axes,
 )
 
-from pynlin.utils.nlin_estimation.ideal_fits import ideal_fit_coefficients
-from pynlin.utils.nlin_estimation.raman_integrals import (
+from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from pynlin.nlin.nlin_estimation.raman_integrals import (
     load_fB,
     load_raman_integral_extremes,
     raman_integral,

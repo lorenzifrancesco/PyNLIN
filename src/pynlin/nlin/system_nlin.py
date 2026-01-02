@@ -4,7 +4,7 @@ from loguru import logger as lg
 from matplotlib import rc
 from matplotlib.ticker import ScalarFormatter
 
-import pynlin.utils.cfg as cfg
+import pynlin.utils as cfg
 import pynlin.wdm
 from pynlin.log_init import init_logging
 from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin

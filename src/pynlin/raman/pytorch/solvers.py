@@ -13,7 +13,7 @@ from scipy.constants import speed_of_light
 
 from pynlin.fiber import Fiber, MMFiber
 from pynlin.raman.pytorch._torch_ode import torch_rk4
-from pynlin.raman.response import impulse_response
+from pynlin.fiber_data.response import impulse_response
 from pynlin.utils import nu2lambda, watt2dBm
 
 

@@ -13,7 +13,7 @@ from scipy.constants import lambda2nu, nu2lambda
 import pynlin.utils
 from pynlin.fiber import Fiber, MMFiber
 from pynlin.pulses import Pulse
-from pynlin.raman.response import gain_spectrum, impulse_response
+from pynlin.fiber_data.response import gain_spectrum, impulse_response
 from pynlin.utils import (
     alpha_to_linear,
     dBm2watt,

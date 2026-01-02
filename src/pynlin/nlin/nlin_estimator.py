@@ -392,7 +392,7 @@ def get_kappa2_matrix(cf,
     """Build squared coupling matrix and optionally disable cross-mode terms."""
     kappa2 = np.zeros((cf.n_modes, cf.n_modes))
     if use_kappa:
-        kappa = np.loadtxt('input/kappa.csv', delimiter=',')
+        kappa = np.loadtxt('input/fiber_data/kappa.csv', delimiter=',')
         kappa2 = kappa**2
     else:
         kappa2 = np.ones((cf.n_modes, cf.n_modes))  # kind of innatural, but ok
@@ -402,11 +402,10 @@ def get_kappa2_matrix(cf,
         kappa2 = np.multiply(kappa2, switchoff_matrix)
     return kappa2
 
+
 # all in SI units
-
-
 def total_nlin(cf,
-               collision_coeffs: np.ndarray,  # warn: in normalized units
+               collision_coeffs: np.ndarray,
                use_kappa: bool = False,
                use_x_mode: bool = False,
                ) -> np.ndarray:
