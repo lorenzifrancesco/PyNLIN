@@ -28,6 +28,7 @@ Notes on units:
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import numpy as np
@@ -211,6 +212,17 @@ def impulse_response(fs: float, num_samples: int, normalize: bool = False):
             response = response / mx
 
     return response, t
+
+
+def gain_spectrum(fs: float, num_samples: int):
+    """
+    Backward-compatible helper returning a one-sided Raman gain spectrum.
+    Only used by legacy imports in Raman solvers.
+    """
+    response, _ = impulse_response(fs=fs, num_samples=num_samples, normalize=False)
+    spectrum = np.fft.fft(response)
+    # Keep the positive frequencies, mirror of usage in torch solvers
+    return -np.imag(spectrum[: math.ceil((num_samples + 1) / 2)])
 
 
 def reference_gain_spectrum_cm_per_W(

@@ -3,7 +3,7 @@ from enum import Enum
 import numpy as np
 import scipy.constants
 import torch
-from scipy.constants import lambda2nu
+from scipy.constants import lambda2nu, nu2lambda
 from scipy.constants import speed_of_light as c0
 
 import os
@@ -51,6 +51,15 @@ def watt2dBm(power):
 
 def dBm2watt(power):
     return dBm_to_watt(power)
+
+
+# Keep aliases expected by downstream modules
+def nu2lambda(freqs):
+    return scipy.constants.nu2lambda(freqs)
+
+
+def lambda2nu(lambdas):
+    return scipy.constants.lambda2nu(lambdas)
 
 
 def beta2_to_dispersion(beta2, wavelength):

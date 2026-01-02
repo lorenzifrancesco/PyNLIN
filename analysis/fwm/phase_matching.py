@@ -6,8 +6,7 @@ from matplotlib import pyplot as plt
 from numpy import polyval
 from scipy.optimize import fsolve, root
 
-import analysis.utils.cfg as cfg
-from analysis.fiber_analysis.load_fiber_values import load_phase_delay
+from pynlin.fiber_data.load_fiber_values import load_phase_delay
 
 
 def get_plane(k, p, m):

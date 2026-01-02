@@ -1,4 +1,4 @@
-from analysis.fiber_analysis.load_fiber_values import *
+from pynlin.fiber_data.load_fiber_values import *
 
 
 def test_modules():

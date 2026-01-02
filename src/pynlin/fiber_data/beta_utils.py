@@ -9,7 +9,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import FuncFormatter, ScalarFormatter
 from numpy import polyval
 
-import pynlin.utils.cfg as cfg
+import pynlin.utils as cfg
 import pynlin.wdm
 from pynlin.fiber_data.load_fiber_values import (
     load_dummy_group_delay,

@@ -13,9 +13,8 @@ from itertools import product
 from matplotlib import pyplot as plt
 from numpy import polyval
 
-import analysis.utils.cfg as cfg
 import pynlin
-from analysis.fiber_analysis.load_fiber_values import load_phase_delay
+from pynlin.fiber_data.load_fiber_values import load_phase_delay
 
 
 def main():
