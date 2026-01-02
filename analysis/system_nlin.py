@@ -3,14 +3,45 @@ import numpy as np
 from loguru import logger as lg
 from matplotlib import rc
 from matplotlib.ticker import ScalarFormatter
+from pathlib import Path
+import tomllib
 
 import pynlin.io_utils as cfg
 import pynlin.wdm
 from pynlin.log_init import init_logging
 from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin
 from pynlin.utils import dBm2watt, watt2dBm
-from pathlib import Path
 init_logging()
+
+
+def load_structured_config(path: Path) -> cfg.Config:
+    """Load jlt2-style structured TOML into the flat Config used downstream."""
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+
+    fiber = data.get("fiber", {})
+    pulse = data.get("pulse", {})
+    wdm = data.get("wdm", {})
+    amp = data.get("amplification", {})
+    nlin = data.get("nlin", {})
+
+    config_dict = dict(
+        dispersion=fiber.get("dispersion"),
+        effective_area=fiber.get("effective_area"),
+        baud_rate=pulse.get("baud_rate"),
+        fiber_length=fiber.get("fiber_length"),
+        n_modes=wdm.get("n_modes"),
+        n_channels=wdm.get("n_channels"),
+        launch_power=wdm.get("launch_power", -5),
+        raman_gain=amp.get("raman_gain", 0.0),
+        channel_spacing=wdm.get("channel_spacing"),
+        center_frequency=wdm.get("center_frequency"),
+        store=nlin.get("store", True),
+        pulse_shape=pulse.get("pulse_shape", 0),
+        collision_margin=nlin.get("collision_margin", 5),
+        n_pumps=amp.get("n_pumps", 0),
+    )
+    return cfg.Config(**config_dict)
 
 # import plotly.graph_objects as go
 # import seaborn as sns
@@ -41,10 +72,10 @@ def plot_case_study_noise(
     dpi = 300
     grid = False
 
-    smf_file = Path("./input/smf.toml")
-    mmf_file = Path("./input/mmf.toml")
-    cf_smf = cfg.load_toml_to_struct(smf_file)
-    cf_mmf = cfg.load_toml_to_struct(mmf_file)
+    smf_file = Path("./input/smf_struct.toml")
+    mmf_file = Path("./input/mmf_struct.toml")
+    cf_smf = load_structured_config(smf_file)
+    cf_mmf = load_structured_config(mmf_file)
     print(
         f"Loading a ITU-T standardized WDM grid \n [spacing: {cf_smf.channel_spacing * 1e-9:.3e}GHz, center: {cf_smf.center_frequency * 1e-12:.3e}THz] \n")
     assert (cf_smf.fiber_length == cf_mmf.fiber_length)
@@ -176,10 +207,10 @@ def plot_case_study_noise_histogram(
     grid = False
 
     # --- Load configs & sanity checks (as in the first function) ---
-    smf_file = "./input/smf.toml"
-    mmf_file = "./input/mmf.toml"
-    cf_smf = cfg.load_toml_to_struct(smf_file)
-    cf_mmf = cfg.load_toml_to_struct(mmf_file)
+    smf_file = Path("./input/smf_struct.toml")
+    mmf_file = Path("./input/mmf_struct.toml")
+    cf_smf = load_structured_config(smf_file)
+    cf_mmf = load_structured_config(mmf_file)
     print(
         f"Loading a ITU-T standardized WDM grid \n "
         f"[spacing: {cf_smf.channel_spacing * 1e-9:.3e}GHz, center: {cf_smf.center_frequency * 1e-12:.3e}THz] \n"

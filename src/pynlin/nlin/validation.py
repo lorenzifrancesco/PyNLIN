@@ -209,7 +209,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     raman_gvd_correction_min, raman_gvd_correction_max = build_lookup_integral_table_with_raman(cf, m_lo_truncation=m_lo_truncation)
     
     # -- analytic and fitted
-    nlin_fitted, ps_ramanful = fit_nlin(cf,
+    nlin_fitted = fit_nlin(cf,
                            gvda,
                            gvdb,
                            fB,
@@ -245,10 +245,12 @@ def simple_plot_threshold(gvda: float = 0.0,
     plt.xlabel(r'$L/L_W$')
     plt.ylabel(r'$\mathcal{N} \, T^2 / L^2$')
     plt.tight_layout()
-    plt.axvline(ps_ramanful[1], color='red', lw=1, ls='--')
-    plt.axhline(ps_ramanful[0], color='blue', lw=1, ls='--')
-    lg.info(f"threshold at L/LW = {1/ps_ramanful[2]:.2f}")
-    lg.debug(f"(ramanful) Fitted parameters: a={ps_ramanful[0]:.4f}, b={ps_ramanful[1]:.4f}, c={ps_ramanful[2]:.4f}")
+    ps_ramanful = getattr(nlin_fitted, "ps_params", None)
+    if ps_ramanful is not None:
+        plt.axvline(ps_ramanful[1], color='red', lw=1, ls='--')
+        plt.axhline(ps_ramanful[0], color='blue', lw=1, ls='--')
+        lg.info(f"threshold at L/LW = {1/ps_ramanful[2]:.2f}")
+        lg.debug(f"(ramanful) Fitted parameters: a={ps_ramanful[0]:.4f}, b={ps_ramanful[1]:.4f}, c={ps_ramanful[2]:.4f}")
     
     plt.savefig(f"media/simple_threshold_{pulse_shape}_{llda:.2f}_{lldb:.2f}.pdf", dpi=dpi)
     lg.info(f"Saved figure to media/simple_threshold_{pulse_shape}_{llda:.2f}_{lldb:.2f}.pdf")

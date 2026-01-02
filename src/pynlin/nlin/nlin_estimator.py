@@ -206,7 +206,10 @@ def fit_nlin(cf,
             ps_ideal.copy(), lo_value_perfect)
         lg.info("You are using a flat fB, no Raman correction will be applied")
         ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
-        return lambda dgd: softplus(dgd * cf.fiber_length * cf.baud_rate, *ps)
+        def nlin_basic(dgd):
+            return softplus(dgd * cf.fiber_length * cf.baud_rate, *ps)
+        nlin_basic.ps_params = ps
+        return nlin_basic
 
     # correct in the LO regime (Raman + GVD)
     lo_value_max = raman_gvd_correction_max(
@@ -241,7 +244,8 @@ def fit_nlin(cf,
         return softplus(d, *ps_ramanful) * (1-xi) + softplus(d, *ps_ramanless) * xi * raman_integral_fB_hi
         return softplus(d, *ps_ramanful)
         return softplus(d, *ps_ramanless) * raman_integral_fB_lo
-    return nlin_megafit, ps_ramanful
+    nlin_megafit.ps_params = ps_ramanful
+    return nlin_megafit
 
 """
 corrections due to mode multiplicity
