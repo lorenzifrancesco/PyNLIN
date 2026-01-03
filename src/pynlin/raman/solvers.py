@@ -16,7 +16,7 @@ from scipy.constants import lambda2nu, nu2lambda
 import pynlin.utils
 from pynlin.fiber import Fiber, MMFiber
 from pynlin.pulses import Pulse
-from pynlin.fiber_data.response import gain_spectrum, impulse_response
+from pynlin.fiber_data.response import gain_spectrum
 from pynlin.utils import (
     alpha_to_linear,
     dBm2watt,
@@ -27,7 +27,11 @@ from pynlin.utils import (
     watt2dBm,
     wavelength_to_frequency,
 )
-from pynlin.wdm import PumpSpec
+from pynlin.wdm import IrregularWDM, PumpSpec
+from pynlin.log_init import init_logging
+from loguru import logger as lg
+
+init_logging()
 
 
 class TimeOut(Exception):
@@ -85,77 +89,71 @@ class MMRamanAmplifierConfig(RamanAmplifierConfig):
             extra = "ignore"
 
 
+_GAIN_SPECTRUM_CACHE: dict[tuple[float, float], tuple[np.ndarray, np.ndarray]] = {}
+_GAIN_MATRIX_CACHE: dict[tuple[bytes, int, float], np.ndarray] = {}
+
+
 class RamanAmplifier:
+    @staticmethod
+    def _log_first_nonfinite(name: str, arr: np.ndarray) -> bool:
+        """Log the first NaN/inf entry; return True if any were found."""
+        bad = ~np.isfinite(arr)
+        if not np.any(bad):
+            return False
+        idx = tuple(np.argwhere(bad)[0])
+        lg.error(f"{name} has non-finite value at {idx}: {arr[idx]}")
+        return True
+
     def __init__(
         self,
         fiber: Fiber,
         response_bandwidth: float = 40e12,
         viz: bool = False
     ):
-
-        self.response_bandwidth = response_bandwidth
-
-        self.spline = self._compute_gain_spectrum(response_bandwidth)
         self.fiber = fiber
+        self.response_bandwidth = response_bandwidth
 
         super().__init__()
 
-    def _compute_gain_spectrum(self, bandwidth, spacing=100e9):
+    @staticmethod
+    def _gain_resolution(frequencies: np.ndarray, fallback: float = 50e9) -> float:
+        """Resolution to sample Raman gain; derived from grid spacing if available."""
+        freqs = np.sort(np.unique(np.asarray(frequencies, dtype=float)))
+        diffs = np.diff(freqs)
+        diffs = diffs[diffs > 0]
+        if diffs.size:
+            return float(np.min(diffs))
+        return float(fallback)
 
-        fs = 2 * bandwidth
+    def _build_gain_spectrum(self, max_shift_hz: float, resolution_hz: float):
+        """Precompute reference Raman gain spectrum up to max_shift_hz and cache it."""
+        max_shift_hz = float(max_shift_hz)
+        resolution_hz = max(float(resolution_hz), 1e9)
+        for (cached_max, cached_res), (shifts, gains) in _GAIN_SPECTRUM_CACHE.items():
+            if cached_max >= max_shift_hz and cached_res <= resolution_hz:
+                return shifts, gains
 
-        num_samples = np.ceil(fs / spacing)
+        num_samples = int(np.ceil(2 * max_shift_hz / resolution_hz)) + 1
+        num_samples = max(num_samples, 1024)
+        fs = resolution_hz * num_samples
+        g_ref = gain_spectrum(fs=fs, num_samples=num_samples)
+        shifts = np.arange(len(g_ref)) * fs / num_samples
+        peak = np.max(np.abs(g_ref))
+        gains = g_ref / peak if peak else g_ref
+        _GAIN_SPECTRUM_CACHE[(max_shift_hz, resolution_hz)] = (shifts, gains)
+        lg.debug(
+            f"Cached Raman gain spectrum up to {max_shift_hz*1e-12:.2f} THz "
+            f"(Δf≈{resolution_hz*1e-9:.1f} GHz, samples={num_samples})"
+        )
+        return shifts, gains
 
-        dt = 1 / fs
-        duration = (num_samples - 1) * dt
-        dF = fs / num_samples
-
-        f = np.arange(num_samples) * dF
-
-        resp, t = impulse_response(fs=fs, num_samples=int(num_samples), normalize=False)
-
-        resp -= resp.mean()
-
-        spectrum = np.fft.fft(resp)
-
-        gain_spectrum = -np.imag(spectrum)
-
-        # Normalize the peak to 1
-        gain_spectrum /= np.max(np.abs(gain_spectrum))
-
-        # Compute the spline representation of the signal for later use
-        # This is done in the constructor so that each call of the
-        # `propagate` method does not have to recompute it. It will only do
-        # so in case the maximum frequency does not fall in the bandwidth
-        # of the precomputed spectrum
-        spline = scipy.interpolate.splrep(f, gain_spectrum, k=3)
-
-        return spline
-
-    def _interpolate_gain(self, frequencies):
-        # if negative frequencies are passed, just compute the gain
-        # for the absolute value and then change the sign
-
-        negative_idx = frequencies < 0
-
-        pos_freqs = np.abs(frequencies)
-
-        max_freq = np.max(pos_freqs)
-
-        if max_freq > self.response_bandwidth:
-            print("Warning: recomputing spline representation")
-            self.response_bandwidth = 2 * max_freq
-
-            # Recompute the gain spectrum with a bigger bandwidth
-            self.spline = self._compute_gain_spectrum(self.response_bandwidth)
-
-        # compute the interpolate values from the spline representation
-        # we computed in the constructor
-        gains = scipy.interpolate.splev(pos_freqs, self.spline)
-
-        # switch the sign for negative frequencies
-        gains[negative_idx] *= -1
-
+    def _interpolate_gain(self, delta_freqs, resolution_hz: float):
+        """Interpolate Raman gain for frequency shifts delta_freqs (array)."""
+        abs_shifts = np.abs(delta_freqs)
+        max_shift = np.max(abs_shifts)
+        shifts, gains_ref = self._build_gain_spectrum(max_shift, resolution_hz)
+        gains = np.interp(abs_shifts, shifts, gains_ref, left=0.0, right=0.0)
+        gains[delta_freqs < 0] *= -1
         return gains
 
     def propagate(self):
@@ -175,7 +173,7 @@ class RamanAmplifier:
         temperature=300,
         odeint_kwargs=None,
         ase=False,
-        solver: str = "odeint",
+        solver: str = "ivp",
     ):
 
         # raman_coefficient = self.fiber.raman_coefficient
@@ -187,7 +185,9 @@ class RamanAmplifier:
         num_ase = num_signals if ase else 0
 
         signal_direction = np.ones_like(signal_power)
-        if np.isscalar(pump_direction):
+        if num_pumps == 0:
+            pump_direction = np.array([])
+        elif np.isscalar(pump_direction):
             pump_direction = np.sign(pump_direction) * np.ones_like(pump_power)
         else:
             pump_direction = np.atleast_1d(pump_direction)
@@ -207,14 +207,18 @@ class RamanAmplifier:
         frequencies = lambda2nu(wavelengths)
 
         # input_power = np.concatenate((self.pump_power, self.signal_power))
-        input_power = np.concatenate(
-            (self.pump_power, self.signal_power))
+        input_power = np.concatenate((self.pump_power, self.signal_power))
         if ase:
             input_power = np.concatenate((input_power, np.zeros(num_ase)))
+        lg.debug(
+            f"[SM amp] inputs: pump {pump_power.shape}, signal {signal_power.shape}, "
+            f"power range [{input_power.min():.3e},{input_power.max():.3e}], z={len(z)}"
+        )
 
         losses_linear = self.get_linear_losses(wavelengths)
 
         gain_matrix = self.compute_gain_matrix(frequencies)
+        lg.debug(f"[SM amp] gain matrix shape: {gain_matrix.shape}")
 
         # Compute the frequency shifts for each wave
         frequency_shifts = np.zeros((total_signals, total_signals))
@@ -247,8 +251,8 @@ class RamanAmplifier:
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
             ase_solution = sol[:, -num_ase:] if num_ase else np.empty((len(z), 0))
         else:
-            if solver == "ivp":
-                # Use stiff solver for better robustness
+            if solver in ("ivp", "bdf", "BDF"):
+                # Use stiff solver for better robustness (BDF)
                 def _ode(z_val, P):
                     P = np.asarray(P)
                     dPdz = (-losses_linear + gain_matrix @ P) * P
@@ -277,6 +281,20 @@ class RamanAmplifier:
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
             ase_solution = np.empty((len(z), 0))
 
+        bad_pump = self._log_first_nonfinite("[SM amp] pump_solution", pump_solution) if pump_solution.size else False
+        bad_sig = self._log_first_nonfinite("[SM amp] signal_solution", signal_solution)
+        if bad_pump or bad_sig:
+            lg.error("[SM amp] non-finite values in solution; check gain matrix and step size/tolerances")
+        else:
+            pump_range = (
+                f"[{pump_solution.min():.3e},{pump_solution.max():.3e}]" if pump_solution.size else "[]"
+            )
+            lg.debug(
+                f"[SM amp] done solve: pump_sol={pump_solution.shape}, sig_sol={signal_solution.shape}; "
+                f"power ranges pump{pump_range} "
+                f"signal[{signal_solution.min():.3e},{signal_solution.max():.3e}]"
+            )
+
         if check_photon_count:
             photon_count = np.sum(sol / frequencies, axis=1)
             return pump_solution, signal_solution, photon_count
@@ -285,27 +303,40 @@ class RamanAmplifier:
 
     def compute_gain_matrix(self, frequencies):
         """Generate the matrix of Raman gains between each pair of frequencies."""
+        frequencies = np.asarray(frequencies, dtype=float)
+        resolution = self._gain_resolution(frequencies)
+        cache_key = (frequencies.tobytes(), id(self.fiber), float(resolution))
+        if cache_key in _GAIN_MATRIX_CACHE:
+            return _GAIN_MATRIX_CACHE[cache_key]
+
         num_frequencies = len(frequencies)
-        # Compute the frequency shifts for each signal
-        frequency_shifts = np.zeros((num_frequencies, num_frequencies))
-        for i in range(num_frequencies):
-            frequency_shifts[i, :] = frequencies - frequencies[i]
+        frequency_shifts = frequencies[:, None] - frequencies[None, :]
 
-        gains = self._interpolate_gain(frequency_shifts)
+        gains = self._interpolate_gain(frequency_shifts, resolution)
 
-        gains *= self.fiber.raman_coefficient / self.fiber.effective_area
+        wavelengths = nu2lambda(frequencies)
+        if hasattr(self.fiber, "effective_area_at"):
+            areas = np.array([self.fiber.effective_area_at(wl) for wl in wavelengths], dtype=float)
+        else:
+            areas = np.full_like(frequencies, getattr(self.fiber, "effective_area", 1.0), dtype=float)
+        # use the average Aeff of the interacting pair to approximate overlap
+        area_matrix = 0.5 * (areas[:, None] + areas[None, :])
+        min_area = np.min(areas[areas > 0]) if np.any(areas > 0) else 1e-18
+        area_matrix = np.where(area_matrix > 0, area_matrix, min_area)
 
-        # Force diagonal to be 0
+        gains = gains * (self.fiber.raman_coefficient / area_matrix)
         np.fill_diagonal(gains, 0)
 
-        # gains = np.triu(gains) + np.triu(gains, 1).T
-
-        # compute the frequency scaling factor
         freqs = np.expand_dims(frequencies, axis=-1)
-        freq_scaling = np.maximum(1, freqs * (1 / freqs.T))
-
-        # gain matrix
+        freq_scaling = np.maximum(1.0, freqs * (1 / freqs.T))
         gain_matrix = freq_scaling * gains
+        if self._log_first_nonfinite("[SM amp] gain_matrix", gain_matrix):
+            raise ValueError("Non-finite values in Raman gain matrix")
+        _GAIN_MATRIX_CACHE[cache_key] = gain_matrix
+        lg.debug(
+            f"Cached Raman gain matrix for {num_frequencies} frequencies "
+            f"(Δf≈{resolution*1e-9:.1f} GHz, max shift {np.max(np.abs(frequency_shifts))*1e-12:.2f} THz)."
+        )
         return gain_matrix
 
     @staticmethod
@@ -675,6 +706,7 @@ class MMFRamanAmplifier(RamanAmplifier):
         direction=None,
         odeint_kwargs=None
     ):
+        lg.debug(f"[MM amp] start solve: signals={signal_power.shape}, pumps={pump_power.shape}, z={len(z)}")
         """Solve the multi-mode Raman amplifier equations [1].
 
         Params
@@ -737,6 +769,7 @@ class MMFRamanAmplifier(RamanAmplifier):
         wavelengths = np.concatenate((pump_wavelength, signal_wavelength))
         input_power = np.concatenate((pump_power_, signal_power_))
         frequencies = wavelength_to_frequency(wavelengths)
+        resolution = self._gain_resolution(frequencies)
 
         loss_coeffs = fiber.losses
         losses_ = polyval(loss_coeffs, wavelengths)
@@ -747,7 +780,7 @@ class MMFRamanAmplifier(RamanAmplifier):
         for i in range(total_wavelengths):
             frequency_shifts[i, :] = frequencies - frequencies[i]
 
-        gains = self._interpolate_gain(frequency_shifts)
+        gains = self._interpolate_gain(frequency_shifts, resolution)
         gains *= fiber.raman_coefficient
 
         # Must be multiplied by overlap integrals
@@ -791,6 +824,7 @@ class MMFRamanAmplifier(RamanAmplifier):
                 sol = sol.reshape((len(z), total_signals, fiber.n_modes))
                 pump_solution = sol[:, :num_pumps, :]
                 signal_solution = sol[:, num_pumps:, :]
+                lg.debug(f"[MM amp] done solve (no ASE, no shooting): pump_sol={pump_solution.shape}, sig_sol={signal_solution.shape}")
             else:
                 # SHOOTING METHOD
                 pump_losses = losses_linear[: num_pumps * fiber.n_modes]
@@ -881,6 +915,7 @@ class MMFRamanAmplifier(RamanAmplifier):
 
                 pump_solution = sol[:, :num_pumps, :]
                 signal_solution = sol[:, num_pumps:, :]
+            lg.debug(f"[MM amp] done solve (no ASE, shooting): pump_sol={pump_solution.shape}, sig_sol={signal_solution.shape}")
             return pump_solution, signal_solution, np.array([])
         else:
             direction = np.ones(((total_wavelengths + num_signals) * fiber.n_modes,))
@@ -942,6 +977,7 @@ class MMFRamanAmplifier(RamanAmplifier):
             signal_solution = power_solution[:, num_pumps:, :]
             ase_solution = sol[:, -num_signals:, :]
 
+            lg.debug(f"[MM amp] done solve (with ASE): pump_sol={pump_solution.shape}, sig_sol={signal_solution.shape}")
             return pump_solution, signal_solution, ase_solution
 
     def solve_shooting():
@@ -1007,9 +1043,54 @@ class MMRamanAmplifier(MMFRamanAmplifier):
     """Multimode Raman amplifier."""
     pass
 
+# Wideband SMF Raman amplifier aware of irregular WDM launch powers
+class SMWidebandRamanAmplifier(SMRamanAmplifier):
+    """Single-mode Raman amplifier that honors per-band launch powers on irregular WDM grids."""
+
+    @staticmethod
+    def _band_launch_powers(system, default_dbm: float) -> np.ndarray:
+        wdm = system.wdm
+        n_ch = getattr(wdm, "num_channels", None)
+        powers_dbm = np.full(n_ch, default_dbm)
+        if isinstance(wdm, IrregularWDM):
+            for name, slc in getattr(wdm, "_band_slices", {}).items():
+                spec = wdm.band_specs.get(name)
+                if spec and spec.launch_power_dbm is not None:
+                    powers_dbm[slc] = spec.launch_power_dbm
+        return powers_dbm
+
+    def solve_from_system(self, system, z: np.ndarray, disable_pumps: bool = False, **kwargs):
+        fiber = system.fiber
+        wdm = system.wdm
+        pumps = [] if disable_pumps else (system.pump_specs or [])
+
+        freqs = wdm.frequency_grid()
+        wavelengths = nu2lambda(freqs)
+
+        launch_dbm_default = system.launch_power if system.launch_power is not None else -5.0
+        signal_power_dbm = self._band_launch_powers(system, launch_dbm_default)
+        signal_power_w = dBm2watt(signal_power_dbm)
+
+        pump_wavelengths = np.array([p.wavelength for p in pumps]) if pumps else np.array([])
+        pump_powers_w = dBm2watt(np.array([p.power_dbm for p in pumps])) if pumps else np.array([])
+        pump_dirs = np.array([p.direction for p in pumps]) if pumps else np.array([])
+
+        return self.solve(
+            signal_power=signal_power_w,
+            signal_wavelength=wavelengths,
+            pump_power=pump_powers_w,
+            pump_wavelength=pump_wavelengths,
+            z=z,
+            pump_direction=pump_dirs,
+            use_power_at_fiber_start=True,
+            check_photon_count=False,
+            **kwargs,
+        )
+
 # Backward compatibility
 RamanAmplifier = SMRamanAmplifier
 MMFRamanAmplifier = MMRamanAmplifier
+SMRamanAmplifierWideband = SMWidebandRamanAmplifier
 
 
 if __name__ == "__main__":
@@ -1017,7 +1098,7 @@ if __name__ == "__main__":
     from pathlib import Path
     from pynlin.raman.plot_optimization import plot_profiles
     # Simple smoke test: load system TOML (default smf_struct) and run single-mode amplification
-    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/smf_struct.toml")
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/dummy_struct.toml")
     try:
         from pynlin.system import System
         from pynlin.utils import dBm2watt, nu2lambda
@@ -1030,42 +1111,53 @@ if __name__ == "__main__":
     wdm = system.wdm
     pumps = system.pump_specs or []
 
+    try:
+        out_fig = system.plot_launch_spectrum()
+        print(f"Saved launch spectrum plot to {out_fig}")
+    except Exception as e:
+        print(f"Launch spectrum plot skipped: {e}")
+
     freqs = wdm.frequency_grid()
     print(f"Frequency grid: {freqs.shape[0]} points from {freqs.min()/1e12:.2f} THz to {freqs.max()/1e12:.2f} THz")
-    wavelengths = nu2lambda(freqs)
-    launch_dbm = system.launch_power if system.launch_power is not None else -5.0
-    signal_power_w = dBm2watt(launch_dbm) * np.ones_like(wavelengths)
 
-    pump_wavelengths = np.array([p.wavelength for p in pumps]) if pumps else np.array([])
-    pump_power_dbm = np.array([min(p.power_dbm, 10.0) for p in pumps]) if pumps else np.array([])
-    pump_powers_w = dBm2watt(pump_power_dbm) if pumps else np.array([])
-    pump_dirs = np.array([p.direction for p in pumps]) if pumps else np.array([1])
-
-    z = np.linspace(0, fiber.length, 20)
-    amp = SMRamanAmplifier(fiber)
-    pump_sol, sig_sol, _ = amp.solve(
-        signal_power=signal_power_w,
-        signal_wavelength=wavelengths,
-        pump_power=pump_powers_w,
-        pump_wavelength=pump_wavelengths,
+    # Build per-band launch powers automatically
+    z = np.linspace(0, fiber.length, 200)
+    amp = SMWidebandRamanAmplifier(fiber)
+    pump_sol, sig_sol, _ = amp.solve_from_system(
+        system,
         z=z,
-        pump_direction=pump_dirs,
-        use_power_at_fiber_start=True,
-        check_photon_count=False,
-        ase=False,
+        disable_pumps=False,
         solver="ivp",
         odeint_kwargs={"rtol": 1e-2, "atol": 1e-4, "mxstep": 500},
+        ase=False,
     )
     print(f"Pump solution shape: {pump_sol.shape}, Signal solution shape: {sig_sol.shape}")
 
     try:
+        pump_power_dbm = np.array([p.power_dbm for p in pumps]) if pumps else np.array([])
+        pump_power_w = dBm2watt(pump_power_dbm) if pump_power_dbm.size else np.array([])
+
+        # Build mock pump data if none were present so plots can proceed
+        if pump_sol.size == 0 or pump_power_w.size == 0:
+            mode_count = getattr(system, "n_modes", getattr(system.fiber, "n_modes", 1))
+            pump_wavelengths = np.array([nu2lambda(np.median(freqs))])
+            pump_solution = np.zeros((len(z), 1, mode_count))
+            pump_powers = np.zeros((1, 1))
+            print("No pumps in solve; using mock zero-power pump for plotting.")
+        else:
+            pump_wavelengths = np.array([p.wavelength for p in pumps])
+            pump_solution = pump_sol[:, :, None] if pump_sol.ndim == 2 else pump_sol
+            pump_powers = pump_power_w[:, None]
+
+        signal_solution = sig_sol[:, :, None] if sig_sol.ndim == 2 else sig_sol
+
         plot_profiles(
-            signal_wavelengths=wavelengths,
-            signal_solution=sig_sol[:, :, None] if sig_sol.ndim == 2 else sig_sol,
+            signal_wavelengths=nu2lambda(freqs),
+            signal_solution=signal_solution,
             ase_solution=None,
             pump_wavelengths=pump_wavelengths,
-            pump_solution=pump_sol[:, :, None] if pump_sol.ndim == 2 else pump_sol,
-            pump_powers=pump_powers_w[:, None] if pump_powers_w.ndim == 1 else pump_powers_w,
+            pump_solution=pump_solution,
+            pump_powers=pump_powers,
             cf=system,
             wallpaper_mode=False,
         )
