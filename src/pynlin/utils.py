@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Mapping
 
 import numpy as np
 import scipy.constants
@@ -13,18 +14,24 @@ except ModuleNotFoundError:
     import toml  # type: ignore
 
 try:
-    from pydantic import BaseModel as _PydanticBase
+    from pydantic import BaseModel as _PydanticBase, ConfigDict
     # probe that dependencies are present by defining a trivial subclass
     class _PydanticProbe(_PydanticBase):
         x: int = 1
     BaseModel = _PydanticBase
 except Exception:
+    ConfigDict = None
     class BaseModel:  # minimal fallback
         def __init__(self, **data):
             self.__dict__.update(data)
 
         def model_dump(self):
             return dict(self.__dict__)
+else:
+    # Export ConfigDict for downstream modules
+    pass
+
+EXTRA_IGNORE_CONFIG = ConfigDict(extra="ignore") if "ConfigDict" in globals() and ConfigDict else None
 
 def wavelength_to_frequency(lambdas):
     """Convert wavelength to frequency."""
@@ -189,22 +196,6 @@ U-band \t1625 – 1675 nm \tUltra-long wavelength
 """
 
 
-class Config(BaseModel):
-  dispersion       : float
-  effective_area   : float
-  baud_rate        : float
-  fiber_length     : float
-  n_modes          : int
-  n_channels       : int
-  launch_power     : float
-  raman_gain       : float
-  channel_spacing  : float
-  center_frequency : float
-  store            : bool
-  pulse_shape      : int
-  collision_margin : int
-  n_pumps          : int 
-
 class NumericalConfig(BaseModel):
    gvd             : float
    dgd1            : float
@@ -212,6 +203,7 @@ class NumericalConfig(BaseModel):
    dgd2_n          : float
    n_samples_numeric_g : int
    n_samples_numeric_n : int
+
 
 # Deserialize TOML file into a Pydantic model
 def _toml_load(filepath):
@@ -225,21 +217,58 @@ def _toml_load(filepath):
     return toml.load(filepath)
 
 
-def load_toml_to_struct(filepath) -> Config:
-    """Load simulation configuration from a TOML file into a Config object."""
-    data = _toml_load(filepath)
-    return Config(**data)
+def load_toml_to_struct(filepath):
+    """Legacy shim: now returns a System object loaded from TOML."""
+    from pynlin.system import System
+    return System.from_toml(filepath)
+
+# Backwards compatibility: Config name now aliases System
+try:
+    from pynlin.system import System as Config  # type: ignore
+except Exception:
+    Config = None
 
 def load_nc_toml_to_struct(filepath) -> NumericalConfig:
     """Load numerical configuration from TOML into a NumericalConfig object."""
     data = _toml_load(filepath)
     return NumericalConfig(**data)
 
-# Serialize a Pydantic model into a TOML file
-def save_struct_to_toml(filepath: str, config: Config):
+# Serialize a System (or mapping) into a TOML file
+def save_struct_to_toml(filepath: str, system):
+    from pynlin.system import System
+    if isinstance(system, System):
+        data = {
+            "fiber": {
+                "dispersion": system.dispersion,
+                "effective_area": getattr(system.fiber, "effective_area", None),
+                "fiber_length": getattr(system.fiber, "length", None),
+            },
+            "pulse": {
+                "baud_rate": getattr(system, "baud_rate", None),
+                "pulse_shape": getattr(system, "pulse_shape", None),
+            },
+            "wdm": {
+                "n_modes": system.n_modes,
+                "n_channels": system.n_channels,
+                "launch_power": getattr(system, "launch_power", None),
+                "channel_spacing": system.channel_spacing,
+                "center_frequency": system.center_frequency,
+            },
+            "amplification": {
+                "n_pumps": system.n_pumps,
+                "raman_gain": system.raman_gain,
+            },
+            "nlin": {
+                "store": getattr(system, "store", None),
+                "collision_margin": getattr(system, "collision_margin", None),
+            },
+        }
+    elif hasattr(system, "model_dump"):
+        data = system.model_dump()
+    else:
+        data = dict(system)
     with open(filepath, "w") as f:
-        toml.dump(config.model_dump(), f)
-        
+        toml.dump(data, f)
 
 def get_next_filename(
   base_name, 

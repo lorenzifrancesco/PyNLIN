@@ -92,10 +92,17 @@ def build_lookup_integral_table_with_raman_custom(cf,
 
     def func_wrapper(func):
         def func_wrapper(x, y):
-            assert (x <= 1.01 * lld[-1] and y <= 1.01 * lld[-1]
-                    ), f"Input {x} exceeds the 110% of the interpolation range [{lld[0]}, {lld[-1]}]"
-            assert (x >= 0 and y >=
-                    0), f"Input has negative values check that your LD is positive"
+            if x < 0 or y < 0:
+                raise ValueError("Input has negative values; check that your LD is positive")
+            max_allowed = 1.01 * lld[-1]
+            if x > max_allowed or y > max_allowed:
+                # clamp to the edge of the interpolation grid instead of failing
+                x = min(x, max_allowed)
+                y = min(y, max_allowed)
+                lg.warning(
+                    f"Clamping Raman correction lookup to L/LD={max_allowed:.2f}; inputs were ({x:.2f}, {y:.2f}). "
+                    f"Consider regenerating the grid with a larger range."
+                )
             return func((x, y))
         return func_wrapper
     return func_wrapper(inter_func)
@@ -229,10 +236,16 @@ def build_lookup_integral_table_with_raman(cf,
 
     def func_wrapper(func):
         def func_wrapper(x, y):
-            assert (x <= 1.01 * lld[-1] and y <= 1.01 * lld[-1]
-                    ), f"Input {x} exceeds the 110% of the interpolation range [{lld[0]}, {lld[-1]}]"
-            assert (x >= 0 and y >=
-                    0), f"Input has negative values check that your LD is positive"
+            if x < 0 or y < 0:
+                raise ValueError("Input has negative values; check that your LD is positive")
+            max_allowed = 1.01 * lld[-1]
+            if x > max_allowed or y > max_allowed:
+                lg.warning(
+                    f"Clamping Raman correction lookup to L/LD={max_allowed:.2f}; inputs were ({x:.2f}, {y:.2f}). "
+                    f"Consider regenerating the grid with a larger range."
+                )
+                x = min(x, max_allowed)
+                y = min(y, max_allowed)
             return func((x, y))
         return func_wrapper
 

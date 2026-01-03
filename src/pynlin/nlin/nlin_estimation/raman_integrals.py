@@ -2,8 +2,8 @@ from typing import Tuple
 
 import numpy as np
 
-import pynlin.io_utils as cfg
 from pynlin.log_init import init_logging
+from pynlin.system import System
 
 init_logging()
 
@@ -13,7 +13,7 @@ LLW_MAX = 100.0
 # 64-QAM <|b_0|^4>/<|b_0|^2>^2 this is compatible with the (mu_0 - 1)=0.32*1.19 previously used.
 MU0 = 1.3809
 
-def load_fB(cf: cfg.Config) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
+def load_fB(cf: System) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
     """Load normalized Raman gain profiles fB(z) and polynomial approximations from a cached solution."""
     assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
     # all the information about the numerosity and stuff is here.

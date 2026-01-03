@@ -70,9 +70,9 @@ def ideal_fit_coefficients(gvda: float = 0.0,
                         nlin_numeric * y_norm,
                         p0=p0)
     lg.debug(f"Fitting ideal case with gvda={gvda}, gvdb={gvdb}, pulse_shape={pulse_shape}")
-    lg.info(
-        f"Ideal fit coefficients (a, b, c): {popt[0]:.3e}, {popt[1]:.3e}, {popt[2]:.3e}")
-    lg.info(f"Ideal fit coefficients (a, b, c): {popt[0]*L**2/T**2 * 1e-30:.3e} km^2/ps^2, {popt[1]*T/L * 1e12:.3e} ps/m, {popt[2]}")
+    # lg.info(
+    #     f"Ideal fit coefficients (a, b, c): {popt[0]:.3e}, {popt[1]:.3e}, {popt[2]:.3e}")
+    # lg.info(f"Ideal fit coefficients (a, b, c): {popt[0]*L**2/T**2 * 1e-30:.3e} km^2/ps^2, {popt[1]*T/L * 1e12:.3e} ps/m, {popt[2]}")
     return popt
 
 if __name__ == "__main__":

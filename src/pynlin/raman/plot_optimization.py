@@ -3,7 +3,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.cm import viridis
 
-from pynlin.utils import Config, get_next_filename
+from pynlin.system import System
+from pynlin.utils import get_next_filename
 from pynlin.utils import dBm2watt, watt2dBm
 
 
@@ -18,7 +19,7 @@ def plot_profiles(signal_wavelengths,
                   pump_wavelengths,
                   pump_solution,
                   pump_powers,
-                  cf: Config,
+                  cf: System,
                   wallpaper_mode=False, 
                   single_out_mode = None):
     """Plot signal, ASE, and pump power profiles and save flatness snapshots."""

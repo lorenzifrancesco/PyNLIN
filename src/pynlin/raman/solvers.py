@@ -20,15 +20,69 @@ from pynlin.fiber_data.response import gain_spectrum, impulse_response
 from pynlin.utils import (
     alpha_to_linear,
     dBm2watt,
+    BaseModel,
+    ConfigDict,
     oi_law,
+    _toml_load,
     watt2dBm,
     wavelength_to_frequency,
 )
+from pynlin.wdm import PumpSpec
 
 
 class TimeOut(Exception):
     """Raise a timeout exception to stop the shooting algorithm."""
     pass
+
+
+class RamanAmplifierConfig(BaseModel):
+    """Configuration for Raman amplifier pumps/targets."""
+
+    pumps: list[PumpSpec] | None = None
+    target_raman_gain: float = 0.0
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
+
+    @classmethod
+    def from_mapping(cls, data):
+        data = data or {}
+        pumps_data = data.get("pumps") if isinstance(data, dict) else None
+        pumps = None
+        if isinstance(pumps_data, list):
+            pumps = [PumpSpec(**p) if not isinstance(p, PumpSpec) else p for p in pumps_data]
+        target = data.get("target") if isinstance(data, dict) else {}
+        raman_gain = target.get("raman_gain") if isinstance(target, dict) else data.get("raman_gain", 0.0)
+        return cls(pumps=pumps, target_raman_gain=float(raman_gain))
+
+    @classmethod
+    def from_toml(cls, filepath):
+        raw = _toml_load(filepath)
+        amp = raw.get("amplification") if isinstance(raw, dict) else {}
+        return cls.from_mapping(amp)
+
+
+class SMRamanAmplifierConfig(RamanAmplifierConfig):
+    """Single-mode Raman amplifier config."""
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
+
+
+class MMRamanAmplifierConfig(RamanAmplifierConfig):
+    """Multimode Raman amplifier config."""
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
 
 
 class RamanAmplifier:
@@ -119,6 +173,9 @@ class RamanAmplifier:
         check_photon_count=False,
         reference_bandwidth=0.1,
         temperature=300,
+        odeint_kwargs=None,
+        ase=False,
+        solver: str = "odeint",
     ):
 
         # raman_coefficient = self.fiber.raman_coefficient
@@ -127,7 +184,7 @@ class RamanAmplifier:
         num_signals = signal_power.shape[0]
         num_pumps = pump_power.shape[0]
         total_signals = num_pumps + num_signals
-        num_ase = num_signals
+        num_ase = num_signals if ase else 0
 
         signal_direction = np.ones_like(signal_power)
         if np.isscalar(pump_direction):
@@ -149,11 +206,11 @@ class RamanAmplifier:
         wavelengths = np.concatenate((self.pump_wavelengths, self.signal_wavelengths))
         frequencies = lambda2nu(wavelengths)
 
-        num_ase = num_signals
-
         # input_power = np.concatenate((self.pump_power, self.signal_power))
-        input_power_with_ase = np.concatenate(
-            (self.pump_power, self.signal_power, np.zeros(num_ase)))
+        input_power = np.concatenate(
+            (self.pump_power, self.signal_power))
+        if ase:
+            input_power = np.concatenate((input_power, np.zeros(num_ase)))
 
         losses_linear = self.get_linear_losses(wavelengths)
 
@@ -164,45 +221,62 @@ class RamanAmplifier:
         for i in range(total_signals):
             frequency_shifts[i, :] = frequencies - frequencies[i]
 
-        h_planck = 6.626e-34
-        kB = 1.380649e-23
-        # Compute the phonon occupancy factor (adopt the view pump+ase)
-        Hinv = np.exp(h_planck * np.abs(frequency_shifts) / (kB * temperature)) - 1
-        np.fill_diagonal(Hinv, 1e56)  # random fill the diagonal
-        eta_plus = 1 + 1 / Hinv
-        np.fill_diagonal(eta_plus, 0)
-        gain_matrix_ase = eta_plus * gain_matrix
+        if ase:
+            h_planck = 6.626e-34
+            kB = 1.380649e-23
+            Hinv = np.exp(h_planck * np.abs(frequency_shifts) / (kB * temperature)) - 1
+            np.fill_diagonal(Hinv, 1e56)  # random fill the diagonal
+            eta_plus = 1 + 1 / Hinv
+            np.fill_diagonal(eta_plus, 0)
+            gain_matrix_ase = eta_plus * gain_matrix
 
-        if shooting:
-            if not use_power_at_fiber_start:
-                raise NotImplementedError(
-                    "Cannot yet use counter-propagating pumps without using the power at the fiber start, i.e. no shooting implemented"
-                )
+        kw = dict(rtol=1e-3, atol=1e-3, mxstep=10000)
+        if isinstance(odeint_kwargs, dict):
+            kw.update(odeint_kwargs)
 
+        if ase:
             sol = scipy.integrate.odeint(
                 RamanAmplifier.raman_ode_with_ase,
-                input_power_with_ase,
+                input_power,
                 z,
                 args=(losses_linear, gain_matrix, gain_matrix_ase, np.hstack((self.direction, np.ones(
                     num_ase))), temperature, reference_bandwidth, num_pumps, num_signals, frequencies),
+                **kw,
             )
-
             pump_solution = sol[:, :num_pumps]
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
-            ase_solution = sol[:, -num_ase:]
-
+            ase_solution = sol[:, -num_ase:] if num_ase else np.empty((len(z), 0))
         else:
-            sol = scipy.integrate.odeint(
-                RamanAmplifier.raman_ode_with_ase,
-                input_power_with_ase,
-                z,
-                args=(losses_linear, gain_matrix, gain_matrix_ase, np.hstack((self.direction, np.ones(
-                    num_ase))), temperature, reference_bandwidth, num_pumps, num_signals, frequencies),
-            )
+            if solver == "ivp":
+                # Use stiff solver for better robustness
+                def _ode(z_val, P):
+                    P = np.asarray(P)
+                    dPdz = (-losses_linear + gain_matrix @ P) * P
+                    return dPdz * self.direction
 
-            pump_solution = sol[:, :num_pumps]
+                ivp = scipy.integrate.solve_ivp(
+                    _ode,
+                    (z[0], z[-1]),
+                    input_power,
+                    method="BDF",
+                    t_eval=z,
+                    rtol=kw.get("rtol", 1e-3),
+                    atol=kw.get("atol", 1e-6),
+                    max_step=(z[-1]-z[0]) / 100 if len(z) > 1 else None,
+                )
+                sol = ivp.y.T
+            else:
+                sol = scipy.integrate.odeint(
+                    RamanAmplifier.raman_ode,
+                    input_power,
+                    z,
+                    args=(losses_linear, gain_matrix, np.hstack((self.direction,))),
+                    **kw,
+                )
+            pump_solution = sol[:, :num_pumps] if num_pumps else np.zeros((len(z), 0))
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
-            ase_solution = sol[:, -num_ase:]
+            ase_solution = np.empty((len(z), 0))
+
         if check_photon_count:
             photon_count = np.sum(sol / frequencies, axis=1)
             return pump_solution, signal_solution, photon_count
@@ -598,7 +672,8 @@ class MMFRamanAmplifier(RamanAmplifier):
         temperature=300,
         shooting=None,
         initial_guesses=None,
-        direction=None
+        direction=None,
+        odeint_kwargs=None
     ):
         """Solve the multi-mode Raman amplifier equations [1].
 
@@ -703,11 +778,15 @@ class MMFRamanAmplifier(RamanAmplifier):
                 direction[: num_pumps * fiber.n_modes] = -1
 
             if not shooting:
+                kw = dict(rtol=1e-3, atol=1e-6, mxstep=10000)
+                if isinstance(odeint_kwargs, dict):
+                    kw.update(odeint_kwargs)
                 sol = scipy.integrate.odeint(
                     MMFRamanAmplifier.raman_ode,
                     input_power,
                     z,
                     args=(losses_linear, gains_mmf, direction),
+                    **kw,
                 )
                 sol = sol.reshape((len(z), total_signals, fiber.n_modes))
                 pump_solution = sol[:, :num_pumps, :]
@@ -740,11 +819,15 @@ class MMFRamanAmplifier(RamanAmplifier):
                     x0_ = 10 ** (x0 / 10)
                     input_power = np.concatenate((x0_, signal_power_))
 
+                    kw = dict(rtol=1e-3, atol=1e-6, mxstep=10000)
+                    if isinstance(odeint_kwargs, dict):
+                        kw.update(odeint_kwargs)
                     sol = scipy.integrate.odeint(
                         MMFRamanAmplifier.raman_ode,
                         input_power,
                         z,
                         args=(losses_linear, gains_mmf, direction),
+                        **kw,
                     )
 
                     sol = sol.reshape((len(z), total_signals, fiber.n_modes))
@@ -832,6 +915,9 @@ class MMFRamanAmplifier(RamanAmplifier):
             signal_frequencies = wavelength_to_frequency(signal_wavelength)
             ase_frequencies = np.repeat(signal_frequencies, fiber.n_modes)
 
+            kw = dict(rtol=1e-3, atol=1e-6, mxstep=10000)
+            if isinstance(odeint_kwargs, dict):
+                kw.update(odeint_kwargs)
             sol = scipy.integrate.odeint(
                 MMFRamanAmplifier.raman_ode_with_ase,
                 input_power_ase,
@@ -847,6 +933,7 @@ class MMFRamanAmplifier(RamanAmplifier):
                     num_pumps,
                     fiber.n_modes,
                 ),
+                **kw,
             )
 
             sol = sol.reshape((len(z), total_signals + num_signals, fiber.n_modes))
@@ -904,3 +991,84 @@ class MMFRamanAmplifier(RamanAmplifier):
 
         dPdz = np.vstack((dPowerdz, dASEdz))
         return np.squeeze(dPdz) * direction
+
+# Named amplifiers mirroring fiber naming (wideband by default)
+class SMRamanAmplifier(RamanAmplifier):
+    """Single-mode Raman amplifier (wideband)."""
+    pass
+
+
+class SMRamanAmplifierNarrowband(SMRamanAmplifier):
+    """Single-mode narrowband Raman amplifier (placeholder for distinct behavior)."""
+    pass
+
+
+class MMRamanAmplifier(MMFRamanAmplifier):
+    """Multimode Raman amplifier."""
+    pass
+
+# Backward compatibility
+RamanAmplifier = SMRamanAmplifier
+MMFRamanAmplifier = MMRamanAmplifier
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+    from pynlin.raman.plot_optimization import plot_profiles
+    # Simple smoke test: load system TOML (default smf_struct) and run single-mode amplification
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/smf_struct.toml")
+    try:
+        from pynlin.system import System
+        from pynlin.utils import dBm2watt, nu2lambda
+    except Exception as e:
+        print(f"Could not import System: {e}")
+        sys.exit(1)
+
+    system = System.from_toml(cfg_path)
+    fiber = system.fiber
+    wdm = system.wdm
+    pumps = system.pump_specs or []
+
+    freqs = wdm.frequency_grid()
+    print(f"Frequency grid: {freqs.shape[0]} points from {freqs.min()/1e12:.2f} THz to {freqs.max()/1e12:.2f} THz")
+    wavelengths = nu2lambda(freqs)
+    launch_dbm = system.launch_power if system.launch_power is not None else -5.0
+    signal_power_w = dBm2watt(launch_dbm) * np.ones_like(wavelengths)
+
+    pump_wavelengths = np.array([p.wavelength for p in pumps]) if pumps else np.array([])
+    pump_power_dbm = np.array([min(p.power_dbm, 10.0) for p in pumps]) if pumps else np.array([])
+    pump_powers_w = dBm2watt(pump_power_dbm) if pumps else np.array([])
+    pump_dirs = np.array([p.direction for p in pumps]) if pumps else np.array([1])
+
+    z = np.linspace(0, fiber.length, 20)
+    amp = SMRamanAmplifier(fiber)
+    pump_sol, sig_sol, _ = amp.solve(
+        signal_power=signal_power_w,
+        signal_wavelength=wavelengths,
+        pump_power=pump_powers_w,
+        pump_wavelength=pump_wavelengths,
+        z=z,
+        pump_direction=pump_dirs,
+        use_power_at_fiber_start=True,
+        check_photon_count=False,
+        ase=False,
+        solver="ivp",
+        odeint_kwargs={"rtol": 1e-2, "atol": 1e-4, "mxstep": 500},
+    )
+    print(f"Pump solution shape: {pump_sol.shape}, Signal solution shape: {sig_sol.shape}")
+
+    try:
+        plot_profiles(
+            signal_wavelengths=wavelengths,
+            signal_solution=sig_sol[:, :, None] if sig_sol.ndim == 2 else sig_sol,
+            ase_solution=None,
+            pump_wavelengths=pump_wavelengths,
+            pump_solution=pump_sol[:, :, None] if pump_sol.ndim == 2 else pump_sol,
+            pump_powers=pump_powers_w[:, None] if pump_powers_w.ndim == 1 else pump_powers_w,
+            cf=system,
+            wallpaper_mode=False,
+        )
+        print("Saved smoke-test profiles via plot_profiles.")
+    except Exception as e:
+        print(f"Plotting skipped due to error: {e}")

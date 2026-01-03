@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Mapping, Optional
 
 import pynlin.utils
-from pynlin.utils import BaseModel, _toml_load
+from pynlin.utils import BaseModel, ConfigDict, EXTRA_IGNORE_CONFIG, _toml_load
 
 
 def _extract_wdm_section(data):
@@ -49,13 +49,23 @@ def _extract_center_frequency_hz(wdm_data, root_data=None) -> Optional[float]:
     return None
 
 
+def _pick(key, *sections):
+    for sec in sections:
+        if isinstance(sec, Mapping) and key in sec:
+            return sec[key]
+    return None
+
+
 class WDMConfig(BaseModel):
     spacing: float
     num_channels: int
     center_frequency: float
 
-    class Config:
-        extra = "ignore"
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
 
     @classmethod
     def from_mapping(cls, data: Mapping, root_data=None):
@@ -77,8 +87,61 @@ class WDMBandConfig(BaseModel):
     start_nm: float
     modulation: Optional[str] = None
 
-    class Config:
-        extra = "ignore"
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
+
+
+class PumpSpec(BaseModel):
+    wavelength: float
+    power_dbm: float
+    direction: int = 1  # +1 co-propagating, -1 counter-propagating
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
+
+
+class Amplification(BaseModel):
+    n_pumps: int
+    raman_gain: float
+    pumps: Optional[list[PumpSpec]] = None
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
+
+    @classmethod
+    def from_mapping(cls, data: Mapping, root_data=None) -> "Amplification":
+        amp = data if isinstance(data, Mapping) else {}
+        root = root_data if isinstance(root_data, Mapping) else {}
+        n_pumps = _pick("n_pumps", amp, root)
+        target = amp.get("target") if isinstance(amp, Mapping) else {}
+        raman_gain = _pick("raman_gain", amp, root) or (target.get("raman_gain") if isinstance(target, Mapping) else None)
+        pumps_data = amp.get("pumps") if isinstance(amp, Mapping) else None
+        pumps = None
+        if isinstance(pumps_data, list):
+            pumps = [PumpSpec(**p) if not isinstance(p, PumpSpec) else p for p in pumps_data]
+            if n_pumps is None:
+                n_pumps = len(pumps)
+        if n_pumps is None or raman_gain is None:
+            raise ValueError("Amplification requires n_pumps/raman_gain.")
+        return cls(n_pumps=int(n_pumps), raman_gain=float(raman_gain), pumps=pumps)
+
+    @classmethod
+    def from_toml(cls, filepath: Path | str) -> "Amplification":
+        data = _toml_load(Path(filepath))
+        amp = data.get("amplification") if isinstance(data, Mapping) else None
+        return cls.from_mapping(amp if isinstance(amp, Mapping) else {}, root_data=data)
+
+# backwards compatibility for earlier name
+AmplificationConfig = Amplification
 
 
 class BaseWDM:
@@ -264,7 +327,7 @@ WDM = RegularWDM
 
 if __name__ == "__main__":
     import sys
-    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/jlt2.toml")
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/uwb_struct.toml")
     wdm = wdm_from_toml(cfg_path)
     print(f"Loaded WDM from {cfg_path}:")
     print(wdm.summary())

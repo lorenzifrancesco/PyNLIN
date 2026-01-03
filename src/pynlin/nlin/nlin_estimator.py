@@ -250,7 +250,7 @@ def fit_nlin(cf,
 """
 corrections due to mode multiplicity
 """
-def nlin_prefactor_general(cf: cfg.Config, mode_a: int, mode_b: int):
+def nlin_prefactor_general(cf, mode_a: int, mode_b: int):
     """Multiplicity/constellation prefactor for MMF NLIN between two modes."""
     prefactor = 1
     if mode_a == mode_b:
@@ -266,7 +266,7 @@ wrapper for the nlin_prefactor_mmf to handle single-mode case
 """
 
 
-def nlin_prefactor(cf: cfg.Config, mode_a, mode_b):
+def nlin_prefactor(cf, mode_a, mode_b):
     """Wrapper handling SMF vs MMF to compute NLIN prefactors."""
     if cf.n_modes == 1:
         return nlin_prefactor_general(cf, 0, 0)

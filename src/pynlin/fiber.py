@@ -9,6 +9,8 @@ from scipy.constants import speed_of_light as c0
 
 from pynlin.utils import (
     BaseModel,
+    ConfigDict,
+    EXTRA_IGNORE_CONFIG,
     dispersion_to_beta2,
     oi_law,
     oi_polynomial_expansion,
@@ -87,8 +89,11 @@ class FiberConfig(BaseModel):
     raman_coefficient: float = 7e-14
     gamma: float = 1.3e-3
 
-    class Config:
-        extra = "ignore"
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
 
     @classmethod
     def from_toml(cls, filepath):
@@ -105,8 +110,11 @@ class SMFiberConfig(FiberConfig):
     attenuation_wavelengths: Optional[Sequence[float]] = None
     attenuation_values: Optional[Sequence[float]] = None
 
-    class Config:
-        extra = "ignore"
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
 
     def resolved_beta2(self, fallback: float) -> float:
         if self.beta2 is not None:
@@ -118,15 +126,21 @@ class SMFiberConfig(FiberConfig):
 
 
 class SMFiberNarrowbandConfig(SMFiberConfig):
-    class Config:
-        extra = "ignore"
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
 
 
 class MMFiberConfig(FiberConfig):
     n_modes: int = 4
 
-    class Config:
-        extra = "ignore"
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
 
     @classmethod
     def from_toml(cls, filepath):
@@ -571,7 +585,7 @@ def log_fiber(fiber: Fiber, logger=None, level: str = "trace"):
 
 if __name__ == "__main__":
     # Simple smoke test: load nested-fiber TOML and print a short summary
-    cfg_path = Path("input/jlt2.toml")
+    cfg_path = Path("input/uwb_struct.toml")
     smf = SMFiber.from_toml(cfg_path)
     print(f"Loaded fiber from {cfg_path}:")
     print(fiber_summary(smf))

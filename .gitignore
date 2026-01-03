@@ -8,6 +8,7 @@ INSTRUCTIONS.md
 /output
 /docs
 /logs 
+scalene*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
