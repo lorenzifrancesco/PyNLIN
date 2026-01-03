@@ -259,6 +259,14 @@ class SMFiber(Fiber):
         wl, values = self._attenuation_profile
         return float(np.interp(wavelength, wl, values))
 
+    def loss_profile(self, wavelengths):
+        """Override to use attenuation profile when provided."""
+        wl = np.asarray(wavelengths)
+        if self._attenuation_profile is not None:
+            x, y = self._attenuation_profile
+            return np.interp(wl, x, y)
+        return super().loss_profile(wl)
+
     def beta_at(self, wavelength: float) -> Optional[float]:
         return self._interp_profile(self._beta_profile, wavelength)
 
