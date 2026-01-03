@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
 
+import numpy as np
+
 from .fiber import (
     Fiber,
     MMFiber,
@@ -19,7 +21,7 @@ from .fiber import (
     _extract_fiber_section,
 )
 from .pulses import Pulse, PulseConfig, pulse_from_config
-from .utils import NumericalConfig, _toml_load
+from .utils import NumericalConfig, _toml_load, lambda2nu
 from .wdm import Amplification, BaseWDM, wdm_from_toml
 
 
@@ -175,3 +177,46 @@ class System:
             "collision_margin": self.collision_margin,
             "dispersion": self.dispersion,
         }
+
+    def _initial_signal_powers_dbm(self) -> np.ndarray:
+        """Return launch powers per channel in dBm, honoring band overrides."""
+        freqs = self.wdm.frequency_grid()
+        launch_dbm = self.launch_power if self.launch_power is not None else -5.0
+        powers_dbm = np.full(len(freqs), launch_dbm, dtype=float)
+        if hasattr(self.wdm, "band_specs") and hasattr(self.wdm, "_band_slices"):
+            for name, slc in self.wdm._band_slices.items():
+                spec = self.wdm.band_specs.get(name)
+                if spec and spec.launch_power_dbm is not None:
+                    powers_dbm[slc] = spec.launch_power_dbm
+        return powers_dbm
+
+    def plot_launch_spectrum(self, save_path: Path | str | None = None, tiny_markers: bool = True):
+        """
+        Plot pumps and signals at fiber start and save to media/debug.
+
+        Scatter of channel powers (dBm) vs frequency (THz) plus pump markers.
+        """
+        import matplotlib.pyplot as plt  # local import to avoid hard dependency at import time
+
+        freqs = self.wdm.frequency_grid()
+        sig_powers_dbm = self._initial_signal_powers_dbm()
+
+        pump_specs = self.pump_specs or []
+        pump_freqs = np.array([lambda2nu(p.wavelength) for p in pump_specs]) if pump_specs else np.array([])
+        pump_powers_dbm = np.array([p.power_dbm for p in pump_specs]) if pump_specs else np.array([])
+
+        plt.figure(figsize=(6, 3))
+        plt.scatter(freqs * 1e-12, sig_powers_dbm, s=2 if tiny_markers else 6, alpha=0.6, label="signals")
+        if pump_powers_dbm.size:
+            plt.scatter(pump_freqs * 1e-12, pump_powers_dbm, marker="x", color="red", s=12, label="pumps")
+        plt.xlabel("Frequency [THz]")
+        plt.ylabel("Power at z=0 [dBm]")
+        plt.grid(True, alpha=0.2)
+        plt.legend(loc="best")
+        out_dir = Path(save_path).parent if save_path else Path("media/debug")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filename = Path(save_path) if save_path else out_dir / f"launch_spectrum_{self.source.stem if self.source else 'system'}.png"
+        plt.tight_layout()
+        plt.savefig(filename, dpi=200)
+        plt.close()
+        return filename
