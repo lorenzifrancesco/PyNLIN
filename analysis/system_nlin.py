@@ -4,44 +4,13 @@ from loguru import logger as lg
 from matplotlib import rc
 from matplotlib.ticker import ScalarFormatter
 from pathlib import Path
-import tomllib
 
-import pynlin.io_utils as cfg
 import pynlin.wdm
 from pynlin.log_init import init_logging
 from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin
+from pynlin.system import System
 from pynlin.utils import dBm2watt, watt2dBm
 init_logging()
-
-
-def load_structured_config(path: Path) -> cfg.Config:
-    """Load jlt2-style structured TOML into the flat Config used downstream."""
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
-
-    fiber = data.get("fiber", {})
-    pulse = data.get("pulse", {})
-    wdm = data.get("wdm", {})
-    amp = data.get("amplification", {})
-    nlin = data.get("nlin", {})
-
-    config_dict = dict(
-        dispersion=fiber.get("dispersion"),
-        effective_area=fiber.get("effective_area"),
-        baud_rate=pulse.get("baud_rate"),
-        fiber_length=fiber.get("fiber_length"),
-        n_modes=wdm.get("n_modes"),
-        n_channels=wdm.get("n_channels"),
-        launch_power=wdm.get("launch_power", -5),
-        raman_gain=amp.get("raman_gain", 0.0),
-        channel_spacing=wdm.get("channel_spacing"),
-        center_frequency=wdm.get("center_frequency"),
-        store=nlin.get("store", True),
-        pulse_shape=pulse.get("pulse_shape", 0),
-        collision_margin=nlin.get("collision_margin", 5),
-        n_pumps=amp.get("n_pumps", 0),
-    )
-    return cfg.Config(**config_dict)
 
 # import plotly.graph_objects as go
 # import seaborn as sns
@@ -74,8 +43,10 @@ def plot_case_study_noise(
 
     smf_file = Path("./input/smf_struct.toml")
     mmf_file = Path("./input/mmf_struct.toml")
-    cf_smf = load_structured_config(smf_file)
-    cf_mmf = load_structured_config(mmf_file)
+    smf_system = System.from_toml(smf_file)
+    mmf_system = System.from_toml(mmf_file)
+    cf_smf = smf_system
+    cf_mmf = mmf_system
     print(
         f"Loading a ITU-T standardized WDM grid \n [spacing: {cf_smf.channel_spacing * 1e-9:.3e}GHz, center: {cf_smf.center_frequency * 1e-12:.3e}THz] \n")
     assert (cf_smf.fiber_length == cf_mmf.fiber_length)
@@ -87,18 +58,8 @@ def plot_case_study_noise(
         print(
             f"Warning: the number of channels is different: {cf_smf.n_channels} vs {cf_mmf.n_channels * cf_mmf.n_modes}")
     assert (cf_smf.center_frequency == cf_mmf.center_frequency)
-    wdm = pynlin.wdm.WDM(
-        spacing=cf_smf.channel_spacing,
-        num_channels=cf_smf.n_channels,
-        center_frequency=cf_smf.center_frequency
-    )
-    freqs_smf = wdm.frequency_grid()
-    wdm = pynlin.wdm.WDM(
-        spacing=cf_mmf.channel_spacing,
-        num_channels=cf_mmf.n_channels,
-        center_frequency=cf_mmf.center_frequency
-    )
-    freqs_mmf = wdm.frequency_grid()
+    freqs_smf = smf_system.wdm.frequency_grid()
+    freqs_mmf = mmf_system.wdm.frequency_grid()
 
     ccfs_mmf = collision_coeffs_system(cf_mmf,
                                        ipulse=1,
@@ -209,8 +170,10 @@ def plot_case_study_noise_histogram(
     # --- Load configs & sanity checks (as in the first function) ---
     smf_file = Path("./input/smf_struct.toml")
     mmf_file = Path("./input/mmf_struct.toml")
-    cf_smf = load_structured_config(smf_file)
-    cf_mmf = load_structured_config(mmf_file)
+    smf_system = System.from_toml(smf_file)
+    mmf_system = System.from_toml(mmf_file)
+    cf_smf = smf_system
+    cf_mmf = mmf_system
     print(
         f"Loading a ITU-T standardized WDM grid \n "
         f"[spacing: {cf_smf.channel_spacing * 1e-9:.3e}GHz, center: {cf_smf.center_frequency * 1e-12:.3e}THz] \n"
@@ -227,18 +190,8 @@ def plot_case_study_noise_histogram(
     assert (cf_smf.center_frequency == cf_mmf.center_frequency)
 
     # Build WDM grids (not strictly needed for the histogram, but kept for parity)
-    wdm = pynlin.wdm.WDM(
-        spacing=cf_smf.channel_spacing,
-        num_channels=cf_smf.n_channels,
-        center_frequency=cf_smf.center_frequency
-    )
-    freqs_smf = wdm.frequency_grid()
-    wdm = pynlin.wdm.WDM(
-        spacing=cf_mmf.channel_spacing,
-        num_channels=cf_mmf.n_channels,
-        center_frequency=cf_mmf.center_frequency
-    )
-    freqs_mmf = wdm.frequency_grid()
+    freqs_smf = smf_system.wdm.frequency_grid()
+    freqs_mmf = mmf_system.wdm.frequency_grid()
 
     # --- Compute collisions & NLIN exactly like the first function ---
     ccfs_mmf = collision_coeffs_system(cf_mmf, ipulse=1, recompute=False)

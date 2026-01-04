@@ -1,4 +1,5 @@
 from typing import Tuple
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -174,6 +175,7 @@ class RamanAmplifier:
         odeint_kwargs=None,
         ase=False,
         solver: str = "ivp",
+        pump_power_floor: float = 0.0,
     ):
 
         # raman_coefficient = self.fiber.raman_coefficient
@@ -197,6 +199,9 @@ class RamanAmplifier:
 
         # check if we need a shooting algorithm
         shooting = np.any(self.direction < 0)
+
+        if pump_power_floor and pump_power.size:
+            pump_power = np.maximum(pump_power, pump_power_floor)
 
         self.pump_power = pump_power
         self.signal_power = signal_power
@@ -251,23 +256,31 @@ class RamanAmplifier:
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
             ase_solution = sol[:, -num_ase:] if num_ase else np.empty((len(z), 0))
         else:
-            if solver in ("ivp", "bdf", "BDF"):
-                # Use stiff solver for better robustness (BDF)
+            if solver in ("ivp", "bdf", "BDF", "radau", "Radau"):
+                # Use stiff solver for better robustness (Radau)
                 def _ode(z_val, P):
                     P = np.asarray(P)
                     dPdz = (-losses_linear + gain_matrix @ P) * P
                     return dPdz * self.direction
 
+                max_step = min(
+                    1e100,
+                    (z[-1]-z[0]) / 2000 if len(z) > 1 else np.inf,
+                )
                 ivp = scipy.integrate.solve_ivp(
                     _ode,
                     (z[0], z[-1]),
                     input_power,
-                    method="BDF",
+                    method="Radau",
                     t_eval=z,
                     rtol=kw.get("rtol", 1e-3),
                     atol=kw.get("atol", 1e-6),
-                    max_step=(z[-1]-z[0]) / 100 if len(z) > 1 else None,
+                    max_step=max_step,
                 )
+                if not ivp.success:
+                    lg.error(f"[SM amp] Radau solver failed: {ivp.message}")
+                else:
+                    lg.debug(f"[SM amp] Radau steps: {ivp.nfev} f evals, {ivp.t.size} outputs")
                 sol = ivp.y.T
             else:
                 sol = scipy.integrate.odeint(
@@ -852,7 +865,6 @@ class MMFRamanAmplifier(RamanAmplifier):
 
                     x0_ = 10 ** (x0 / 10)
                     input_power = np.concatenate((x0_, signal_power_))
-
                     kw = dict(rtol=1e-3, atol=1e-6, mxstep=10000)
                     if isinstance(odeint_kwargs, dict):
                         kw.update(odeint_kwargs)
@@ -863,22 +875,15 @@ class MMFRamanAmplifier(RamanAmplifier):
                         args=(losses_linear, gains_mmf, direction),
                         **kw,
                     )
-
                     sol = sol.reshape((len(z), total_signals, fiber.n_modes))
-
                     pump_solution = sol[-1, :num_pumps, :].flatten()
-
                     # return the MSE between desired solution and obtained values
                     cost = np.sqrt(
                         np.mean((pump_solution * 1e3 - pump_power_ * 1e3) ** 2)
                     )
-
                     max_error = np.max(np.abs(pump_solution - pump_power_)) * 1e3
-
                     callback_info["max_error"] = max_error
-
                     # print(f"RMSE: {cost:.3f} mW\tMax. Error {max_error:.2f} mW")
-
                     return cost
 
                 # bounds = [(0, None) for _ in range(num_pumps * fiber.n_modes)]
@@ -1097,6 +1102,13 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     from pynlin.raman.plot_optimization import plot_profiles
+    from pynlin.log_init import init_logging
+    from loguru import logger as lg
+    init_logging()
+    # Ensure console logging is enabled even when env is unset
+    level = os.getenv("LOGURU_LEVEL", "DEBUG")
+    lg.remove()
+    lg.add(sys.stderr, level=level)
     # Simple smoke test: load system TOML (default smf_struct) and run single-mode amplification
     cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/dummy_struct.toml")
     try:
@@ -1121,7 +1133,7 @@ if __name__ == "__main__":
     print(f"Frequency grid: {freqs.shape[0]} points from {freqs.min()/1e12:.2f} THz to {freqs.max()/1e12:.2f} THz")
 
     # Build per-band launch powers automatically
-    z = np.linspace(0, fiber.length, 200)
+    z = np.linspace(0, fiber.length, 400)
     amp = SMWidebandRamanAmplifier(fiber)
     pump_sol, sig_sol, _ = amp.solve_from_system(
         system,
@@ -1130,8 +1142,20 @@ if __name__ == "__main__":
         solver="ivp",
         odeint_kwargs={"rtol": 1e-2, "atol": 1e-4, "mxstep": 500},
         ase=False,
+        pump_power_floor=1e-6,
     )
     print(f"Pump solution shape: {pump_sol.shape}, Signal solution shape: {sig_sol.shape}")
+    sig_finite = np.isfinite(sig_sol)
+    pump_finite = np.isfinite(pump_sol) if pump_sol.size else np.array([True])
+    print(
+        f"Signal finite fraction: {sig_finite.mean():.4f}, "
+        f"min/max (dBm) [{watt2dBm(np.nanmin(sig_sol)):.2f}, {watt2dBm(np.nanmax(sig_sol)):.2f}]"
+    )
+    if pump_sol.size:
+        print(
+            f"Pump finite fraction: {pump_finite.mean():.4f}, "
+            f"min/max (dBm) [{watt2dBm(np.nanmin(pump_sol)):.2f}, {watt2dBm(np.nanmax(pump_sol)):.2f}]"
+        )
 
     try:
         pump_power_dbm = np.array([p.power_dbm for p in pumps]) if pumps else np.array([])

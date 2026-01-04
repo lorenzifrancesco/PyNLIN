@@ -249,9 +249,24 @@ class IrregularWDM(BaseWDM):
         band_slices: Dict[str, slice] = {}
         grids = []
         current = 0
+        intervals = []
+        tol = spacing * 1e-6 if spacing else 0.0
+
         for name, spec in sorted(band_specs.items(), key=lambda kv: kv[1].start_nm):
             f_start = c / (spec.start_nm * 1e-9)
             f_band = f_start - np.arange(spec.n_channels) * spacing
+
+            # Overlap check against existing bands
+            f_low, f_high = float(np.min(f_band)), float(np.max(f_band))
+            for other_name, o_low, o_high in intervals:
+                if max(f_low, o_low) <= min(f_high, o_high) + tol:
+                    raise ValueError(
+                        f"WDM bands '{name}' and '{other_name}' overlap in frequency "
+                        f"ranges [{f_low*1e-12:.3f}, {f_high*1e-12:.3f}] THz and "
+                        f"[{o_low*1e-12:.3f}, {o_high*1e-12:.3f}] THz"
+                    )
+            intervals.append((name, f_low, f_high))
+
             grids.append(f_band)
             band_slices[name] = slice(current, current + spec.n_channels)
             current += spec.n_channels

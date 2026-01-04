@@ -23,6 +23,16 @@ def plot_profiles(signal_wavelengths,
                   wallpaper_mode=False, 
                   single_out_mode = None):
     """Plot signal, ASE, and pump power profiles and save flatness snapshots."""
+    # Guard against zeros/NaNs to avoid -inf in dBm plots
+    eps = 1e-18
+    signal_solution = np.where(np.isfinite(signal_solution), signal_solution, np.nan)
+    signal_solution = np.maximum(signal_solution, eps)
+    if ase_solution is not None:
+        ase_solution = np.where(np.isfinite(ase_solution), ase_solution, np.nan)
+        ase_solution = np.maximum(ase_solution, eps)
+    if pump_solution is not None:
+        pump_solution = np.where(np.isfinite(pump_solution), pump_solution, np.nan)
+        pump_solution = np.maximum(pump_solution, eps)
     plt.clf()
     # plt.figure(figsize=(2.5, 2))
     plt.figure(figsize=(3.6, 2))
@@ -83,13 +93,16 @@ def plot_profiles(signal_wavelengths,
     plt.savefig(name)
     print(f"Plot saved as {name}")
     #
-    loss = -0.2e-3 * cf.fiber_length
-    on_off_gain = -loss + cf.raman_gain
+    fiber_len = getattr(cf, "fiber_length", None)
+    loss = -0.2e-3 * fiber_len if fiber_len is not None else 0.0
+    launch_dbm = cf.launch_power if getattr(cf, "launch_power", None) is not None else 0.0
+    raman_gain = cf.raman_gain if getattr(cf, "raman_gain", None) is not None else 0.0
+    on_off_gain = -loss + raman_gain
     plt.clf()
     plt.figure(figsize=(4, 3))
     for i in range(cf.n_modes):
         plt.plot(signal_wavelengths * 1e6,
-                 watt2dBm(signal_solution[-1, :, i]) - cf.launch_power - loss, 
+                 watt2dBm(signal_solution[-1, :, i]) - launch_dbm - loss, 
                  label=mode_labels[i], 
                  color=cmap(i / cf.n_modes + 0.2))
     plt.legend()
