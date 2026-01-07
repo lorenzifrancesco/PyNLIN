@@ -21,7 +21,7 @@ from .fiber import (
     _extract_fiber_section,
 )
 from .pulses import Pulse, PulseConfig, pulse_from_config
-from .utils import NumericalConfig, _toml_load, lambda2nu
+from .utils import NumericalConfig, _toml_load, lambda2nu, nu2lambda
 from .wdm import Amplification, BaseWDM, wdm_from_toml
 
 
@@ -168,6 +168,103 @@ class System:
     @property
     def effective_area(self) -> Optional[float]:
         return getattr(self.fiber, "effective_area", None)
+
+    def beta_grids(self, freqs: Optional[np.ndarray] = None) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Return beta1/beta2 grids (shape: n_modes x n_freqs) for the system.
+
+        Uses fiber.group_delay when available; otherwise falls back to fiber beta arrays
+        or profiles. For multimode without group_delay, a default dataset is used.
+        """
+        if freqs is None:
+            freqs = self.wdm.frequency_grid()
+        wavelengths = nu2lambda(freqs)
+
+        gd = getattr(self.fiber, "group_delay", None)
+        if gd is not None:
+            beta1 = np.array([gd.evaluate_beta1(m, freqs) for m in range(self.n_modes)])
+            beta2 = np.array([gd.evaluate_beta2(m, freqs) for m in range(self.n_modes)])
+            return beta1, beta2
+
+        if self.n_modes > 1:
+            from pynlin.fiber_data.load_fiber_values import load_group_delay
+            gd = load_group_delay()
+            beta1 = np.array([gd.evaluate_beta1(m, freqs) for m in range(self.n_modes)])
+            beta2 = np.array([gd.evaluate_beta2(m, freqs) for m in range(self.n_modes)])
+            return beta1, beta2
+
+        beta1 = None
+        beta2 = None
+        b1_raw = getattr(self.fiber, "beta1", None)
+        if b1_raw is not None:
+            b1_raw = np.array(b1_raw)
+            if b1_raw.ndim == 0:
+                beta1 = np.full((self.n_modes, freqs.size), float(b1_raw))
+            elif b1_raw.ndim == 1 and b1_raw.size == freqs.size:
+                beta1 = b1_raw[None, :]
+        b2_raw = getattr(self.fiber, "beta2", None)
+        if b2_raw is not None:
+            b2_raw = np.array(b2_raw)
+            if b2_raw.ndim == 0:
+                beta2 = np.full((self.n_modes, freqs.size), float(b2_raw))
+            elif b2_raw.ndim == 1 and b2_raw.size == freqs.size:
+                beta2 = b2_raw[None, :]
+
+        if beta1 is None and getattr(self.fiber, "_beta1_profile", None) is not None:
+            wl_prof, b1_prof = self.fiber._beta1_profile
+            beta1 = np.interp(wavelengths, wl_prof, b1_prof)[None, :]
+        if beta2 is None and getattr(self.fiber, "_beta2_profile", None) is not None:
+            wl_prof, b2_prof = self.fiber._beta2_profile
+            beta2 = np.interp(wavelengths, wl_prof, b2_prof)[None, :]
+
+        if beta1 is None or beta2 is None:
+            raise ValueError("beta1/beta2 unavailable for this system.")
+
+        return beta1, beta2
+
+    def report_max_l_normalizations(self) -> Optional[tuple[float, float]]:
+        """
+        Print the maximum L/LD and L/LW over modes/frequencies for this system.
+
+        LD is based on |beta2| via LD = 1/(baud_rate^2 * |beta2|).
+        LW is based on |beta1| via LW = 1/(baud_rate * |beta1|).
+        """
+        try:
+            L = float(self.fiber_length)
+            br = float(self.baud_rate)
+            beta1, beta2 = self.beta_grids()
+        except Exception as exc:
+            print(f"Could not compute L/LD or L/LW: missing system parameters ({exc})")
+            return None
+
+        if beta2 is None:
+            print("Could not compute L/LD: beta2 unavailable.")
+            max_l_ld = float("nan")
+        else:
+            abs_b2 = np.maximum(np.abs(beta2), 0.0)
+            max_b2 = np.max(abs_b2)
+            if max_b2 == 0:
+                print("Could not compute L/LD: beta2 is zero.")
+                max_l_ld = float("nan")
+            else:
+                max_l_ld = float(L * br * br * max_b2)
+
+        if beta1 is None:
+            print("Could not compute L/LW: beta1 unavailable.")
+            max_l_lw = float("nan")
+        else:
+            # For wideband SMF, use the spread across channels (per mode, then max)
+            b1_max = np.max(beta1, axis=1)
+            b1_min = np.min(beta1, axis=1)
+            span_b1 = float(np.max(np.abs(b1_max - b1_min)))
+            if span_b1 == 0:
+                print("Could not compute L/LW: beta1 span is zero.")
+                max_l_lw = float("nan")
+            else:
+                max_l_lw = float(L * br * span_b1)
+
+        print(f"Max L/LD: {max_l_ld:.3e}, Max L/LW: {max_l_lw:.3e}")
+        return max_l_ld, max_l_lw
 
     def model_dump(self):
         """Minimal dict representation for persistence helpers."""
