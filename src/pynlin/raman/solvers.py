@@ -15,7 +15,7 @@ from scipy.constants import Planck as h_planck
 from scipy.constants import lambda2nu, nu2lambda
 
 import pynlin.utils
-from pynlin.fiber import Fiber, MMFiber
+from pynlin.fiber import Fiber, MMFiber, SMFiberNarrowband
 from pynlin.pulses import Pulse
 from pynlin.fiber_data.response import gain_spectrum
 from pynlin.utils import (
@@ -219,11 +219,15 @@ class RamanAmplifier:
             f"[SM amp] inputs: pump {pump_power.shape}, signal {signal_power.shape}, "
             f"power range [{input_power.min():.3e},{input_power.max():.3e}], z={len(z)}"
         )
+        lg.info(f"[SM amp] initial power vector (W): {input_power}")
 
         losses_linear = self.get_linear_losses(wavelengths)
 
         gain_matrix = self.compute_gain_matrix(frequencies)
         lg.debug(f"[SM amp] gain matrix shape: {gain_matrix.shape}")
+        lg.debug(
+            f"[SM amp] gain stats: min={np.nanmin(gain_matrix):.3e}, max={np.nanmax(gain_matrix):.3e}"
+        )
 
         # Compute the frequency shifts for each wave
         frequency_shifts = np.zeros((total_signals, total_signals))
@@ -239,10 +243,17 @@ class RamanAmplifier:
             np.fill_diagonal(eta_plus, 0)
             gain_matrix_ase = eta_plus * gain_matrix
 
-        kw = dict(rtol=1e-3, atol=1e-3, mxstep=10000)
+        kw = dict(rtol=1e-3, atol=1e-9, mxstep=10000)
         if isinstance(odeint_kwargs, dict):
             kw.update(odeint_kwargs)
-
+        # User can override max_step via odeint_kwargs; otherwise derive a conservative default.
+        kw_max_step = kw.pop("max_step", None)
+        default_max_step = (
+            min(1e100, (z[-1] - z[0]) / 5000) if len(z) > 1 else np.inf
+        )
+        max_step = default_max_step if kw_max_step is None else float(kw_max_step)
+        max_step = 0.1
+        lg.warning(f"[SM amp] using max_step={max_step:.3e} m for solver")
         if ase:
             sol = scipy.integrate.odeint(
                 RamanAmplifier.raman_ode_with_ase,
@@ -256,32 +267,97 @@ class RamanAmplifier:
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
             ase_solution = sol[:, -num_ase:] if num_ase else np.empty((len(z), 0))
         else:
-            if solver in ("ivp", "bdf", "BDF", "radau", "Radau"):
-                # Use stiff solver for better robustness (Radau)
-                def _ode(z_val, P):
-                    P = np.asarray(P)
-                    dPdz = (-losses_linear + gain_matrix @ P) * P
-                    return dPdz * self.direction
+            if solver == "log_ivp":
+                # Experimental: integrate log-power to reduce dynamic range issues.
+                log_floor = 1e-30
+                P0 = np.maximum(input_power, log_floor)
+                logP0 = np.log(P0)
 
-                max_step = min(
-                    1e100,
-                    (z[-1]-z[0]) / 2000 if len(z) > 1 else np.inf,
+                def _ode_log(z_val, logP):
+                    P_lin = np.exp(logP)
+                    dlogPdz = (-losses_linear + gain_matrix @ P_lin)
+                    if not np.all(np.isfinite(dlogPdz)):
+                        raise FloatingPointError("Non-finite dlogPdz in log_ivp")
+                    return dlogPdz * self.direction
+
+                lg.debug(
+                    f"[SM amp] log_ivp: max_step={max_step:.3e}, "
+                    f"rtol={kw.get('rtol')}, atol={kw.get('atol')}, "
+                    f"logP0 range [{logP0.min():.3e},{logP0.max():.3e}]"
                 )
                 ivp = scipy.integrate.solve_ivp(
-                    _ode,
+                    _ode_log,
                     (z[0], z[-1]),
-                    input_power,
+                    logP0,
                     method="Radau",
                     t_eval=z,
-                    rtol=kw.get("rtol", 1e-3),
+                    rtol=kw.get("rtol", 1e-6),
                     atol=kw.get("atol", 1e-6),
                     max_step=max_step,
                 )
                 if not ivp.success:
-                    lg.error(f"[SM amp] Radau solver failed: {ivp.message}")
+                    lg.error(f"[SM amp] log_ivp solver failed: {ivp.message}")
                 else:
-                    lg.debug(f"[SM amp] Radau steps: {ivp.nfev} f evals, {ivp.t.size} outputs")
-                sol = ivp.y.T
+                    lg.debug(f"[SM amp] log_ivp steps: {ivp.nfev} f evals, {ivp.t.size} outputs")
+                sol_lin = np.exp(ivp.y.T)
+                # Guard against underflow/overflow after exponentiation
+                sol_lin = np.where(np.isfinite(sol_lin), sol_lin, np.nan)
+                sol = sol_lin
+            elif solver in ("ivp", "bdf", "BDF", "radau", "Radau"):
+                # Use stiff solver for better robustness (Radau), integrating log-power.
+                eval_count = {"n": 0}
+
+                log_every = int(kw.pop("log_every", 1000))
+                floor = max(pump_power_floor, 1e-30)
+                logP0 = np.log(np.maximum(input_power, floor))
+
+                def _ode(z_val, logP):
+                    P = np.exp(logP)
+                    eval_count["n"] += 1
+                    gP = gain_matrix @ P
+                    if log_every and eval_count["n"] % log_every == 0:
+                        lg.debug(
+                            f"[SM amp][Radau] eval {eval_count['n']} t={z_val:.3e}: "
+                            f"max|P|={np.max(np.abs(P)):.3e}, max|gP|={np.max(np.abs(gP)):.3e}"
+                        )
+                    dlogPdz = (-losses_linear + gP)
+                    return dlogPdz * self.direction
+
+                lg.debug(
+                    f"[SM amp] Radau (logP) solve: max_step={max_step:.3e}, "
+                    f"rtol={kw.get('rtol')}, atol={kw.get('atol')}, "
+                    f"logP0 range [{logP0.min():.3e},{logP0.max():.3e}]"
+                )
+                ivp = None
+                max_step_try = max_step
+                for attempt in range(2):
+                    try:
+                        ivp = scipy.integrate.solve_ivp(
+                            _ode,
+                            (z[0], z[-1]),
+                            logP0,
+                            method="Radau",
+                            t_eval=z,
+                            rtol=kw.get("rtol", 1e-6),
+                            atol=kw.get("atol", 1e-9),
+                            max_step=max_step_try,
+                        )
+                    except Exception as exc:
+                        lg.warning(f"[SM amp] Radau attempt {attempt+1} failed (max_step={max_step_try:.3e}): {exc}")
+                        ivp = None
+                    if ivp is not None and ivp.success:
+                        break
+                    max_step_try *= 0.1
+                if ivp is None or not ivp.success:
+                    msg = ivp.message if ivp is not None else "no result"
+                    lg.error(f"[SM amp] Radau solver failed after retries: {msg}")
+                    sol = np.full((len(z), len(input_power)), np.nan)
+                    sol_log = np.log(sol + np.finfo(float).eps)
+                else:
+                    lg.debug(f"[SM amp] Radau steps: {ivp.nfev} f evals, {ivp.t.size} outputs (max_step_used={max_step_try:.3e})")
+                    sol_log = ivp.y.T
+                    sol = np.exp(sol_log)
+                    sol = np.where(np.isfinite(sol), sol, np.nan)
             else:
                 sol = scipy.integrate.odeint(
                     RamanAmplifier.raman_ode,
@@ -290,6 +366,7 @@ class RamanAmplifier:
                     args=(losses_linear, gain_matrix, np.hstack((self.direction,))),
                     **kw,
                 )
+                lg.debug(f"[SM amp] odeint solve done; sol shape {sol.shape}")
             pump_solution = sol[:, :num_pumps] if num_pumps else np.zeros((len(z), 0))
             signal_solution = sol[:, num_pumps:num_pumps + num_signals]
             ase_solution = np.empty((len(z), 0))
@@ -318,12 +395,16 @@ class RamanAmplifier:
         """Generate the matrix of Raman gains between each pair of frequencies."""
         frequencies = np.asarray(frequencies, dtype=float)
         resolution = self._gain_resolution(frequencies)
-        cache_key = (frequencies.tobytes(), id(self.fiber), float(resolution))
+        # Include a version tag so older cached matrices (built with the wrong sign convention)
+        # are not reused across process runs.
+        cache_key = (frequencies.tobytes(), id(self.fiber), float(resolution), "raman_sign_v2")
         if cache_key in _GAIN_MATRIX_CACHE:
             return _GAIN_MATRIX_CACHE[cache_key]
 
         num_frequencies = len(frequencies)
-        frequency_shifts = frequencies[:, None] - frequencies[None, :]
+        # Raman transfer depends on the shift (ν_j - ν_i): power flows from higher ν_j to lower ν_i.
+        # The previous sign convention (ν_i - ν_j) inverted this flow, causing unphysical gain blow-up.
+        frequency_shifts = frequencies[None, :] - frequencies[:, None]
 
         gains = self._interpolate_gain(frequency_shifts, resolution)
 
@@ -341,7 +422,9 @@ class RamanAmplifier:
         np.fill_diagonal(gains, 0)
 
         freqs = np.expand_dims(frequencies, axis=-1)
-        freq_scaling = np.maximum(1.0, freqs * (1 / freqs.T))
+        # Use the physical ν_i / ν_j factor (no clipping) so Stokes/anti-Stokes pairs
+        # exchange power consistently and do not create artificial gain.
+        freq_scaling = freqs * (1.0 / freqs.T)
         gain_matrix = freq_scaling * gains
         if self._log_first_nonfinite("[SM amp] gain_matrix", gain_matrix):
             raise ValueError("Non-finite values in Raman gain matrix")
@@ -359,8 +442,9 @@ class RamanAmplifier:
             dPdz = (
                 -losses[:, np.newaxis] + np.matmul(gain_matrix, P[:, np.newaxis])
             ) * P[:, np.newaxis]
-        except ValueError:
-            breakpoint()
+        except ValueError as exc:
+            lg.error(f"[SM amp] raman_ode shape mismatch: losses {losses.shape}, gain {gain_matrix.shape}, P {P.shape}, dir {direction.shape}")
+            raise
         return direction * np.squeeze(dPdz)
 
     @staticmethod
@@ -431,6 +515,127 @@ class RamanAmplifier:
         losses_linear = alpha_to_linear(losses)
         return losses_linear
 
+    # --- Boundary-value solve (signals forward, pumps backward) ---
+    def solve_bvp_signals_forward_pumps_backward(
+        self,
+        signal_power: np.ndarray,
+        signal_wavelength: np.ndarray,
+        pump_power: np.ndarray,
+        pump_wavelength: np.ndarray,
+        z: np.ndarray,
+        tol: float = 1e-6,
+        max_nodes: int = 100000,
+        power_cap: float = 1e3,
+    ):
+        """
+        Solve Raman power profiles as a boundary-value problem:
+        signals are specified at z=0 (forward) and pumps at z=L (backward).
+
+        This uses scipy.integrate.solve_bvp and assumes pumps propagate backward
+        (direction = -1) while signals propagate forward (direction = +1).
+        """
+        import scipy.integrate
+
+        z_arr = np.asarray(z, dtype=float).reshape(-1)
+        if z_arr.size < 2:
+            raise ValueError("z must contain at least two points for BVP solve")
+        z0, zL = float(z_arr[0]), float(z_arr[-1])
+        span = zL - z0
+        if span <= 0:
+            raise ValueError("z must be strictly increasing for BVP solve")
+
+        sigP = np.asarray(signal_power, dtype=float).reshape(-1)
+        sigW = np.asarray(signal_wavelength, dtype=float).reshape(-1)
+        pumP = np.asarray(pump_power, dtype=float).reshape(-1)
+        pumW = np.asarray(pump_wavelength, dtype=float).reshape(-1)
+
+        Ns = sigP.size
+        Np = pumP.size
+        if sigW.size != Ns:
+            raise ValueError("signal_power and signal_wavelength size mismatch")
+        if pumW.size != Np:
+            raise ValueError("pump_power and pump_wavelength size mismatch")
+
+        pump_dir = -np.ones(Np, dtype=float)
+        sig_dir = np.ones(Ns, dtype=float)
+        direction = np.concatenate([pump_dir, sig_dir], axis=0)
+
+        wavelengths = np.concatenate([pumW, sigW], axis=0)
+        freqs = lambda2nu(wavelengths)
+        losses = self.get_linear_losses(wavelengths)
+        gain_matrix = self.compute_gain_matrix(freqs)
+
+        lg.info(
+            f"[SM amp] BVP solve_bvp: pumps={Np} (backward), signals={Ns} (forward), "
+            f"span={span:.3e} m, tol={tol:.1e}, power_cap={power_cap:.1e} W"
+        )
+        # Scale the domain to [0,1] and powers to O(1) to avoid singular Jacobians
+        s_grid = (z_arr - z0) / span
+        power_scale = max(
+            np.max(sigP) if Ns else 0.0,
+            np.max(pumP) if Np else 0.0,
+            1.0,
+        )
+        tol_scaled = tol / power_scale
+        if tol_scaled > 1e2:
+            lg.warning(
+                f"[SM amp] BVP tolerance is very loose after scaling (tol_scaled={tol_scaled:.1e}); "
+                "solution may be under-constrained."
+            )
+        lg.debug(
+            f"[SM amp] BVP scaling: power_scale={power_scale:.3e} W, "
+            f"tol_scaled={tol_scaled:.2e}, span={span:.3e} m"
+        )
+
+        # Loss-only initial guess that satisfies boundaries (physical units), then scale
+        z_rel = z_arr - z0
+        pump_guess = pumP[:, None] * np.exp(-losses[:Np, None] * (zL - z_arr)[None, :]) if Np else np.zeros((0, z_arr.size))
+        sig_guess = sigP[:, None] * np.exp(-losses[Np:, None] * z_rel[None, :]) if Ns else np.zeros((0, z_arr.size))
+        y_init = np.vstack([pump_guess, sig_guess])
+        y_init_scaled = y_init / power_scale
+        pump_bc_scaled = pumP / power_scale if Np else np.array([])
+        sig_bc_scaled = sigP / power_scale if Ns else np.array([])
+
+        def ode(s_local, Y_scaled):
+            Y_phys = np.clip(Y_scaled * power_scale, 0.0, power_cap)
+            gmY = gain_matrix @ Y_phys
+            gmY = np.clip(gmY, -power_cap, power_cap)
+            rhs_phys = (-losses[:, None] + gmY) * Y_phys
+            return direction[:, None] * (rhs_phys * (span / power_scale))
+
+        def bc(ya_scaled, yb_scaled):
+            res = np.zeros_like(ya_scaled)
+            if Np:
+                res[:Np] = yb_scaled[:Np] - pump_bc_scaled
+            if Ns:
+                res[Np:] = ya_scaled[Np:] - sig_bc_scaled
+            return res
+
+        sol = scipy.integrate.solve_bvp(
+            ode,
+            bc,
+            s_grid,
+            y_init_scaled,
+            tol=tol_scaled,
+            max_nodes=max_nodes,
+        )
+        if not sol.success:
+            raise RuntimeError(
+                f"solve_bvp failed: {sol.message} "
+                f"[span={span:.3e} m, power_scale={power_scale:.3e} W, tol_scaled={tol_scaled:.3e}]"
+            )
+
+        # Evaluate solution on the original grid and rescale to physical units
+        try:
+            y_scaled = sol.sol(s_grid)
+        except Exception:
+            y_scaled = sol.y
+        y = y_scaled * power_scale  # shape (N, M)
+        pump_solution = y[:Np, :].T if Np else np.zeros((z_arr.size, 0))
+        signal_solution = y[Np:, :].T if Ns else np.zeros((z_arr.size, 0))
+        ase_solution = np.empty((z_arr.size, 0))
+        return pump_solution, signal_solution, ase_solution
+
     def solve_shooting(self, pump_power, signal_power, z, solver="scipy"):
         """Shooting algorithm presented in [1].
 
@@ -446,7 +651,18 @@ class RamanAmplifier:
         elif solver == "jiang":
             return self.solve_shooting_jiang(pump_power, signal_power, z)
 
-    def solve_shooting_scipy(self, pump_power, signal_power, z):
+    def solve_shooting_scipy(
+        self,
+        pump_power,
+        signal_power,
+        z,
+        pump_wavelength=None,
+        signal_wavelength=None,
+        pump_power_floor: float = 0.0,
+        guess_scale: float = 1e-3,
+    ):
+        """Shooting using scipy.solve_bvp to meet pump boundary conditions."""
+        num_signals = len(signal_power)
         num_pumps = len(pump_power)
         alpha = 0.01
 
@@ -460,42 +676,42 @@ class RamanAmplifier:
             b = b[sort_idx]
             return a[::-1], b[::-1]
 
+        # ensure internal state mirrors inputs
+        self.pump_power = pump_power
+        self.signal_power = signal_power
+        if pump_wavelength is not None:
+            self.pump_wavelengths = pump_wavelength
+        elif not hasattr(self, "pump_wavelengths") or self.pump_wavelengths is None:
+            raise ValueError("pump_wavelength must be provided for shooting solver.")
+        if signal_wavelength is not None:
+            self.signal_wavelengths = signal_wavelength
+        elif not hasattr(self, "signal_wavelengths") or self.signal_wavelengths is None:
+            raise ValueError("signal_wavelength must be provided for shooting solver.")
+        self.direction = np.ones(num_pumps + num_signals)
+
         pump_frequencies = lambda2nu(self.pump_wavelengths)
         sorted_pump_frequencies, sorted_pump_powers = reverse_sort(
             pump_frequencies, pump_power
         )
 
-        gain_matrix = self.compute_gain_matrix(sorted_pump_frequencies)
+        pump_gain_matrix = self.compute_gain_matrix(sorted_pump_frequencies)
         sorted_pump_losses = self.get_linear_losses(nu2lambda(sorted_pump_frequencies))
         signal_losses = self.get_linear_losses(self.signal_wavelengths)
 
-        direction_tmp = np.ones_like(sorted_pump_powers)
-
-        sol = scipy.integrate.odeint(
-            RamanAmplifier.raman_ode,
-            sorted_pump_powers,
-            z,
-            args=(sorted_pump_losses, gain_matrix, direction_tmp),
-        )
-
-        pump_solution_initial_cond = sol[::-1, :num_pumps]
-
-        # signal_solution_initial_cond = sorted_pump_powers * np.exp(
-        #     -z[::-1, np.newaxis] * sorted_pump_losses
-        # )
-
-        signal_solution_initial_cond = self.signal_power * np.exp(
-            -z[:, np.newaxis] * signal_losses
-        )
-
-        # plt.figure()
-        # plt.plot(z, pynlin.utils.watt2dBm(signal_solution_initial_cond))
-        # plt.plot(z, pynlin.utils.watt2dBm(pump_solution_initial_cond))
-        # # plt.show()
-
-        initial_conditions = np.hstack(
-            (pump_solution_initial_cond, signal_solution_initial_cond)
-        ).T
+        def build_initial_conditions(scale: float):
+            direction_tmp = np.ones_like(sorted_pump_powers)
+            guess_pumps = np.maximum(sorted_pump_powers * scale, pump_power_floor)
+            sol_guess = scipy.integrate.odeint(
+                RamanAmplifier.raman_ode,
+                guess_pumps,
+                z,
+                args=(sorted_pump_losses, pump_gain_matrix, direction_tmp),
+            )
+            pump_solution_initial_cond = sol_guess[::-1, :num_pumps]
+            signal_solution_initial_cond = self.signal_power * np.exp(
+                -z[:, np.newaxis] * signal_losses
+            )
+            return np.hstack((pump_solution_initial_cond, signal_solution_initial_cond)).T
 
         wavelengths = np.concatenate(
             (nu2lambda(sorted_pump_frequencies), self.signal_wavelengths)
@@ -518,10 +734,23 @@ class RamanAmplifier:
                 P, z, losses_linear, gain_matrix, self.direction
             )
 
-        result = scipy.integrate.solve_bvp(
-            ode, boundary_residuals, z, initial_conditions, verbose=1
-        )
-        return result.y.transpose()
+        scales = [guess_scale, guess_scale * 0.1, guess_scale * 0.01]
+        last_err = None
+        for sc in scales:
+            try:
+                init = build_initial_conditions(sc)
+                result = scipy.integrate.solve_bvp(
+                    ode, boundary_residuals, z, init, verbose=1
+                )
+                if result.success:
+                    lg.info(f"[SM amp] Shooting converged with initial scale {sc}")
+                    return result.y.transpose()
+                last_err = result.message
+                lg.warning(f"[SM amp] Shooting failed (scale {sc}): {result.message}")
+            except Exception as exc:
+                last_err = str(exc)
+                lg.warning(f"[SM amp] Shooting exception (scale {sc}): {exc}")
+        raise RuntimeError(f"Shooting did not converge: {last_err}")
 
     def solve_shooting_jiang(self, pump_power, signal_power, z):
         """Shooting algorithm presented in [1].
@@ -655,9 +884,9 @@ class RamanAmplifier:
         while num_iter < 1000:
             D = compute_error(x0)
 
-            print(f"Iteration {num_iter}")
-            print(f"\tx0={pynlin.utils.watt2dBm(x0)} dBm")
-            print(f"\tError={D * 1e3} mW")
+            lg.debug(f"Iteration {num_iter}")
+            lg.debug(f"\tx0={pynlin.utils.watt2dBm(x0)} dBm")
+            lg.debug(f"\tError={D * 1e3} mW")
             Ds.append(D)
 
             sol = solve_system(x0)
@@ -686,10 +915,8 @@ class RamanAmplifier:
 
                 #     # breakpoint()
 
-                # print(f"\tdelta_P={delta_P * 1e3} mW")
-                # x0 = x0 + alpha * delta_P
                 x0 = x0 - eta * G
-                print(f"\tx0_new={pynlin.utils.watt2dBm(x0)} dBm")
+                lg.debug(f"\tx0_new={pynlin.utils.watt2dBm(x0)} dBm")
                 num_iter += 1
             except np.linalg.LinAlgError:
                 break
@@ -824,7 +1051,7 @@ class MMFRamanAmplifier(RamanAmplifier):
                 direction[: num_pumps * fiber.n_modes] = -1
 
             if not shooting:
-                kw = dict(rtol=1e-3, atol=1e-6, mxstep=10000)
+                kw = dict(rtol=1e-6, atol=1e-12, mxstep=10000)
                 if isinstance(odeint_kwargs, dict):
                     kw.update(odeint_kwargs)
                 sol = scipy.integrate.odeint(
@@ -855,7 +1082,7 @@ class MMFRamanAmplifier(RamanAmplifier):
                 def callback(x):
                     max_error = callback_info["max_error"]
                     threshold = callback_info["threshold"]
-                    print(f"Max error: {max_error} mW")
+                    lg.debug(f"Max error: {max_error} mW")
                     if max_error < threshold:
                         # print(f"Shooting error < {threshold}, stopping optimization")
                         callback_info["params"] = np.copy(x)
@@ -1062,6 +1289,10 @@ class SMWidebandRamanAmplifier(SMRamanAmplifier):
                 spec = wdm.band_specs.get(name)
                 if spec and spec.launch_power_dbm is not None:
                     powers_dbm[slc] = spec.launch_power_dbm
+        # power_scale = getattr(wdm, "power_scale", 1.0)
+        # if power_scale not in (None, 1.0):
+        #     lg.info(f"[SM amp] Detected WDM power_scale={power_scale:.3f}; undoing per-channel boost.")
+        #     powers_dbm = powers_dbm - 10 * np.log10(power_scale)
         return powers_dbm
 
     def solve_from_system(self, system, z: np.ndarray, disable_pumps: bool = False, **kwargs):
@@ -1092,10 +1323,174 @@ class SMWidebandRamanAmplifier(SMRamanAmplifier):
             **kwargs,
         )
 
+    def solve_signals_with_fixed_pumps(
+        self,
+        signal_power: np.ndarray,
+        signal_wavelength: np.ndarray,
+        pump_power_profile: np.ndarray,
+        pump_wavelength: np.ndarray,
+        z: np.ndarray,
+        odeint_kwargs=None,
+        solver: str = "radau",
+    ):
+        """Solve only signals with pumps fixed to a provided z-profile."""
+        num_pumps = pump_power_profile.shape[1] if pump_power_profile.size else 0
+        num_signals = signal_power.shape[0]
+        wavelengths = np.concatenate((pump_wavelength, signal_wavelength)) if num_pumps else signal_wavelength
+        frequencies = lambda2nu(wavelengths)
+        gain_matrix = self.compute_gain_matrix(frequencies)
+        losses_s = self.get_linear_losses(signal_wavelength)
+
+        if num_pumps:
+            Gsp = gain_matrix[num_pumps:, :num_pumps]
+            Gss = gain_matrix[num_pumps:, num_pumps:]
+        else:
+            Gsp = np.zeros((num_signals, 0))
+            Gss = gain_matrix
+
+        kw = dict(rtol=1e-3, atol=1e-6, max_step=(z[-1]-z[0]) / 3500 if len(z) > 1 else None)
+        if isinstance(odeint_kwargs, dict):
+            kw.update(odeint_kwargs)
+
+        if num_pumps:
+            pump_interp = [
+                lambda zz, col=i: float(np.interp(zz, z, pump_power_profile[:, col])) for i in range(num_pumps)
+            ]
+        else:
+            pump_interp = []
+
+        def _ode(z_val, S):
+            pump_vec = np.array([fn(z_val) for fn in pump_interp]) if num_pumps else np.zeros((0,))
+            rhs = -losses_s + (Gss @ S)
+            if num_pumps:
+                rhs += Gsp @ pump_vec
+            return rhs * S
+
+        if solver.lower() == "radau":
+            sol = scipy.integrate.solve_ivp(
+                _ode,
+                (z[0], z[-1]),
+                signal_power,
+                method="Radau",
+                t_eval=z,
+                **kw,
+            )
+            if not sol.success:
+                lg.error(f"[SM amp] Radau (signals-only) failed: {sol.message}")
+            return sol.y.T
+        else:
+            sol = scipy.integrate.odeint(_ode, signal_power, z, **kw)
+            return sol
+
+    def solve_two_step_from_system(
+        self,
+        system,
+        z: np.ndarray,
+        decimation_factor: int = 100,
+        disable_pumps: bool = False,
+        pump_power_floor: float = 0.0,
+        use_shooting: bool = False,
+        shooting_guess_scale: float = 1e-3,
+        conserve_power_on_decimation: bool = True,
+        pump_input_scale: float = 1e-3,
+        **kwargs,
+    ):
+        """Two-step solve: (1) decimated signals + pumps, (2) full signals with fixed pumps."""
+        fiber = system.fiber
+        wdm = system.wdm
+        pumps = [] if disable_pumps else (system.pump_specs or [])
+
+        # Optional signal decimation via WDM helper (no per-channel power rescale)
+        wdm_dec = wdm.decimate(decimation_factor, rescale_power=False) if decimation_factor > 1 else wdm
+        freqs = wdm_dec.frequency_grid()
+        wavelengths = nu2lambda(freqs)
+
+        launch_dbm_default = system.launch_power if system.launch_power is not None else -5.0
+        # Use a lightweight system-like holder so _band_launch_powers uses the decimated grid
+        dec_sys = type("TmpSystem", (), {"wdm": wdm_dec})
+        signal_power_dbm = self._band_launch_powers(dec_sys, launch_dbm_default)
+        signal_power_w = dBm2watt(signal_power_dbm)
+        if decimation_factor > 1 and conserve_power_on_decimation and freqs.size:
+            power_scale = len(wdm.frequency_grid()) / len(freqs)
+            signal_power_w *= power_scale
+            lg.info(f"[SM amp] Two-step: decimating signals by {decimation_factor} (kept {len(freqs)}); power scale {power_scale:.2f}")
+        elif decimation_factor > 1:
+            lg.info(f"[SM amp] Two-step: decimating signals by {decimation_factor} (kept {len(freqs)}) without power scaling")
+
+        pump_wavelengths = np.array([p.wavelength for p in pumps]) if pumps else np.array([])
+        pump_powers_target_w = dBm2watt(np.array([p.power_dbm for p in pumps])) if pumps else np.array([])
+        pump_powers_w = pump_powers_target_w * pump_input_scale if pumps else np.array([])
+        if pumps:
+            lg.info(f"[SM amp] Using pump input scale {pump_input_scale:.1e}; targets (W) min/max {pump_powers_target_w.min():.3e}/{pump_powers_target_w.max():.3e}")
+        pump_dirs = np.array([p.direction for p in pumps]) if pumps else np.array([])
+
+        # Step 1: decimate signals but keep total power
+        if decimation_factor > 1:
+            sig_idx = np.arange(0, len(wavelengths), decimation_factor, dtype=int)
+            scale = len(wavelengths) / len(sig_idx) if conserve_power_on_decimation else 1.0
+            sig_power_dec = signal_power_w[sig_idx] * scale
+            sig_wl_dec = wavelengths[sig_idx]
+            lg.info(f"[SM amp] Two-step: decimating signals by {decimation_factor} (kept {len(sig_idx)})")
+            if not conserve_power_on_decimation:
+                lg.info("[SM amp] Decimation without power scaling (per-channel power unchanged)")
+        else:
+            sig_idx = np.arange(len(wavelengths))
+            sig_power_dec = signal_power_w
+            sig_wl_dec = wavelengths
+
+        # Step 1: decimated forward solve (no shooting)
+        pump_solution_step1, signal_solution_step1, _ = self.solve(
+            signal_power=sig_power_dec,
+            signal_wavelength=sig_wl_dec,
+            pump_power=pump_powers_w,
+            pump_wavelength=pump_wavelengths,
+            z=z,
+            pump_direction=pump_dirs,
+            use_power_at_fiber_start=True,
+            check_photon_count=False,
+            pump_power_floor=pump_power_floor,
+            **kwargs,
+        )
+        try:
+            from pynlin.raman.plot_optimization import plot_profiles
+            sig_step1_plot = signal_solution_step1[:, :, None] if signal_solution_step1.ndim == 2 else signal_solution_step1
+            pump_step1_plot = pump_solution_step1[:, :, None] if pump_solution_step1.ndim == 2 else pump_solution_step1
+            pump_powers_step1 = pump_powers_w[:, None] if pump_powers_w.size else np.zeros((0, 1))
+            plot_profiles(
+                signal_wavelengths=sig_wl_dec,
+                signal_solution=sig_step1_plot,
+                ase_solution=None,
+                pump_wavelengths=pump_wavelengths,
+                pump_solution=pump_step1_plot,
+                pump_powers=pump_powers_step1,
+                cf=system,
+                wallpaper_mode=False,
+            )
+            lg.info("Saved decimated-step profiles via plot_profiles.")
+        except Exception as e:
+            lg.warning(f"Decimated-step plotting failed: {e}")
+
+        # Step 2: solve full signals with pumps fixed to step1 profile
+        signal_solution_full = self.solve_signals_with_fixed_pumps(
+            signal_power=signal_power_w,
+            signal_wavelength=wavelengths,
+            pump_power_profile=pump_solution_step1 if pump_solution_step1.size else np.zeros((len(z), 0)),
+            pump_wavelength=pump_wavelengths,
+            z=z,
+            odeint_kwargs=kwargs.get("odeint_kwargs"),
+        )
+
+        return pump_solution_step1, signal_solution_full, signal_solution_step1, sig_wl_dec
+
 # Backward compatibility
 RamanAmplifier = SMRamanAmplifier
 MMFRamanAmplifier = MMRamanAmplifier
 SMRamanAmplifierWideband = SMWidebandRamanAmplifier
+
+
+# ---------------------------------------
+#  MAIN
+# ---------------------------------------
 
 
 if __name__ == "__main__":
@@ -1106,7 +1501,7 @@ if __name__ == "__main__":
     from loguru import logger as lg
     init_logging()
     # Ensure console logging is enabled even when env is unset
-    level = os.getenv("LOGURU_LEVEL", "DEBUG")
+    level = os.getenv("LOGURU_LEVEL", "TRACE")
     lg.remove()
     lg.add(sys.stderr, level=level)
     # Simple smoke test: load system TOML (default smf_struct) and run single-mode amplification
@@ -1115,7 +1510,7 @@ if __name__ == "__main__":
         from pynlin.system import System
         from pynlin.utils import dBm2watt, nu2lambda
     except Exception as e:
-        print(f"Could not import System: {e}")
+        lg.error(f"Could not import System: {e}")
         sys.exit(1)
 
     system = System.from_toml(cfg_path)
@@ -1125,36 +1520,108 @@ if __name__ == "__main__":
 
     try:
         out_fig = system.plot_launch_spectrum()
-        print(f"Saved launch spectrum plot to {out_fig}")
+        lg.info(f"Saved launch spectrum plot to {out_fig}")
     except Exception as e:
-        print(f"Launch spectrum plot skipped: {e}")
+        lg.warning(f"Launch spectrum plot skipped: {e}")
 
     freqs = wdm.frequency_grid()
-    print(f"Frequency grid: {freqs.shape[0]} points from {freqs.min()/1e12:.2f} THz to {freqs.max()/1e12:.2f} THz")
+    lg.info(f"Frequency grid: {freqs.shape[0]} points from {freqs.min()/1e12:.2f} THz to {freqs.max()/1e12:.2f} THz")
 
-    # Build per-band launch powers automatically
+    # Diagnostic: compare wideband vs narrowband gain matrices on a reduced grid
+    try:
+        import matplotlib.pyplot as plt
+        sample_size = min(200, len(freqs))
+        idx = np.linspace(0, len(freqs) - 1, sample_size, dtype=int)
+        freq_sample = freqs[idx]
+
+        wide_amp = RamanAmplifier(fiber)
+        gm_wide = wide_amp.compute_gain_matrix(freq_sample)
+
+        nb_fiber = SMFiberNarrowband(
+            losses=getattr(fiber, "losses", None),
+            raman_coefficient=fiber.raman_coefficient,
+            effective_area=getattr(fiber, "effective_area", 80e-12),
+            beta2=getattr(fiber, "beta2", None),
+            gamma=getattr(fiber, "gamma", None),
+            length=fiber.length,
+        )
+        nb_amp = RamanAmplifier(nb_fiber)
+        gm_narrow = nb_amp.compute_gain_matrix(freq_sample)
+
+        def plot_matrix(mat, title, fname):
+            plt.figure(figsize=(5, 4))
+            plt.imshow(mat, origin="lower", aspect="auto")
+            plt.colorbar(label="Gain (1/W·m)")
+            plt.title(title)
+            plt.tight_layout()
+            out_path = Path("media/debug") / fname
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(out_path, dpi=200)
+            plt.close()
+            lg.info(f"Saved gain matrix plot: {out_path}")
+
+        plot_matrix(gm_wide, "Wideband gain matrix", "gain_matrix_wide.png")
+        plot_matrix(gm_narrow, "Narrowband gain matrix", "gain_matrix_narrow.png")
+        plot_matrix(gm_wide - gm_narrow, "Gain matrix diff (wide - narrow)", "gain_matrix_diff.png")
+
+        # Reference narrowband case from smf_struct.toml
+        try:
+            smf_ref = System.from_toml(Path("input/smf_struct.toml"))
+            ref_freqs = smf_ref.wdm.frequency_grid()
+            ref_idx = np.linspace(0, len(ref_freqs) - 1, min(200, len(ref_freqs)), dtype=int)
+            ref_freq_sample = ref_freqs[ref_idx]
+            ref_amp = RamanAmplifier(smf_ref.fiber)
+            gm_ref = ref_amp.compute_gain_matrix(ref_freq_sample)
+            plot_matrix(gm_ref, "Narrowband gain (smf_struct)", "gain_matrix_smf_struct.png")
+        except Exception as e:
+            lg.warning(f"Reference smf_struct gain plot skipped: {e}")
+    except Exception as e:
+        lg.warning(f"Gain matrix diagnostic skipped: {e}")
+
+    # Boundary-value solve only (signals forward, pumps backward)
     z = np.linspace(0, fiber.length, 400)
     amp = SMWidebandRamanAmplifier(fiber)
-    pump_sol, sig_sol, _ = amp.solve_from_system(
-        system,
+    launch_dbm_default = system.launch_power if system.launch_power is not None else -5.0
+    # Decimate signals (20x) via WDM helper; no per-channel power rescale
+    signal_power_dbm = amp._band_launch_powers(system, launch_dbm_default)
+    signal_power_w = dBm2watt(signal_power_dbm)
+    sig_wl_full = nu2lambda(freqs)
+    wdm_dec = wdm.decimate(2, rescale_power=True)
+    freqs_dec = wdm_dec.frequency_grid()
+    sig_wl_dec = nu2lambda(freqs_dec)
+    sig_power_dec = signal_power_w[: len(sig_wl_dec)]
+    power_scale = len(sig_wl_full) / len(sig_wl_dec) if len(sig_wl_dec) else 1.0
+    # if decim > 1 and power_scale != 1.0:
+    #     sig_power_dec = sig_power_dec * power_scale
+    #     lg.info(f"[BVP] Decimating signals by {decim} (kept {len(sig_wl_dec)} of {len(sig_wl_full)}); power scale {power_scale:.2f}")
+    # else:
+    #     lg.info(f"[BVP] Decimating signals by {decim} (kept {len(sig_wl_dec)} of {len(sig_wl_full)}) without power scaling")
+    pump_wavelengths = np.array([p.wavelength for p in pumps]) if pumps else np.array([])
+    pump_power_w = dBm2watt(np.array([p.power_dbm for p in pumps])) if pumps else np.array([])
+    # guard against zero/negative powers before BVP
+    pump_power_w = np.maximum(pump_power_w, 1e-12) if pump_power_w.size else pump_power_w
+    sig_power_dec = np.maximum(sig_power_dec, 1e-12)
+    pump_sol, sig_sol, _ = amp.solve_bvp_signals_forward_pumps_backward(
+        signal_power=sig_power_dec,
+        signal_wavelength=sig_wl_dec,
+        pump_power=pump_power_w,
+        pump_wavelength=pump_wavelengths,
         z=z,
-        disable_pumps=False,
-        solver="ivp",
-        odeint_kwargs={"rtol": 1e-2, "atol": 1e-4, "mxstep": 500},
-        ase=False,
-        pump_power_floor=1e-6,
+        tol=10,
+        power_cap=1e3,
     )
-    print(f"Pump solution shape: {pump_sol.shape}, Signal solution shape: {sig_sol.shape}")
     sig_finite = np.isfinite(sig_sol)
     pump_finite = np.isfinite(pump_sol) if pump_sol.size else np.array([True])
-    print(
-        f"Signal finite fraction: {sig_finite.mean():.4f}, "
-        f"min/max (dBm) [{watt2dBm(np.nanmin(sig_sol)):.2f}, {watt2dBm(np.nanmax(sig_sol)):.2f}]"
+    lg.info(
+        f"[BVP] pump {pump_sol.shape}, signal {sig_sol.shape}; "
+        f"signal finite {sig_finite.mean():.4f}, pump finite {pump_finite.mean():.4f}"
+    )
+    lg.info(
+        f"[BVP] signal min/max dBm [{watt2dBm(np.nanmin(sig_sol)):.2f}, {watt2dBm(np.nanmax(sig_sol)):.2f}]"
     )
     if pump_sol.size:
-        print(
-            f"Pump finite fraction: {pump_finite.mean():.4f}, "
-            f"min/max (dBm) [{watt2dBm(np.nanmin(pump_sol)):.2f}, {watt2dBm(np.nanmax(pump_sol)):.2f}]"
+        lg.info(
+            f"[BVP] pump min/max dBm [{watt2dBm(np.nanmin(pump_sol)):.2f}, {watt2dBm(np.nanmax(pump_sol)):.2f}]"
         )
 
     try:
@@ -1167,16 +1634,17 @@ if __name__ == "__main__":
             pump_wavelengths = np.array([nu2lambda(np.median(freqs))])
             pump_solution = np.zeros((len(z), 1, mode_count))
             pump_powers = np.zeros((1, 1))
-            print("No pumps in solve; using mock zero-power pump for plotting.")
+            lg.warning("No pumps in solve; using mock zero-power pump for plotting.")
         else:
             pump_wavelengths = np.array([p.wavelength for p in pumps])
             pump_solution = pump_sol[:, :, None] if pump_sol.ndim == 2 else pump_sol
             pump_powers = pump_power_w[:, None]
 
         signal_solution = sig_sol[:, :, None] if sig_sol.ndim == 2 else sig_sol
+        signal_solution_dec = signal_solution
 
         plot_profiles(
-            signal_wavelengths=nu2lambda(freqs),
+            signal_wavelengths=sig_wl_dec,
             signal_solution=signal_solution,
             ase_solution=None,
             pump_wavelengths=pump_wavelengths,
@@ -1184,7 +1652,10 @@ if __name__ == "__main__":
             pump_powers=pump_powers,
             cf=system,
             wallpaper_mode=False,
+            use_active_naming=False
         )
-        print("Saved smoke-test profiles via plot_profiles.")
+        lg.info("Saved smoke-test profiles via plot_profiles.")
+
+        print("Saved BVP profiles via plot_profiles.")
     except Exception as e:
-        print(f"Plotting skipped due to error: {e}")
+        lg.error(f"Plotting skipped due to error: {e}")
