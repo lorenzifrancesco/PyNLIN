@@ -205,18 +205,19 @@ class System:
         pump_freqs = np.array([lambda2nu(p.wavelength) for p in pump_specs]) if pump_specs else np.array([])
         pump_powers_dbm = np.array([p.power_dbm for p in pump_specs]) if pump_specs else np.array([])
 
-        plt.figure(figsize=(6, 3))
-        plt.scatter(freqs * 1e-12, sig_powers_dbm, s=2 if tiny_markers else 6, alpha=0.6, label="signals")
+        plt.figure()
+        plt.scatter(freqs * 1e-12, sig_powers_dbm, s=2 if tiny_markers else 6, alpha=0.6, label=r"signals") # $\mathnormal P(z=0)$")
         if pump_powers_dbm.size:
-            plt.scatter(pump_freqs * 1e-12, pump_powers_dbm, marker="x", color="red", s=12, label="pumps")
-        plt.xlabel("Frequency [THz]")
-        plt.ylabel("Power at z=0 [dBm]")
+            plt.scatter(pump_freqs * 1e-12, pump_powers_dbm, marker="x", color="red", s=12, label=r"pumps") # $\mathnormal P(z=L)$")
+        plt.xlabel(r"$\mathnormal f$ [THz]")
+        plt.ylabel(r" Launch power [dBm]")
         plt.grid(True, alpha=0.2)
         plt.legend(loc="best")
         out_dir = Path(save_path).parent if save_path else Path("media/debug")
         out_dir.mkdir(parents=True, exist_ok=True)
         filename = Path(save_path) if save_path else out_dir / f"launch_spectrum_{self.source.stem if self.source else 'system'}.png"
         plt.tight_layout()
+        plt.grid(False, alpha=0.2)
         plt.savefig(filename, dpi=200)
         plt.close()
         return filename
