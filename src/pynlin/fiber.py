@@ -520,6 +520,19 @@ def get_oi_matrix(self, modes, wavelengths):
 
 def fiber_summary(fiber: Fiber) -> str:
     """Return a human-friendly summary string for a Fiber/SMFiber/MMFiber."""
+    def _format_profile_samples(wavelengths, values) -> str:
+        wl = np.asarray(wavelengths, dtype=float)
+        vals = np.asarray(values, dtype=float)
+        if wl.size == 0 or vals.size == 0:
+            return "[]"
+        n = min(wl.size, vals.size)
+        if n <= 4:
+            idx = list(range(n))
+        else:
+            idx = [0, 1, n - 2, n - 1]
+        pairs = ", ".join(f"({wl[i]:.3e},{vals[i]:.3e})" for i in idx)
+        return f"[{pairs}]"
+
     lines = [
         f"Fiber type   : {fiber.fiber_type}",
         f"Length       : {fiber.length:.3e} m",
@@ -543,7 +556,8 @@ def fiber_summary(fiber: Fiber) -> str:
             lines.append(f"Aeff profile : {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
         if getattr(fiber, "_attenuation_profile", None) is not None:
             wl, vals = fiber._attenuation_profile
-            lines.append(f"Atten profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
+            samples = _format_profile_samples(wl, vals)
+            lines.append(f"Atten profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m {samples}")
     elif isinstance(fiber, SMFiber):
         # Profiles carry beta/beta1/beta2; no single-point betas shown here
         if getattr(fiber, "_effective_area_profile", None) is not None:
@@ -551,16 +565,19 @@ def fiber_summary(fiber: Fiber) -> str:
             lines.append(f"Aeff profile : {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
         if getattr(fiber, "_attenuation_profile", None) is not None:
             wl, vals = fiber._attenuation_profile
-            lines.append(f"Atten profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
+            samples = _format_profile_samples(wl, vals)
+            lines.append(f"Atten profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m {samples}")
         if getattr(fiber, "_beta_profile", None) is not None:
             wl, vals = fiber._beta_profile
             lines.append(f"Beta profile : {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
         if getattr(fiber, "_beta1_profile", None) is not None:
             wl, vals = fiber._beta1_profile
-            lines.append(f"Beta1 profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
+            samples = _format_profile_samples(wl, vals)
+            lines.append(f"Beta1 profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m {samples}")
         if getattr(fiber, "_beta2_profile", None) is not None:
             wl, vals = fiber._beta2_profile
-            lines.append(f"Beta2 profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m")
+            samples = _format_profile_samples(wl, vals)
+            lines.append(f"Beta2 profile: {len(wl)} points [{wl[0]:.3e},{wl[-1]:.3e}] m {samples}")
         if getattr(fiber, "_freq_profile", None) is not None:
             fp = fiber._freq_profile
             lines.append(f"Freq grid    : {len(fp)} points [{fp.min():.3e},{fp.max():.3e}] Hz")
