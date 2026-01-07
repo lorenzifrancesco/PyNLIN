@@ -1,3 +1,4 @@
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger as lg
@@ -10,10 +11,12 @@ from pynlin.nlin.nlin_estimator_uwb import (
     collision_coeffs_system_uwb,
     total_nlin_uwb,
 )
-from pynlin.raman.solvers import MMFRamanAmplifier
-from pynlin.raman.solvers_jiang import SMFWidebandAmplifier, JiangIterativeConfig
+from pynlin.raman.power_profiles import simulate_power_profiles
+from pynlin.raman.plot_optimization import plot_profiles
 from pynlin.system import System
-from pynlin.utils import dBm2watt, nu2lambda, watt2dBm
+from pynlin.utils import watt2dBm
+
+os.environ.setdefault("LOGURU_LEVEL", "DEBUG")
 init_logging()
 
 # import plotly.graph_objects as go
@@ -34,124 +37,75 @@ def plot_case_study_fits():
 
 
 def compute_raman_profiles(system: System,
-                           save_path: str = "results/uwb_profiles.npz",
+                           save_path: str = "results/uwb_power_profiles.npy",
                            integration_steps: int = 300,
                            recompute: bool = False):
-    """Compute Raman/ISRS power evolution using the Jiang solver and persist results."""
+    """Compute Raman profiles using the standard Jiang pipeline in power_profiles.py."""
     save_path = Path(save_path)
     if save_path.exists() and not recompute:
         lg.info(f"Raman profiles already exist at {save_path}; skipping recompute.")
         return
-
-    wdm = system.wdm
-    fiber = system.fiber
-    pumps = system.pump_specs or []
-    num_pumps = len(pumps)
-    n_modes = getattr(fiber, "n_modes", 1)
-
-    freqs = wdm.frequency_grid()
-    wavelengths = nu2lambda(freqs)
-
-    def _initial_signal_powers():
-        launch_dbm = system.launch_power if system.launch_power is not None else -5.0
-        powers_dbm = np.full(len(wavelengths), launch_dbm)
-        if hasattr(wdm, "band_specs") and hasattr(wdm, "_band_slices"):
-            for name, slc in wdm._band_slices.items():
-                spec = wdm.band_specs.get(name)
-                if spec and spec.launch_power_dbm is not None:
-                    powers_dbm[slc] = spec.launch_power_dbm
-        return dBm2watt(powers_dbm)
-
-    signal_power_w = np.tile(_initial_signal_powers()[:, None], (1, n_modes))
-
-    # pump arrays
-    if num_pumps:
-        pump_wavelengths = np.array([p.wavelength for p in pumps])
-        pump_power_dbm = np.array([p.power_dbm for p in pumps])
-        pump_power_w = np.tile(dBm2watt(pump_power_dbm)[:, None], (1, n_modes))
-        pump_dirs = np.array([p.direction for p in pumps])
-    else:
-        pump_wavelengths = np.array([])
-        pump_power_w = np.zeros((0, n_modes))
-        pump_dirs = np.array([])
-
-    # z-grid
-    z = np.linspace(0, fiber.length, integration_steps)
-
-    if n_modes == 1:
-        # Single-mode Raman amplifier solved with Jiang-style homotopy
-        amp = SMFWidebandAmplifier(fiber)
-        jiang_cfg = JiangIterativeConfig(
-            iterative_steps=80,
-            pump_scale_start=1e-6,
-            inner_iters=None,
-            early_stop_rtol=1e-4,
-            pump_power_floor=1e-12,
-        )
-        pump_solution, signal_solution, _ = amp.solve_with_jiang(
-            system,
-            z=z,
-            cfg=jiang_cfg,
-            disable_pumps=False,
-        )
-        pump_solution = pump_solution[:, :, None] if pump_solution.ndim == 2 else pump_solution
-        signal_solution = signal_solution[:, :, None] if signal_solution.ndim == 2 else signal_solution
-    else:
-        if num_pumps:
-            amp = MMFRamanAmplifier()
-            direction = np.concatenate(
-                [np.repeat(pump_dirs, n_modes), np.ones(len(wavelengths) * n_modes)]
-            )
-            pump_solution, signal_solution, _ = amp.solve(
-                signal_power=signal_power_w,
-                signal_wavelength=wavelengths,
-                pump_power=pump_power_w,
-                pump_wavelength=pump_wavelengths,
-                z=z,
-                fiber=fiber,
-                counterpumping=np.any(pump_dirs < 0),
-                ase=False,
-                direction=direction,
-            )
-        else:
-            # simple loss-only propagation
-            losses = fiber.losses if hasattr(fiber, "losses") else np.array([0, 0, 0])
-            pump_solution = np.zeros((len(z), 0, n_modes))
-            signal_solution = np.empty((len(z), len(wavelengths), n_modes))
-            for i, wl in enumerate(wavelengths):
-                alpha_db_per_m = np.polyval(losses, wl)
-                alpha_linear = alpha_db_per_m * np.log(10) / 10  # dB/m -> Np/m
-                signal_solution[:, i, :] = signal_power_w[i] * np.exp(-alpha_linear * z)[:, None]
-
-    # Band-level power summary (start/end)
-    band_summaries = []
-    if hasattr(wdm, "band_specs") and hasattr(wdm, "_band_slices"):
-        for name, slc in wdm._band_slices.items():
-            start_power = watt2dBm(np.nanmean(signal_solution[0, slc, :]))
-            end_power = watt2dBm(np.nanmean(signal_solution[-1, slc, :]))
-            band_summaries.append((name, start_power, end_power))
-            lg.info(f"Band {name}: avg start power {start_power:.2f} dBm, end power {end_power:.2f} dBm")
-    else:
-        start_power = watt2dBm(np.nanmean(signal_solution[0]))
-        end_power = watt2dBm(np.nanmean(signal_solution[-1]))
-        band_summaries.append(("full", start_power, end_power))
-        lg.info(f"Full band: avg start power {start_power:.2f} dBm, end power {end_power:.2f} dBm")
-
-    if np.isnan(signal_solution).any() or np.isnan(pump_solution).any():
-        lg.warning("NaNs detected in Raman profiles; check solver stability and inputs.")
-
-    np.savez(
-        save_path,
-        z=z,
-        wavelengths=wavelengths,
-        signal_solution=signal_solution,
-        pump_solution=pump_solution,
-        pump_wavelengths=pump_wavelengths,
-        pump_dirs=pump_dirs,
-        band_summaries=band_summaries,
+    cfg_path = system.source or Path("./input/uwb_struct.toml")
+    simulate_power_profiles(
+        cfg_path=cfg_path,
+        output_path=save_path,
+        z_points=integration_steps,
     )
     lg.info(f"Saved Raman/ISRS power profiles to {save_path}")
-    return z, wavelengths, signal_solution, pump_solution
+    return
+
+
+def plot_power_profiles(system: System, profile_path: Path | str) -> None:
+    """Load a saved profile file and plot it with plot_profiles."""
+    p_path = Path(profile_path)
+    if not p_path.exists():
+        lg.warning(f"Profile file {p_path} not found; skipping plot.")
+        return
+    lg.info(f"Loading profile data for plotting from {p_path}")
+    data = np.load(p_path, allow_pickle=True).item()
+
+    sig_wl = data.get("signal_wavelengths")
+    sig_sol = data.get("signal_sol")
+    if sig_wl is None or sig_sol is None:
+        lg.warning("Profile file missing signal_wavelengths or signal_sol; skipping plot.")
+        return
+
+    signal_solution = np.array(sig_sol, dtype=float)
+    if signal_solution.ndim == 2:
+        signal_solution = signal_solution[:, :, None]
+
+    pump_solution = data.get("pump_sol")
+    pump_wavelengths = data.get("pump_wavelengths")
+    pump_powers = data.get("pump_powers")
+
+    if pump_solution is None:
+        pump_solution = np.zeros((signal_solution.shape[0], 0, system.n_modes))
+    else:
+        pump_solution = np.array(pump_solution, dtype=float)
+        if pump_solution.ndim == 2:
+            pump_solution = pump_solution[:, :, None]
+
+    if pump_wavelengths is None:
+        pump_wavelengths = np.array([])
+    if pump_powers is None:
+        pump_powers = np.zeros((len(pump_wavelengths), 1))
+    else:
+        pump_powers = np.array(pump_powers, dtype=float)
+        if pump_powers.ndim == 1:
+            pump_powers = pump_powers[:, None]
+
+    plot_profiles(
+        signal_wavelengths=sig_wl,
+        signal_solution=signal_solution,
+        ase_solution=None,
+        pump_wavelengths=pump_wavelengths,
+        pump_solution=pump_solution,
+        pump_powers=pump_powers,
+        cf=system,
+        wallpaper_mode=False,
+        use_active_naming=False,
+    )
+    lg.info("Saved profile plot via plot_profiles.")
 
 
 def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int) -> np.ndarray | None:
@@ -161,6 +115,7 @@ def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int
         lg.warning(f"Profile file {p_path} not found; using uniform launch power.")
         return None
     try:
+        lg.info(f"Loading profile data from {p_path}")
         payload = np.load(p_path, allow_pickle=True)
         if isinstance(payload, np.lib.npyio.NpzFile):
             data = payload
@@ -186,7 +141,7 @@ def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int
         return None
 
     span = float(z_grid[-1] - z_grid[0])
-    launch_override = np.trapz(sig_power, z_grid, axis=0) / span
+    launch_override = np.trapezoid(sig_power, z_grid, axis=0) / span
     if launch_override.size != expected_channels:
         lg.warning(f"Profile channels ({launch_override.size}) != expected ({expected_channels}); ignoring override.")
         return None
@@ -198,7 +153,7 @@ def plot_case_study_noise(
         use_dBm_scale=False,
         also_plot_noninteracting=True,
         name="xxx",
-        profile_path: Path | str = Path("results/dummy_power_profiles.npy"),
+        profile_path: Path | str = Path("results/uwb_power_profiles.npy"),
         use_profile: bool = True):
     """Plot NLIN per channel for MMF (and optionally SMF) case studies."""
     formatter = ScalarFormatter()
@@ -209,37 +164,31 @@ def plot_case_study_noise(
     grid = False
 
     cfg_path = Path("./input/uwb_struct.toml")
-    cf = System.from_toml(cfg_path)
-    print(
-        f"Loading a WDM grid \n [spacing: {cf.channel_spacing * 1e-9:.3e}GHz, center: {cf.center_frequency * 1e-12:.3e}THz] \n")
-    freqs = cf.wdm.frequency_grid()
+    syst = System.from_toml(cfg_path)
+    freqs = syst.wdm.frequency_grid()
 
-    launch_override = _load_profile_launch_powers(profile_path, cf.n_channels) if use_profile else None
+    launch_override = _load_profile_launch_powers(profile_path, syst.n_channels) if use_profile else None
 
-    ccfs = collision_coeffs_system_uwb(cf,
+    ccfs = collision_coeffs_system_uwb(syst,
                                        ipulse=1,
-                                       recompute=False)
-    lg.debug(
-        f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0, 0, :, :5]}")
-    ccfs = collision_coeffs_system_uwb(cf,
-                                       ipulse=1,
-                                       recompute=False)
-    nlin_mmf = total_nlin_uwb(cf,
+                                       recompute=False,
+                                       profile_path=profile_path)
+    nlin_uwb = total_nlin_uwb(syst,
                               ccfs,
                               use_kappa=True,
                               use_x_mode=True,
                               launch_powers_w=launch_override,
                               )
-    nlin_mmf_noninteracting = total_nlin_uwb(cf,
+    nlin_uwb_noninteracting = total_nlin_uwb(syst,
                                              ccfs,
                                              use_kappa=True,
                                              use_x_mode=False,
                                              launch_powers_w=launch_override,
                                              )
     lg.debug(
-        f"A few NLIN coeffs MMF (should be of order ... W): {nlin_mmf[0, :5]} W, {watt2dBm(nlin_mmf[0, :5])} dBm")
+        f"A few NLIN coeffs MMF (should be of order ... W): {nlin_uwb[0, :5]} W, {watt2dBm(nlin_uwb[0, :5])} dBm")
     lg.debug(
-        f"A few NLIN coeffs MMF noninteracting (should be larger): {nlin_mmf_noninteracting[0, :5]} W, {watt2dBm(nlin_mmf_noninteracting[0, :5])} dBm")
+        f"A few NLIN coeffs MMF noninteracting (should be larger): {nlin_uwb_noninteracting[0, :5]} W, {watt2dBm(nlin_uwb_noninteracting[0, :5])} dBm")
     colors = ["blue", "orange", "green", "red", "gray"]
     linestyles = ["-", "-", "-", "-", "--"]
     labels = ["LP01", "LP1", "LP11", "LP11", "SMF(LP01)"]
@@ -247,25 +196,25 @@ def plot_case_study_noise(
     if use_dBm_scale:
         ylabel = r'$P_\mathrm{NLIN} \; [\mathrm{dBm}]$'
         plot_function = plt.plot
-        def y_function_mmf(x): return watt2dBm(x)
+        def y_function_uwb(x): return watt2dBm(x)
     else:
         ylabel = r'$\sum\limits_{B\neq A}\mathcal{N}_{AB} \quad [\mathrm{km}^2/\mathrm{ps}^{2}]$'
         plot_function = plt.semilogy
-        def y_function_mmf(x): return x * 1e-30
+        def y_function_uwb(x): return x * 1e-30
 
     plt.clf()
     lw = 1.4
     plt.figure(figsize=(3.6, 3.2))
-    for i in range(cf.n_modes):
+    for i in range(syst.n_modes):
         plot_function(freqs * 1e-12,
-                      y_function_mmf(nlin_mmf[i, :]),
+                      y_function_uwb(nlin_uwb[i, :]),
                       lw=lw,
                       color=colors[i],
                       ls=linestyles[i],
                       label=labels[i])
         if also_plot_noninteracting:
             plot_function(freqs * 1e-12,
-                          y_function_mmf(nlin_mmf_noninteracting[i, :]),
+                          y_function_uwb(nlin_uwb_noninteracting[i, :]),
                           lw=lw,
                           color=colors[i],
                           ls='-.')
@@ -282,8 +231,7 @@ def plot_case_study_noise(
     functions = [np.mean, np.median, np.max, np.min]
     function_names = ["mean  ", "median", "max   ", "min   "]
     for foo, name in zip(functions, function_names):
-        avg_nlin_mmf = foo(nlin_mmf)
-        avg_nlin_smf = foo(nlin_smf)
+        avg_nlin_mmf = foo(nlin_uwb)
         print(
             name + f" NLIN coeff per channel: MMF -> {avg_nlin_mmf:4.3e} | SMF -> {avg_nlin_smf:4.3e}")
         # apply QAM 16 and -10 dBm input power
@@ -298,7 +246,8 @@ def plot_case_study_noise_histogram(
         name="",
         n_bins=25,
         dBm_range=(-53, -40),
-        coeff_range=None):
+        coeff_range=None,
+        profile_path: Path | str | None = None):
     """Visualize NLIN distributions across channels with optional cross-mode variants."""
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
@@ -316,25 +265,30 @@ def plot_case_study_noise_histogram(
     freqs = cf.wdm.frequency_grid()
 
     # --- Compute collisions & NLIN exactly like the first function ---
-    ccfs_mmf = collision_coeffs_system_uwb(cf, ipulse=1, recompute=False)
+    ccfs_uwb = collision_coeffs_system_uwb(
+        cf,
+        ipulse=1,
+        recompute=False,
+        profile_path=profile_path,
+    )
 
     # Interacting (with cross-mode terms)
-    nlin_mmf = total_nlin_uwb(
-        cf, ccfs_mmf,
+    nlin_uwb = total_nlin_uwb(
+        cf, ccfs_uwb,
         use_kappa=True,
         use_x_mode=True,
     )
     # Non-interacting (no cross-mode terms)
-    nlin_mmf_non = total_nlin_uwb(
-        cf, ccfs_mmf,
+    nlin_uwb_non = total_nlin_uwb(
+        cf, ccfs_uwb,
         use_kappa=True,
         use_x_mode=False,
     )
 
     lg.debug(
-        f"A few NLIN coeffs MMF: {nlin_mmf[0, :5]} W, {watt2dBm(nlin_mmf[0, :5])} dBm")
+        f"A few NLIN coeffs MMF: {nlin_uwb[0, :5]} W, {watt2dBm(nlin_uwb[0, :5])} dBm")
     lg.debug(
-        f"A few NLIN coeffs MMF noninteracting: {nlin_mmf_non[0, :5]} W, {watt2dBm(nlin_mmf_non[0, :5])} dBm")
+        f"A few NLIN coeffs MMF noninteracting: {nlin_uwb_non[0, :5]} W, {watt2dBm(nlin_uwb_non[0, :5])} dBm")
 
     # --- Plot styling aligned with the first function ---
     colors = ["blue", "orange", "green", "red", "gray"]
@@ -352,8 +306,8 @@ def plot_case_study_noise_histogram(
         def y_transform(x): return x * 1e-30
         # Determine coefficient range if not provided
         all_coeff = np.concatenate([
-            y_transform(nlin_mmf).ravel(),
-            y_transform(nlin_mmf_non).ravel(),
+            y_transform(nlin_uwb).ravel(),
+            y_transform(nlin_uwb_non).ravel(),
         ])
         if coeff_range is None:
             x_min, x_max = float(np.min(all_coeff)), float(np.max(all_coeff))
@@ -373,7 +327,7 @@ def plot_case_study_noise_histogram(
     lw = 2.5
 
     # Interacting MMF per-mode
-    data_int = y_transform(nlin_mmf)  # shape: [n_modes, n_channels]
+    data_int = y_transform(nlin_uwb)  # shape: [n_modes, n_channels]
     for i in range(cf.n_modes):
         plt.hist(
             data_int[i, :], bins=bins,
@@ -389,7 +343,7 @@ def plot_case_study_noise_histogram(
 
     # Optional: overlay non-interacting MMF
     if also_plot_noninteracting:
-        data_non = y_transform(nlin_mmf_non)
+        data_non = y_transform(nlin_uwb_non)
         for i in range(cf.n_modes):
             plt.hist(
                 data_non[i, :], bins=bins,
@@ -413,21 +367,24 @@ if __name__ == "__main__":
     # First, compute and save Raman/ISRS power profiles using provided pumps
     cfg_path = Path("./input/uwb_struct.toml")
     system = System.from_toml(cfg_path)
+    print(system.summary())
+    # exit()
     try:
         system.report_max_l_normalizations()
     except Exception as exc:
         lg.warning(f"Could not report L/LD or L/LW: {exc}")
+    # compute_raman_profiles(system, save_path="results/uwb_power_profiles.npy") # FIXME this is not saving a menaingful file
+    plot_power_profiles(system, "results/uwb_power_profiles.npy")
+    profile_path = Path("results/uwb_power_profiles.npy")
     # exit()
-    compute_raman_profiles(system, save_path="results/uwb_profiles.npz")
-    profile_path = Path("results/dummy_power_profiles.npy")
-
     plot_case_study_noise(
         use_dBm_scale=True,
         also_plot_noninteracting=True,
-        name="uwb_uwb_struct",
+        name="uwb_struct",
         profile_path=profile_path,
         use_profile=True)
     plot_case_study_noise_histogram(use_dBm_scale=True,
                                     also_plot_noninteracting=True,
-                                    name="uwb_uwb_struct")
+                                    name="uwb_struct",
+                                    profile_path=profile_path)
     exit()
