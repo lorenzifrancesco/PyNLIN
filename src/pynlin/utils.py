@@ -308,6 +308,8 @@ def get_next_filename(
 class PulseShape(Enum):
     GAU = 0
     NYQ = 1
+    RAISED_COSINE = 2
+    ROOT_RAISED_COSINE = 3
     def __str__(self):
         return self.name.lower()   # "gaussian" or "nyquist"
 
@@ -326,5 +328,9 @@ class PulseShape(Enum):
             return "-"
         elif self == PulseShape.NYQ:
             return "--"
+        elif self == PulseShape.RAISED_COSINE:
+            return "-."
+        elif self == PulseShape.ROOT_RAISED_COSINE:
+            return ":"
         else:
             raise ValueError(f"Unknown pulse shape: {self}")
