@@ -62,6 +62,7 @@ class PulseType(Enum):
     GAUSSIAN = "gaussian"
     NYQUIST = "nyquist"
     RAISED_COSINE = "raised_cosine"
+    ROOT_RAISED_COSINE = "root_raised_cosine"
 
     @classmethod
     def from_value(cls, value) -> "PulseType":
@@ -87,11 +88,14 @@ class PulseType(Enum):
 PULSE_SHAPE_TO_TYPE = {
     PulseShape.GAU: PulseType.GAUSSIAN,
     PulseShape.NYQ: PulseType.NYQUIST,
+    PulseShape.RAISED_COSINE: PulseType.RAISED_COSINE,
+    PulseShape.ROOT_RAISED_COSINE: PulseType.ROOT_RAISED_COSINE,
 }
 PULSE_INT_TO_TYPE = {
     0: PulseType.GAUSSIAN,
     1: PulseType.NYQUIST,
     2: PulseType.RAISED_COSINE,
+    3: PulseType.ROOT_RAISED_COSINE,
 }
 
 # from pynlin.fiber import Fiber
@@ -162,6 +166,54 @@ class RaisedCosinePulse(Pulse):
         self.t = t
         self.g = gt
 
+class RootRaisedCosinePulse(Pulse):
+    def __init__(
+        self,
+        baud_rate: float = 10e9,
+        num_symbols: float = 1e3,
+        samples_per_symbol: float = 2**5,
+        rolloff: float = 0.1,
+    ):
+        super().__init__(baud_rate, num_symbols, samples_per_symbol)
+        self.rolloff = rolloff
+        self._generate()
+
+    def data(self) -> Tuple[np.ndarray, np.ndarray]:
+        return self.g, self.t
+
+    def _generate(self):
+        dt = self.T0 / self.samples_per_symbol
+        Ndt = self.samples_per_symbol * self.num_symbols
+        t = np.arange(-Ndt / 2, Ndt / 2) * dt
+
+        if self.rolloff <= 0:
+            gt = np.sinc(t / self.T0) / np.sqrt(self.T0)
+        else:
+            df = 1 / (max(t) - min(t))
+            f = np.arange(-Ndt / 2, Ndt / 2) * df
+
+            R = self.rolloff
+            rate = 1 / self.T0
+            freq = f
+            wind1 = np.zeros_like(f)
+            wind1[np.abs(freq) <= rate * (1 + R) / 2] = 1
+            wind2 = np.zeros_like(f)
+            wind2[np.abs(freq) >= rate * (1 - R) / 2] = 1
+            wind = wind1 * wind2
+            gf = (1 - wind) + wind * 0.5 * (
+                1 + np.cos(np.pi / R / rate * (np.abs(freq) - rate * (1 - R) / 2))
+            )
+            gf[np.abs(freq) > rate * (1 + R) / 2] = 0
+            gf = np.sqrt(gf)
+
+            gt = np.real(np.fft.ifftshift(np.fft.ifft(np.fft.fftshift(gf))))
+
+        energy = scipy.integrate.trapezoid(np.abs(gt) ** 2, t)
+        gt = gt / np.sqrt(energy)
+
+        self.t = t
+        self.g = gt
+
 class NyquistPulse(Pulse):
     def __init__(
         self,
@@ -225,6 +277,7 @@ PULSE_TYPE_TO_CLASS = {
     PulseType.GAUSSIAN: GaussianPulse,
     PulseType.NYQUIST: NyquistPulse,
     PulseType.RAISED_COSINE: RaisedCosinePulse,
+    PulseType.ROOT_RAISED_COSINE: RootRaisedCosinePulse,
 }
 
 
@@ -244,7 +297,7 @@ def pulse_from_config(cfg: PulseConfig, **overrides) -> Pulse:
         if val is not None:
             kwargs[key] = val
 
-    if ptype == PulseType.RAISED_COSINE and "rolloff" not in kwargs:
+    if ptype in (PulseType.RAISED_COSINE, PulseType.ROOT_RAISED_COSINE) and "rolloff" not in kwargs:
         kwargs["rolloff"] = cfg.rolloff if cfg.rolloff is not None else 0.1
 
     return pulse_cls(**kwargs)
