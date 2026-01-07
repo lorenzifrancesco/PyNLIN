@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from loguru import logger
+import contextlib
 
 
 def init_logging():
@@ -22,3 +23,12 @@ def init_logging():
     logger.add(log_file_deep, level="TRACE", colorize=False)
 
     logger.debug(f"Logger initialized for script: {script_name}")
+
+    # Apply user matplotlib style globally if present
+    style_path = Path.home() / ".config" / "matplotlib" / "matplotlibrc"
+    if style_path.exists():
+        with contextlib.suppress(Exception):
+            import matplotlib
+
+            matplotlib.rc_file(style_path)
+            logger.debug(f"Loaded matplotlib rc from {style_path}")
