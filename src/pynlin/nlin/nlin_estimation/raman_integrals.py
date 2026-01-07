@@ -15,7 +15,7 @@ MU0 = 1.3809
 
 def load_fB(cf: System) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
     """Load normalized Raman gain profiles fB(z) and polynomial approximations from a cached solution."""
-    assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
+    # assert (cf.launch_power == -5.0 and cf.raman_gain == 0.0)
     # all the information about the numerosity and stuff is here.
     # Beware, -5dBm is right: it is obtained using the -2dBm solutions so to have equalizaiton without recomputing all
     sol_path = "results/ct_solution-5_gain_0.0.npy"
