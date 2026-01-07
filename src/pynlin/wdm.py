@@ -150,6 +150,19 @@ class BaseWDM:
     def frequency_grid(self) -> np.ndarray:
         raise NotImplementedError
 
+    def decimate(self, factor: int, rescale_power: bool = False) -> "BaseWDM":
+        """Return a sparsified WDM keeping every `factor`-th channel.
+
+        Parameters
+        ----------
+        factor: int
+            Keep one channel out of every `factor` (factor >= 1). factor=1 returns self.
+        rescale_power: bool, optional
+            If True and band launch powers are available (IrregularWDM), per-channel
+            launch_power_dbm is increased to conserve total band power after decimation.
+        """
+        raise NotImplementedError
+
     def wavelength_grid(self) -> np.ndarray:
         """Generate the wavelength grid in meters."""
         return nu2lambda(self.frequency_grid())
@@ -209,6 +222,32 @@ class RegularWDM(BaseWDM):
         else:
             freqs = np.arange(-num_channels / 2, num_channels / 2)
         return freqs * self.spacing + self.central_frequency
+
+    def decimate(self, factor: int, rescale_power: bool = False) -> "RegularWDM":
+        if factor < 1:
+            raise ValueError("decimate factor must be >= 1")
+        if factor == 1:
+            return self
+        idx = np.arange(0, self.num_channels, factor, dtype=int)
+        if idx.size < 1:
+            raise ValueError("decimation removed all channels")
+        freqs = self.frequency_grid()[idx]
+        if freqs.size > 1:
+            diffs = np.diff(freqs)
+            if not np.allclose(diffs, diffs[0]):
+                raise ValueError("decimated grid is not uniform; cannot keep RegularWDM")
+            new_spacing = float(np.abs(diffs[0]))
+        else:
+            new_spacing = self.spacing * factor
+        center_freq = float(freqs[len(freqs) // 2])
+        new_wdm = RegularWDM(
+            spacing=new_spacing,
+            num_channels=int(idx.size),
+            center_frequency=center_freq,
+        )
+        # Attach a power scaling hint so callers can optionally conserve total power.
+        new_wdm.power_scale = (self.num_channels / idx.size) if rescale_power else 1.0
+        return new_wdm
 
     def summary(self) -> str:
         return "\n".join([
@@ -295,6 +334,52 @@ class IrregularWDM(BaseWDM):
 
     def frequency_grid(self) -> np.ndarray:
         return self._frequency_grid
+
+    def decimate(self, factor: int, rescale_power: bool = False) -> "IrregularWDM":
+        if factor < 1:
+            raise ValueError("decimate factor must be >= 1")
+        if factor == 1:
+            return self
+
+        new_band_specs: Dict[str, WDMBandConfig] = {}
+        new_band_slices: Dict[str, slice] = {}
+        new_grids = []
+        current = 0
+
+        for name, slc in self._band_slices.items():
+            spec = self.band_specs[name]
+            band_freqs = self._frequency_grid[slc]
+            idx = np.arange(0, band_freqs.size, factor, dtype=int)
+            if idx.size < 1:
+                raise ValueError(f"decimation removed all channels from band '{name}'")
+            decimated = band_freqs[idx]
+            power_dbm = spec.launch_power_dbm
+            if rescale_power and power_dbm is not None:
+                scale = band_freqs.size / idx.size
+                power_dbm = float(power_dbm + 10 * np.log10(scale))
+            new_band_specs[name] = WDMBandConfig(
+                n_channels=int(idx.size),
+                launch_power_dbm=power_dbm,
+                start_nm=spec.start_nm,
+                modulation=spec.modulation,
+            )
+            new_band_slices[name] = slice(current, current + idx.size)
+            current += idx.size
+            new_grids.append(decimated)
+
+        full_grid = np.concatenate(new_grids) if new_grids else np.array([])
+        if full_grid.size == 0:
+            raise ValueError("decimation produced an empty WDM grid")
+
+        new_spacing = self.spacing * factor
+        new_wdm = IrregularWDM(
+            spacing=new_spacing,
+            band_specs=new_band_specs,
+            band_slices=new_band_slices,
+            full_grid=full_grid,
+        )
+        new_wdm.power_scale = (self.num_channels / full_grid.size) if rescale_power else 1.0
+        return new_wdm
 
     def summary(self) -> str:
         lines = [
