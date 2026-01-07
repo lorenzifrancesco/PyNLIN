@@ -6,8 +6,12 @@ from pathlib import Path
 
 import pynlin.wdm
 from pynlin.log_init import init_logging
-from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin
-from pynlin.raman.solvers import MMFRamanAmplifier, SMWidebandRamanAmplifier
+from pynlin.nlin.nlin_estimator_uwb import (
+    collision_coeffs_system_uwb,
+    total_nlin_uwb,
+)
+from pynlin.raman.solvers import MMFRamanAmplifier
+from pynlin.raman.solvers_jiang import SMFWidebandAmplifier, JiangIterativeConfig
 from pynlin.system import System
 from pynlin.utils import dBm2watt, nu2lambda, watt2dBm
 init_logging()
@@ -31,8 +35,14 @@ def plot_case_study_fits():
 
 def compute_raman_profiles(system: System,
                            save_path: str = "results/uwb_profiles.npz",
-                           integration_steps: int = 300):
-    """Compute Raman/ISRS power evolution using the NumPy amplifier and persist results."""
+                           integration_steps: int = 300,
+                           recompute: bool = False):
+    """Compute Raman/ISRS power evolution using the Jiang solver and persist results."""
+    save_path = Path(save_path)
+    if save_path.exists() and not recompute:
+        lg.info(f"Raman profiles already exist at {save_path}; skipping recompute.")
+        return
+
     wdm = system.wdm
     fiber = system.fiber
     pumps = system.pump_specs or []
@@ -69,17 +79,23 @@ def compute_raman_profiles(system: System,
     z = np.linspace(0, fiber.length, integration_steps)
 
     if n_modes == 1:
-        # Single-mode Raman amplifier with per-band launch powers
-        amp = SMWidebandRamanAmplifier(fiber)
-        pump_solution, signal_solution, _ = amp.solve_from_system(
+        # Single-mode Raman amplifier solved with Jiang-style homotopy
+        amp = SMFWidebandAmplifier(fiber)
+        jiang_cfg = JiangIterativeConfig(
+            iterative_steps=80,
+            pump_scale_start=1e-6,
+            inner_iters=None,
+            early_stop_rtol=1e-4,
+            pump_power_floor=1e-12,
+        )
+        pump_solution, signal_solution, _ = amp.solve_with_jiang(
             system,
             z=z,
-            solver="ivp",
-            odeint_kwargs={"rtol": 1e-2, "atol": 1e-4, "mxstep": 500},
-            ase=False,
+            cfg=jiang_cfg,
+            disable_pumps=False,
         )
-        pump_solution = pump_solution[:, :, None] if num_pumps else np.zeros((len(z), 0, 1))
-        signal_solution = signal_solution[:, :, None]
+        pump_solution = pump_solution[:, :, None] if pump_solution.ndim == 2 else pump_solution
+        signal_solution = signal_solution[:, :, None] if signal_solution.ndim == 2 else signal_solution
     else:
         if num_pumps:
             amp = MMFRamanAmplifier()
@@ -138,10 +154,52 @@ def compute_raman_profiles(system: System,
     return z, wavelengths, signal_solution, pump_solution
 
 
+def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int) -> np.ndarray | None:
+    """Load per-channel launch powers (W) from a saved Raman profile file."""
+    p_path = Path(profile_path)
+    if not p_path.exists():
+        lg.warning(f"Profile file {p_path} not found; using uniform launch power.")
+        return None
+    try:
+        payload = np.load(p_path, allow_pickle=True)
+        if isinstance(payload, np.lib.npyio.NpzFile):
+            data = payload
+        else:
+            data = payload.item()
+    except Exception as exc:
+        lg.warning(f"Failed loading profile {p_path}: {exc}")
+        return None
+
+    sig_sol = data.get("signal_sol")
+    z_grid = data.get("z")
+    if sig_sol is None or z_grid is None:
+        lg.warning("Profile file missing signal_sol or z; using uniform launch power.")
+        return None
+
+    sig_power = np.array(sig_sol, dtype=float)
+    if sig_power.ndim == 3 and sig_power.shape[-1] == 1:
+        sig_power = sig_power[..., 0]
+    if sig_power.ndim == 3:
+        sig_power = np.sum(sig_power, axis=-1)
+    if sig_power.ndim != 2 or sig_power.shape[0] != z_grid.size:
+        lg.warning(f"Unexpected signal_sol shape {sig_power.shape}; using uniform launch power.")
+        return None
+
+    span = float(z_grid[-1] - z_grid[0])
+    launch_override = np.trapz(sig_power, z_grid, axis=0) / span
+    if launch_override.size != expected_channels:
+        lg.warning(f"Profile channels ({launch_override.size}) != expected ({expected_channels}); ignoring override.")
+        return None
+    lg.info("Using per-channel launch powers from Raman profile for NLIN.")
+    return launch_override
+
+
 def plot_case_study_noise(
         use_dBm_scale=False,
         also_plot_noninteracting=True,
-        name="xxx"):
+        name="xxx",
+        profile_path: Path | str = Path("results/dummy_power_profiles.npy"),
+        use_profile: bool = True):
     """Plot NLIN per channel for MMF (and optionally SMF) case studies."""
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
@@ -156,21 +214,28 @@ def plot_case_study_noise(
         f"Loading a WDM grid \n [spacing: {cf.channel_spacing * 1e-9:.3e}GHz, center: {cf.center_frequency * 1e-12:.3e}THz] \n")
     freqs = cf.wdm.frequency_grid()
 
-    ccfs = collision_coeffs_system(cf,
-                                   ipulse=1,
-                                   recompute=False)
+    launch_override = _load_profile_launch_powers(profile_path, cf.n_channels) if use_profile else None
+
+    ccfs = collision_coeffs_system_uwb(cf,
+                                       ipulse=1,
+                                       recompute=False)
     lg.debug(
         f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0, 0, :, :5]}")
-    nlin_mmf = total_nlin(cf,
-                          ccfs,
-                          use_kappa=True,
-                          use_x_mode=True,
-                          )
-    nlin_mmf_noninteracting = total_nlin(cf,
-                                         ccfs,
-                                         use_kappa=True,
-                                         use_x_mode=False,
-                                         )
+    ccfs = collision_coeffs_system_uwb(cf,
+                                       ipulse=1,
+                                       recompute=False)
+    nlin_mmf = total_nlin_uwb(cf,
+                              ccfs,
+                              use_kappa=True,
+                              use_x_mode=True,
+                              launch_powers_w=launch_override,
+                              )
+    nlin_mmf_noninteracting = total_nlin_uwb(cf,
+                                             ccfs,
+                                             use_kappa=True,
+                                             use_x_mode=False,
+                                             launch_powers_w=launch_override,
+                                             )
     lg.debug(
         f"A few NLIN coeffs MMF (should be of order ... W): {nlin_mmf[0, :5]} W, {watt2dBm(nlin_mmf[0, :5])} dBm")
     lg.debug(
@@ -251,16 +316,16 @@ def plot_case_study_noise_histogram(
     freqs = cf.wdm.frequency_grid()
 
     # --- Compute collisions & NLIN exactly like the first function ---
-    ccfs_mmf = collision_coeffs_system(cf, ipulse=1, recompute=False)
+    ccfs_mmf = collision_coeffs_system_uwb(cf, ipulse=1, recompute=False)
 
     # Interacting (with cross-mode terms)
-    nlin_mmf = total_nlin(
+    nlin_mmf = total_nlin_uwb(
         cf, ccfs_mmf,
         use_kappa=True,
         use_x_mode=True,
     )
     # Non-interacting (no cross-mode terms)
-    nlin_mmf_non = total_nlin(
+    nlin_mmf_non = total_nlin_uwb(
         cf, ccfs_mmf,
         use_kappa=True,
         use_x_mode=False,
@@ -270,8 +335,6 @@ def plot_case_study_noise_histogram(
         f"A few NLIN coeffs MMF: {nlin_mmf[0, :5]} W, {watt2dBm(nlin_mmf[0, :5])} dBm")
     lg.debug(
         f"A few NLIN coeffs MMF noninteracting: {nlin_mmf_non[0, :5]} W, {watt2dBm(nlin_mmf_non[0, :5])} dBm")
-    lg.debug(
-        f"A few NLIN coeffs SMF: {nlin_smf[0, :5]} W, {watt2dBm(nlin_smf[0, :5])} dBm")
 
     # --- Plot styling aligned with the first function ---
     colors = ["blue", "orange", "green", "red", "gray"]
@@ -350,12 +413,20 @@ if __name__ == "__main__":
     # First, compute and save Raman/ISRS power profiles using provided pumps
     cfg_path = Path("./input/uwb_struct.toml")
     system = System.from_toml(cfg_path)
+    try:
+        system.report_max_l_normalizations()
+    except Exception as exc:
+        lg.warning(f"Could not report L/LD or L/LW: {exc}")
+    # exit()
     compute_raman_profiles(system, save_path="results/uwb_profiles.npz")
+    profile_path = Path("results/dummy_power_profiles.npy")
 
     plot_case_study_noise(
         use_dBm_scale=True,
         also_plot_noninteracting=True,
-        name="uwb_uwb_struct")
+        name="uwb_uwb_struct",
+        profile_path=profile_path,
+        use_profile=True)
     plot_case_study_noise_histogram(use_dBm_scale=True,
                                     also_plot_noninteracting=True,
                                     name="uwb_uwb_struct")
