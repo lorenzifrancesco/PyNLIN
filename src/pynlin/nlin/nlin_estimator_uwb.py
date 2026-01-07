@@ -5,6 +5,7 @@ per-channel launch power overrides, while keeping the original code unchanged.
 
 import itertools as it
 import os
+from pathlib import Path
 from typing import Tuple, Optional
 
 import numpy as np
@@ -20,8 +21,12 @@ from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import build_I_low_interpolator
 from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus, LLW_MIN, LLW_MAX
-from pynlin.nlin.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
-from pynlin.nlin.nlin_estimation.raman_integrals import load_fB, load_raman_integral_extremes, raman_integral # untouched 
+from pynlin.nlin.nlin_estimation.lo_correction_uwb import build_lookup_integral_table_with_raman
+from pynlin.nlin.nlin_estimation.raman_integrals_uwb import (
+    load_fB,
+    load_raman_integral_extremes,
+    raman_integral,
+)
 from pynlin.utils import dBm2watt, watt2dBm
 
 init_logging()
@@ -182,7 +187,10 @@ def fit_nlin(system: System,
     L = _get_fiber_length(system)
     lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
     lo_value_min = raman_gvd_correction_min(L/lda, L/ldb)
-    r_lo_min, r_lo_max, _, _ = load_raman_integral_extremes(system)
+    extremes = _G.get("raman_extremes")
+    if extremes is None:
+        extremes = load_raman_integral_extremes(system)
+    r_lo_min, r_lo_max, _, _ = extremes
 
     raman_integral_fB_lo = raman_integral(system, "LO", fB)
     raman_integral_fB_hi = raman_integral(system, "HI", fB)
@@ -279,10 +287,16 @@ def _beta_grids_from_system(system: System, freqs: np.ndarray) -> tuple[np.ndarr
 
 def collision_coeffs_system_uwb(system: System,
                                 ipulse: int = 1,
-                                recompute: bool = False) -> np.ndarray:
+                                recompute: bool = False,
+                                reserve_cpus: int = 3,
+                                profile_path: Path | str | None = None) -> np.ndarray:
     """Compute or load channel-pair collision coefficients (SMF or MMF)."""
     fiber_type = "smf" if system.n_modes == 1 else "mmf"
-    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}.npy"
+    profile_tag = Path(profile_path).stem if profile_path is not None else None
+    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
+    if profile_tag:
+        filename = f"{filename}_{profile_tag}"
+    filename = f"{filename}.npy"
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
@@ -295,8 +309,9 @@ def collision_coeffs_system_uwb(system: System,
 
     d_min = nc.dgd1
     d_max = nc.dgd2_g
-    raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(system, ipulse=ipulse)
-    fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(system)
+    raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
+        system, ipulse=ipulse, profile_path=profile_path)
+    fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(system, profile_path=profile_path)
 
     beta1_path = "/tmp/beta1_grid.npy"
     beta2_path = "/tmp/beta2_grid.npy"
@@ -307,10 +322,10 @@ def collision_coeffs_system_uwb(system: System,
 
     from concurrent.futures import ProcessPoolExecutor, as_completed
     A_tasks = list(it.product(range(system.n_modes), range(len(freqs))))
-    n_workers = os.cpu_count() or 1
+    n_workers = max((os.cpu_count() or 1) - reserve_cpus, 1)
 
     def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
-                     system, ipulse, raman_min, raman_max, n_workers):
+                     system, ipulse, raman_min, raman_max, n_workers, raman_extremes):
         import os
         import numpy as np
         os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -327,7 +342,9 @@ def collision_coeffs_system_uwb(system: System,
         _G["raman_min"] = raman_min
         _G["raman_max"] = raman_max
         _G["n_workers"] = n_workers
+        _G["raman_extremes"] = raman_extremes
 
+    raman_extremes = load_raman_integral_extremes(system, profile_path=profile_path)
     collision_coeffs = np.zeros((system.n_modes, len(freqs), system.n_modes, len(freqs)))
     with ProcessPoolExecutor(
         max_workers=n_workers,
@@ -335,7 +352,7 @@ def collision_coeffs_system_uwb(system: System,
         initargs=(beta1_path, beta2_path, fB_path,
                   system.n_modes, len(freqs),
                   system, ipulse, raman_gvd_correction_min, raman_gvd_correction_max,
-                  n_workers),
+                  n_workers, raman_extremes),
     ) as ex:
         futures = [ex.submit(_work_A, a) for a in A_tasks]
         for fut in as_completed(futures):
@@ -354,6 +371,7 @@ _G = {
     "cf": None, "ipulse": None,
     "raman_min": None, "raman_max": None,
     "n_workers": None,
+    "raman_extremes": None,
 }
 
 
@@ -434,19 +452,29 @@ __all__ = [
 
 def collision_coeffs_from_system(system,
                                  ipulse: int = 1,
-                                 recompute: bool = False) -> np.ndarray:
+                                 recompute: bool = False,
+                                 reserve_cpus: int = 15,
+                                 profile_path: Path | str | None = None) -> np.ndarray:
     """Modern helper that accepts a System and delegates to collision_coeffs_system_uwb."""
-    return collision_coeffs_system_uwb(system, ipulse=ipulse, recompute=recompute)
+    return collision_coeffs_system_uwb(
+        system,
+        ipulse=ipulse,
+        recompute=recompute,
+        reserve_cpus=reserve_cpus,
+        profile_path=profile_path,
+    )
 
 
 def total_nlin_from_system(system,
                            collision_coeffs: Optional[np.ndarray] = None,
                            use_kappa: bool = False,
                            use_x_mode: bool = False,
-                           launch_powers_w: Optional[np.ndarray] = None) -> np.ndarray:
+                           launch_powers_w: Optional[np.ndarray] = None,
+                           reserve_cpus: int = 3,
+                           profile_path: Path | str | None = None) -> np.ndarray:
     """Modern helper that accepts a System and computes NLIN end-to-end."""
     ccfs = collision_coeffs if collision_coeffs is not None else collision_coeffs_system_uwb(
-        system, ipulse=1, recompute=False)
+        system, ipulse=1, recompute=False, reserve_cpus=reserve_cpus, profile_path=profile_path)
     return total_nlin_uwb(
         system,
         ccfs,
