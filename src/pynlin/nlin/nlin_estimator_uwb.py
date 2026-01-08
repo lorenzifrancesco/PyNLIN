@@ -211,8 +211,29 @@ def total_nlin_uwb(system: System,
                    collision_coeffs: np.ndarray,
                    use_kappa: bool = False,
                    use_x_mode: bool = False,
-                   launch_powers_w: Optional[np.ndarray] = None) -> np.ndarray:
-    """Convert collision coefficients to NLIN PSD per channel with per-channel launch override."""
+                   launch_powers_w: Optional[np.ndarray] = None,
+                   cache_path: Path | str | None = None,
+                   recompute: bool = False) -> np.ndarray:
+    """Convert collision coefficients to NLIN PSD per channel with optional caching."""
+    cache_target = Path(cache_path) if cache_path is not None else None
+    if cache_target is not None and cache_target.exists() and not recompute:
+        lg.info(f"Loading cached total NLIN from {cache_target}")
+        cached = np.load(cache_target, allow_pickle=True)
+        if isinstance(cached, np.lib.npyio.NpzFile):
+            data = cached.get("nlin")
+            if data is not None:
+                cached = data
+            else:
+                cached = None
+            cached.close()
+        if cached is not None:
+            expected_shape = (collision_coeffs.shape[0], collision_coeffs.shape[1])
+            if getattr(cached, "shape", None) != expected_shape:
+                lg.warning(
+                    f"Cached NLIN shape {getattr(cached, 'shape', None)} != expected {expected_shape}; recomputing."
+                )
+            else:
+                return cached
     L = _get_fiber_length(system)
     br = _get_baud_rate(system)
     x_norm = L * br
@@ -252,6 +273,10 @@ def total_nlin_uwb(system: System,
                     prefactor = nlin_prefactor(system, mA, mB)
                     total_nlin[mA, nuA] += collision_coeffs_si[mA, nuA, mB, nuB] * kappa2[mA, mB] * prefactor
     total_nlin *= constant_prefactor
+    if cache_target is not None:
+        cache_target.parent.mkdir(parents=True, exist_ok=True)
+        np.save(cache_target, total_nlin)
+        lg.info(f"Saved total NLIN cache to {cache_target}")
     return total_nlin
 
 
@@ -344,6 +369,8 @@ def collision_coeffs_system_uwb(system: System,
         _G["n_workers"] = n_workers
         _G["raman_extremes"] = raman_extremes
 
+    # FIXME taking only the first 100 frequs for benchmarking
+    # freqs = freqs[:100]
     raman_extremes = load_raman_integral_extremes(system, profile_path=profile_path)
     collision_coeffs = np.zeros((system.n_modes, len(freqs), system.n_modes, len(freqs)))
     with ProcessPoolExecutor(
@@ -453,7 +480,7 @@ __all__ = [
 def collision_coeffs_from_system(system,
                                  ipulse: int = 1,
                                  recompute: bool = False,
-                                 reserve_cpus: int = 15,
+                                 reserve_cpus: int = 18,
                                  profile_path: Path | str | None = None) -> np.ndarray:
     """Modern helper that accepts a System and delegates to collision_coeffs_system_uwb."""
     return collision_coeffs_system_uwb(
@@ -471,7 +498,9 @@ def total_nlin_from_system(system,
                            use_x_mode: bool = False,
                            launch_powers_w: Optional[np.ndarray] = None,
                            reserve_cpus: int = 3,
-                           profile_path: Path | str | None = None) -> np.ndarray:
+                           profile_path: Path | str | None = None,
+                           cache_path: Path | str | None = None,
+                           recompute: bool = False) -> np.ndarray:
     """Modern helper that accepts a System and computes NLIN end-to-end."""
     ccfs = collision_coeffs if collision_coeffs is not None else collision_coeffs_system_uwb(
         system, ipulse=1, recompute=False, reserve_cpus=reserve_cpus, profile_path=profile_path)
@@ -481,4 +510,6 @@ def total_nlin_from_system(system,
         use_kappa=use_kappa,
         use_x_mode=use_x_mode,
         launch_powers_w=launch_powers_w,
+        cache_path=cache_path,
+        recompute=recompute,
     )

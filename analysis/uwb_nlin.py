@@ -149,6 +149,14 @@ def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int
     return launch_override
 
 
+def _nlin_cache_path(profile_path: Path | str | None,
+                     use_kappa: bool,
+                     use_x_mode: bool) -> Path:
+    """Return a cache path for total NLIN arrays."""
+    tag = Path(profile_path).stem if profile_path is not None else "default"
+    return Path("results") / f"total_nlin_{tag}_k{int(use_kappa)}_x{int(use_x_mode)}.npy"
+
+
 def plot_case_study_noise(
         use_dBm_scale=False,
         also_plot_noninteracting=True,
@@ -169,22 +177,26 @@ def plot_case_study_noise(
 
     launch_override = _load_profile_launch_powers(profile_path, syst.n_channels) if use_profile else None
 
-    ccfs = collision_coeffs_system_uwb(syst,
+    ccfs = collision_coeffs_system_uwb(syst, # FIXME this is the thing sucking the most time
                                        ipulse=1,
-                                       recompute=False,
+                                       recompute=True,
                                        profile_path=profile_path)
-    nlin_uwb = total_nlin_uwb(syst,
-                              ccfs,
-                              use_kappa=True,
-                              use_x_mode=True,
-                              launch_powers_w=launch_override,
-                              )
-    nlin_uwb_noninteracting = total_nlin_uwb(syst,
-                                             ccfs,
-                                             use_kappa=True,
-                                             use_x_mode=False,
-                                             launch_powers_w=launch_override,
-                                             )
+    nlin_uwb = total_nlin_uwb(
+        syst,
+        ccfs,
+        use_kappa=True,
+        use_x_mode=True,
+        launch_powers_w=launch_override,
+        cache_path=_nlin_cache_path(profile_path, use_kappa=True, use_x_mode=True),
+    )
+    nlin_uwb_noninteracting = total_nlin_uwb(
+        syst,
+        ccfs,
+        use_kappa=True,
+        use_x_mode=False,
+        launch_powers_w=launch_override,
+        cache_path=_nlin_cache_path(profile_path, use_kappa=True, use_x_mode=False),
+    )
     lg.debug(
         f"A few NLIN coeffs MMF (should be of order ... W): {nlin_uwb[0, :5]} W, {watt2dBm(nlin_uwb[0, :5])} dBm")
     lg.debug(
@@ -277,12 +289,14 @@ def plot_case_study_noise_histogram(
         cf, ccfs_uwb,
         use_kappa=True,
         use_x_mode=True,
+        cache_path=_nlin_cache_path(profile_path, use_kappa=True, use_x_mode=True),
     )
     # Non-interacting (no cross-mode terms)
     nlin_uwb_non = total_nlin_uwb(
         cf, ccfs_uwb,
         use_kappa=True,
         use_x_mode=False,
+        cache_path=_nlin_cache_path(profile_path, use_kappa=True, use_x_mode=False),
     )
 
     lg.debug(
