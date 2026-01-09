@@ -76,4 +76,4 @@ def _init_logging() -> None:
 
 if __name__ == "__main__":
     _init_logging()
-    simulate_power_profiles(cfg_path="input/uwb_struct.toml", output_path="results/uwb_power_profiles.npy")
+    simulate_power_profiles(cfg_path="input/pumped_struct.toml", output_path="results/pumped_power_profiles.npy")

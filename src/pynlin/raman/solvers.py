@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate
+import scipy.interpolate
 import scipy.optimize
 try:
     import seaborn as sns
@@ -390,6 +391,188 @@ class RamanAmplifier:
             return pump_solution, signal_solution, photon_count
         else:
             return pump_solution, signal_solution, ase_solution
+
+    def solve_ase_with_fixed_powers(
+        self,
+        pump_solution: np.ndarray,
+        signal_solution: np.ndarray,
+        pump_wavelength: np.ndarray,
+        signal_wavelength: np.ndarray,
+        z: np.ndarray,
+        ase_initial: np.ndarray | None = None,
+        temperature: float = 300,
+        reference_bandwidth: float = 0.1,
+        odeint_kwargs=None,
+        solver: str = "radau",
+        ase_direction=1.0,
+        ase_decimation: int = 100,
+    ) -> np.ndarray:
+        """Compute ASE evolution along fixed pump/signal profiles.
+
+        pump_solution/signal_solution must be shaped (len(z), n). reference_bandwidth
+        follows the same units used by solve(..., ase=True). ase_decimation keeps
+        every Nth ASE channel, sums the signal powers per group, and scales the
+        ASE bandwidth by N.
+        """
+        lg.info(f"[SM amp] solve_ase_with_fixed_powers: z len={len(z)}, "
+                f"pump_sol={pump_solution.shape}, sig_sol={signal_solution.shape}, "
+                f"ase_decimation={ase_decimation}, solver={solver}"
+        )
+        z = np.asarray(z, dtype=float)
+        if z.ndim != 1 or z.size < 2:
+            raise ValueError("z must be a 1D array with at least two points.")
+        if np.any(np.diff(z) <= 0):
+            raise ValueError("z must be strictly increasing for interpolation.")
+
+        def _coerce_profile(profile: np.ndarray, name: str) -> np.ndarray:
+            arr = np.asarray(profile, dtype=float)
+            if arr.size == 0:
+                return np.zeros((len(z), 0))
+            if arr.ndim == 1:
+                if arr.shape[0] != len(z):
+                    raise ValueError(f"{name} length must match z length.")
+                return arr.reshape((len(z), 1))
+            if arr.ndim != 2:
+                raise ValueError(f"{name} must be 1D or 2D.")
+            if arr.shape[0] != len(z):
+                raise ValueError(f"{name} first dimension must match z length.")
+            return arr
+
+        pump_solution = _coerce_profile(pump_solution, "pump_solution")
+        signal_solution_full = _coerce_profile(signal_solution, "signal_solution")
+
+        num_pumps = pump_solution.shape[1]
+        num_signals_full = signal_solution_full.shape[1]
+        if num_signals_full == 0:
+            raise ValueError("signal_solution must have at least one signal.")
+
+        ase_decimation = int(ase_decimation)
+        if ase_decimation < 1:
+            raise ValueError("ase_decimation must be >= 1.")
+        ase_indices = np.arange(0, num_signals_full, ase_decimation, dtype=int)
+        if ase_indices.size == 0:
+            raise ValueError("ase_decimation removed all ASE channels.")
+        group_slices = [
+            slice(idx, min(idx + ase_decimation, num_signals_full)) for idx in ase_indices
+        ]
+        num_ase = len(group_slices)
+
+        pump_wavelength = np.asarray(pump_wavelength, dtype=float)
+        signal_wavelength_full = np.asarray(signal_wavelength, dtype=float)
+        if num_pumps != pump_wavelength.size:
+            raise ValueError("pump_wavelength size must match pump_solution columns.")
+        if num_signals_full != signal_wavelength_full.size:
+            raise ValueError("signal_wavelength size must match signal_solution columns.")
+
+        signal_solution = np.stack(
+            [signal_solution_full[:, slc].sum(axis=1) for slc in group_slices], axis=1
+        )
+        signal_wavelength = signal_wavelength_full[ase_indices]
+        num_signals = signal_solution.shape[1]
+
+        wavelengths = (
+            np.concatenate((pump_wavelength, signal_wavelength))
+            if num_pumps
+            else signal_wavelength
+        )
+        frequencies = lambda2nu(wavelengths)
+        gain_matrix = self.compute_gain_matrix(frequencies)
+
+        frequency_shifts = frequencies[None, :] - frequencies[:, None]
+        Hinv = np.exp(h_planck * np.abs(frequency_shifts) / (kB * temperature)) - 1
+        np.fill_diagonal(Hinv, 1e56)
+        eta_plus = 1 + 1 / Hinv
+        np.fill_diagonal(eta_plus, 0)
+        gain_matrix_ase = eta_plus * gain_matrix
+
+        losses_s = self.get_linear_losses(signal_wavelength)
+        signal_freqs = lambda2nu(signal_wavelength)
+        ase_bandwidth = float(reference_bandwidth) * ase_decimation
+
+        if ase_initial is None:
+            ase_initial = np.zeros((num_ase,), dtype=float)
+        else:
+            ase_initial = np.asarray(ase_initial, dtype=float).reshape(-1)
+            if ase_initial.size == num_signals_full:
+                ase_initial = np.array(
+                    [np.sum(ase_initial[slc]) for slc in group_slices], dtype=float
+                )
+            elif ase_initial.size != num_ase:
+                raise ValueError("ase_initial must match number of ASE channels.")
+
+        if np.isscalar(ase_direction):
+            ase_direction = np.sign(ase_direction) * np.ones((num_ase,))
+        else:
+            ase_direction = np.asarray(ase_direction, dtype=float).reshape(-1)
+            if ase_direction.size == num_signals_full:
+                ase_direction = np.array(
+                    [np.sign(np.sum(ase_direction[slc])) for slc in group_slices], dtype=float
+                )
+            elif ase_direction.size != num_ase:
+                raise ValueError("ase_direction must match number of ASE channels.")
+
+        pump_interp = None
+        if num_pumps:
+            pump_interp = scipy.interpolate.interp1d(
+                z,
+                pump_solution,
+                axis=0,
+                bounds_error=False,
+                fill_value=(pump_solution[0], pump_solution[-1]),
+            )
+        signal_interp = scipy.interpolate.interp1d(
+            z,
+            signal_solution,
+            axis=0,
+            bounds_error=False,
+            fill_value=(signal_solution[0], signal_solution[-1]),
+        )
+
+        def _ode_ivp(z_val, ase_power):
+            pump_vec = pump_interp(z_val) if num_pumps else np.zeros((0,))
+            signal_vec = signal_interp(z_val)
+            P = np.concatenate((pump_vec, signal_vec))
+
+            gain_factor = gain_matrix @ P
+            gain_factor_ase = gain_matrix_ase @ P
+            gain_sig = gain_factor[-num_signals:]
+            gain_factor_ase = gain_factor_ase[-num_signals:]
+
+            dASEdz = (-losses_s + gain_sig) * ase_power
+            dASEdz += (
+                gain_factor_ase
+                * 2
+                * h_planck
+                * signal_freqs
+                * ase_bandwidth
+            )
+            return dASEdz * ase_direction
+
+        def _ode_odeint(ase_power, z_val):
+            return _ode_ivp(z_val, ase_power)
+
+        kw = dict(rtol=1e-3, atol=1e-9)
+        if isinstance(odeint_kwargs, dict):
+            kw.update(odeint_kwargs)
+
+        if solver.lower() == "radau":
+            if "max_step" not in kw:
+                kw["max_step"] = (z[-1] - z[0]) / 3500 if len(z) > 1 else np.inf
+            sol = scipy.integrate.solve_ivp(
+                _ode_ivp,
+                (z[0], z[-1]),
+                ase_initial,
+                method="Radau",
+                t_eval=z,
+                **kw,
+            )
+            if not sol.success:
+                lg.error(f"[SM amp] Radau (ASE-only) failed: {sol.message}")
+            return sol.y.T
+        else:
+            kw.pop("max_step", None)
+            sol = scipy.integrate.odeint(_ode_odeint, ase_initial, z, **kw)
+            return sol
 
     def compute_gain_matrix(self, frequencies):
         """Generate the matrix of Raman gains between each pair of frequencies."""
@@ -926,7 +1109,6 @@ class RamanAmplifier:
 
 class MMFRamanAmplifier(RamanAmplifier):
     # def __init__(self, bandwidth=40e12):
-
     #     super().__init__()
 
     def solve(
@@ -1493,7 +1675,252 @@ SMRamanAmplifierWideband = SMWidebandRamanAmplifier
 # ---------------------------------------
 
 
-if __name__ == "__main__":
+def main():
+    import sys
+    from pathlib import Path
+    from pynlin.system import System
+    from pynlin.utils import nu2lambda
+
+    init_logging()
+    level = os.getenv("LOGURU_LEVEL", "TRACE")
+    lg.remove()
+    lg.add(sys.stderr, level=level)
+
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/uwb_struct.toml")
+    profile_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("results/uwb_power_profiles.npy")
+    output_path = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("results/uwb_ase_power_profile.npy")
+
+    if not profile_path.exists():
+        lg.error(f"[SM amp] profile file not found: {profile_path}")
+        return
+
+    system = System.from_toml(cfg_path)
+    amp = SMWidebandRamanAmplifier(system.fiber)
+
+    data = np.load(profile_path, allow_pickle=True)
+    if isinstance(data, np.ndarray) and data.shape == ():
+        data = data.item()
+    if not isinstance(data, dict):
+        lg.error(f"[SM amp] expected dict-like payload in {profile_path}, got {type(data)}")
+        return
+
+    def _get(keys):
+        for key in keys:
+            if key in data:
+                return data[key]
+        return None
+
+    z = _get(["z"])
+    if z is None:
+        lg.error(f"[SM amp] missing z array in {profile_path}")
+        return
+    z = np.asarray(z, dtype=float)
+
+    signal_solution = _get(["signal_sol", "signal_solution"])
+    if signal_solution is None:
+        lg.error(f"[SM amp] missing signal_sol in {profile_path}")
+        return
+    signal_solution = np.asarray(signal_solution, dtype=float)
+    if signal_solution.ndim != 2 or signal_solution.shape[0] != len(z):
+        lg.error(f"[SM amp] signal_sol shape mismatch: z={z.shape}, signal_sol={signal_solution.shape}")
+        return
+
+    pump_solution = _get(["pump_sol", "pump_solution"])
+    if pump_solution is None:
+        pump_solution = np.zeros((len(z), 0), dtype=float)
+    else:
+        pump_solution = np.asarray(pump_solution, dtype=float)
+        if pump_solution.ndim == 1:
+            if pump_solution.shape[0] != len(z):
+                lg.error(f"[SM amp] pump_sol length mismatch: z={z.shape}, pump_sol={pump_solution.shape}")
+                return
+        elif pump_solution.ndim == 2:
+            if pump_solution.shape[0] != len(z):
+                lg.error(f"[SM amp] pump_sol shape mismatch: z={z.shape}, pump_sol={pump_solution.shape}")
+                return
+        else:
+            lg.error(f"[SM amp] unsupported pump_sol shape: {pump_solution.shape}")
+            return
+
+    signal_wavelengths = _get(["signal_wavelengths", "signal_wavelength"])
+    if signal_wavelengths is None:
+        freqs = system.wdm.frequency_grid()
+        if freqs.size != signal_solution.shape[1]:
+            lg.error(
+                "[SM amp] missing signal_wavelengths and WDM grid size does not match signal_sol."
+            )
+            return
+        signal_wavelengths = nu2lambda(freqs)
+    signal_wavelengths = np.asarray(signal_wavelengths, dtype=float)
+    if signal_wavelengths.size != signal_solution.shape[1]:
+        lg.error(
+            f"[SM amp] signal_wavelengths size mismatch: wl={signal_wavelengths.size}, signals={signal_solution.shape[1]}"
+        )
+        return
+
+    pump_wavelengths = _get(["pump_wavelengths", "pump_wavelength"])
+    if pump_wavelengths is None and pump_solution.size:
+        pumps = system.pump_specs or []
+        pump_wavelengths = np.array([p.wavelength for p in pumps], dtype=float)
+    if pump_wavelengths is None:
+        pump_wavelengths = np.zeros((0,), dtype=float)
+    pump_wavelengths = np.asarray(pump_wavelengths, dtype=float)
+
+    num_pumps = 0 if pump_solution.size == 0 else (1 if pump_solution.ndim == 1 else pump_solution.shape[1])
+    if num_pumps == 0:
+        pump_wavelengths = np.zeros((0,), dtype=float)
+    elif pump_wavelengths.size != num_pumps:
+        lg.error(
+            f"[SM amp] pump_wavelengths size mismatch: wl={pump_wavelengths.size}, pumps={num_pumps}"
+        )
+        return
+
+    ase_initial = _get(["ase_sol", "ase_solution"])
+    if ase_initial is not None:
+        ase_initial = np.asarray(ase_initial, dtype=float)
+        if ase_initial.ndim == 2 and ase_initial.shape[0] == len(z):
+            ase_initial = ase_initial[0]
+        elif ase_initial.ndim == 2 and ase_initial.shape[1] == len(z):
+            ase_initial = ase_initial[:, 0]
+        elif ase_initial.ndim != 1:
+            lg.warning("[SM amp] ase_sol shape not usable for ase_initial; ignoring.")
+            ase_initial = None
+        if ase_initial is not None and ase_initial.size != signal_solution.shape[1]:
+            lg.warning(
+                "[SM amp] ase_initial length does not match number of signals; ignoring."
+            )
+            ase_initial = None
+
+    reference_bandwidth = _get(["reference_bandwidth", "ref_bandwidth"])
+    if reference_bandwidth is None:
+        reference_bandwidth = system.baud_rate if system.baud_rate is not None else 0.1
+    reference_bandwidth = float(reference_bandwidth)
+
+    temperature = _get(["temperature"])
+    if temperature is None:
+        temperature = 300.0
+    temperature = float(temperature)
+
+    ase_decimation = _get(["ase_decimation", "ase_decimation_factor", "ase_stride"])
+    if ase_decimation is None:
+        ase_decimation = 20
+    ase_decimation = int(ase_decimation)
+    if ase_decimation > 1:
+        lg.info(
+            f"[SM amp] ASE decimation: every {ase_decimation} channels, "
+            f"bandwidth scaled to {reference_bandwidth * ase_decimation:.3e}"
+        )
+
+    ase_solution = amp.solve_ase_with_fixed_powers(
+        pump_solution=pump_solution,
+        signal_solution=signal_solution,
+        pump_wavelength=pump_wavelengths,
+        signal_wavelength=signal_wavelengths,
+        z=z,
+        ase_initial=ase_initial,
+        temperature=temperature,
+        reference_bandwidth=reference_bandwidth,
+        ase_decimation=ase_decimation,
+    )
+
+    lg.info(f"[SM amp] ASE-only solve done: ase_sol={ase_solution.shape}")
+    if ase_solution.size:
+        lg.info(
+            f"[SM amp] ASE range [{ase_solution.min():.3e},{ase_solution.max():.3e}] W"
+        )
+        decimated_indices = np.arange(0, signal_wavelengths.size, ase_decimation, dtype=int)
+        ase_out = ase_solution[-1]
+        if isinstance(system.wdm, IrregularWDM):
+            for name, slc in system.wdm._band_slices.items():
+                band_mask = (decimated_indices >= slc.start) & (decimated_indices < slc.stop)
+                if not np.any(band_mask):
+                    lg.info(f"[SM amp] ASE avg band {name}: n/a (no decimated channels)")
+                    continue
+                band_mean_w = float(np.mean(ase_out[band_mask]))
+                band_mean_dbm = float(watt2dBm(band_mean_w))
+                lg.info(
+                    f"[SM amp] ASE avg band {name}: {band_mean_w:.3e} W ({band_mean_dbm:.2f} dBm)"
+                )
+        else:
+            band_mean_w = float(np.mean(ase_out))
+            band_mean_dbm = float(watt2dBm(band_mean_w))
+            lg.info(
+                f"[SM amp] ASE avg (all): {band_mean_w:.3e} W ({band_mean_dbm:.2f} dBm)"
+            )
+    if output_path is not None:
+        payload = dict(data)
+        payload["ase_sol_fixed"] = ase_solution
+        payload["ase_reference_bandwidth"] = reference_bandwidth
+        payload["ase_reference_bandwidth_effective"] = reference_bandwidth * ase_decimation
+        payload["ase_temperature"] = temperature
+        payload["ase_decimation"] = ase_decimation
+        ase_indices = np.arange(0, signal_wavelengths.size, ase_decimation, dtype=int)
+        payload["ase_signal_indices"] = ase_indices
+        payload["ase_signal_wavelengths"] = signal_wavelengths[ase_indices]
+        np.save(output_path, payload)
+        lg.info(f"[SM amp] saved ASE payload to {output_path}")
+
+    try:
+        from pynlin.raman.plot_optimization import plot_profiles
+
+        if ase_decimation > 1:
+            group_slices = [
+                slice(idx, min(idx + ase_decimation, signal_solution.shape[1]))
+                for idx in range(0, signal_solution.shape[1], ase_decimation)
+            ]
+            signal_solution_plot = np.stack(
+                [signal_solution[:, slc].sum(axis=1) for slc in group_slices], axis=1
+            )
+            signal_wavelengths_plot = signal_wavelengths[::ase_decimation]
+        else:
+            signal_solution_plot = signal_solution
+            signal_wavelengths_plot = signal_wavelengths
+
+        if signal_solution_plot.ndim == 2:
+            signal_solution_plot = signal_solution_plot[:, :, None]
+        ase_solution_plot = ase_solution[:, :, None] if ase_solution.ndim == 2 else ase_solution
+
+        pump_wavelengths_plot = pump_wavelengths
+        pump_solution_plot = pump_solution
+        mode_count = getattr(system, "n_modes", getattr(system.fiber, "n_modes", 1))
+        if pump_solution_plot is None or np.size(pump_solution_plot) == 0:
+            pump_wavelengths_plot = np.array([np.mean(signal_wavelengths_plot)])
+            pump_solution_plot = np.zeros((len(z), 1, mode_count), dtype=float)
+        else:
+            pump_solution_plot = np.asarray(pump_solution_plot, dtype=float)
+            if pump_solution_plot.ndim == 2:
+                pump_solution_plot = pump_solution_plot[:, :, None]
+            elif pump_solution_plot.ndim == 1:
+                pump_solution_plot = pump_solution_plot.reshape((len(z), 1, 1))
+
+        pump_powers = _get(
+            ["pump_powers", "pump_power", "pump_power_w", "pump_powers_w"]
+        )
+        if pump_powers is None:
+            pump_powers = np.zeros((pump_solution_plot.shape[1], 1), dtype=float)
+        else:
+            pump_powers = np.asarray(pump_powers, dtype=float)
+            if pump_powers.ndim == 1:
+                pump_powers = pump_powers[:, None]
+
+        plot_profiles(
+            signal_wavelengths=signal_wavelengths_plot,
+            signal_solution=signal_solution_plot,
+            ase_solution=ase_solution_plot,
+            pump_wavelengths=pump_wavelengths_plot,
+            pump_solution=pump_solution_plot,
+            pump_powers=pump_powers,
+            cf=system,
+            wallpaper_mode=False,
+            use_active_naming=False,
+            plot_title=f"ASE decimation: {ase_decimation}x",
+        )
+        lg.info("[SM amp] saved ASE plot via plot_profiles.")
+    except Exception as exc:
+        lg.warning(f"[SM amp] ASE plotting skipped: {exc}")
+
+
+def main_bak():
     import sys
     from pathlib import Path
     from pynlin.raman.plot_optimization import plot_profiles
@@ -1659,3 +2086,7 @@ if __name__ == "__main__":
         print("Saved BVP profiles via plot_profiles.")
     except Exception as e:
         lg.error(f"Plotting skipped due to error: {e}")
+
+
+if __name__ == "__main__":
+    main()
