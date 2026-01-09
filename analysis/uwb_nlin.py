@@ -14,7 +14,8 @@ from pynlin.nlin.nlin_estimator_uwb import (
 from pynlin.raman.power_profiles import simulate_power_profiles
 from pynlin.raman.plot_optimization import plot_profiles
 from pynlin.system import System
-from pynlin.utils import watt2dBm
+from pynlin.utils import dBm2watt, watt2dBm
+from scipy.constants import c
 
 os.environ.setdefault("LOGURU_LEVEL", "DEBUG")
 init_logging()
@@ -149,6 +150,153 @@ def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int
     return launch_override
 
 
+def _load_profile_output_powers(profile_path: Path | str, expected_channels: int) -> np.ndarray | None:
+    """Load per-channel output powers (W) from a saved Raman profile file."""
+    p_path = Path(profile_path)
+    if not p_path.exists():
+        lg.warning(f"Profile file {p_path} not found; skipping output power plot.")
+        return None
+    try:
+        lg.info(f"Loading profile data for output power from {p_path}")
+        payload = np.load(p_path, allow_pickle=True)
+        if isinstance(payload, np.lib.npyio.NpzFile):
+            data = payload
+        else:
+            data = payload.item()
+    except Exception as exc:
+        lg.warning(f"Failed loading profile {p_path}: {exc}")
+        return None
+
+    sig_sol = data.get("signal_sol")
+    if sig_sol is None:
+        lg.warning("Profile file missing signal_sol; skipping output power plot.")
+        return None
+
+    sig_power = np.array(sig_sol, dtype=float)
+    if sig_power.ndim == 3 and sig_power.shape[-1] == 1:
+        sig_power = sig_power[..., 0]
+    if sig_power.ndim == 3:
+        sig_power = np.sum(sig_power, axis=-1)
+    if sig_power.ndim != 2:
+        lg.warning(f"Unexpected signal_sol shape {sig_power.shape}; skipping output power plot.")
+        return None
+
+    output_power = sig_power[-1]
+    if output_power.size != expected_channels:
+        lg.warning(
+            f"Profile channels ({output_power.size}) != expected ({expected_channels}); skipping output power plot."
+        )
+        return None
+    return output_power
+
+
+def _load_ase_band_lines(profile_path: Path | str, system: System):
+    """Return ASE band averages as (name, f_min, f_max, avg_w) tuples."""
+    ase_path = Path("results/uwb_ase_power_profiles.npy")
+    if not ase_path.exists():
+        raise FileNotFoundError(f"ASE profile not found at {ase_path}")
+    payload = np.load(ase_path, allow_pickle=True)
+    if isinstance(payload, np.lib.npyio.NpzFile):
+        data = payload
+    elif isinstance(payload, np.ndarray) and payload.shape == ():
+        data = payload.item()
+    elif isinstance(payload, dict):
+        data = payload
+    else:
+        raise TypeError(f"Unexpected ASE payload type {type(payload)}")
+
+    def _describe_value(value):
+        if isinstance(value, np.ndarray):
+            array_str = np.array2string(value, threshold=np.inf)
+            return f"ndarray shape={value.shape} dtype={value.dtype} values={array_str}"
+        return repr(value)
+
+    lg.info(f"Using ASE profile data from {ase_path}")
+    # if hasattr(data, "keys"):
+    #     for key in sorted(data.keys()):
+    #         try:
+    #             value = data.get(key)
+    #         except Exception:
+    #             value = None
+    # lg.info(f"[ASE profile] {key}: {_describe_value(value)}")
+
+    ase = data.get("ase_sol_fixed") if hasattr(data, "get") else None
+    if ase is None and hasattr(data, "get"):
+        ase = data.get("ase_sol")
+    if ase is None and hasattr(data, "get"):
+        ase = data.get("ase_solution")
+    if ase is None:
+        lg.warning("ASE profile missing ASE solution; skipping ASE overlay.")
+        return []
+
+    ase = np.asarray(ase, dtype=float)
+    if ase.ndim == 3 and ase.shape[-1] == 1:
+        ase = ase[..., 0]
+    if ase.ndim == 3:
+        ase = np.sum(ase, axis=-1)
+    if ase.ndim != 2:
+        lg.warning(f"Unexpected ASE shape {ase.shape}; skipping ASE overlay.")
+        return []
+
+    ase_wavelengths = None
+    if hasattr(data, "get"):
+        for key in ("ase_signal_wavelengths", "ase_wavelengths", "signal_wavelengths", "signal_wavelength"):
+            if key in data:
+                ase_wavelengths = np.asarray(data.get(key), dtype=float)
+                break
+    if ase_wavelengths is not None and ase_wavelengths.size != ase.shape[1]:
+        ase_wavelengths = None
+
+    ase_decimation = 1
+    if hasattr(data, "get"):
+        ase_decimation = int(data.get("ase_decimation", 1))
+    scale = ase_decimation if ase_decimation > 0 else 1
+    if scale == 1 and system.n_channels and ase.shape[1] and system.n_channels % ase.shape[1] == 0:
+        inferred = system.n_channels // ase.shape[1]
+        if inferred > 1:
+            scale = inferred
+            lg.info(f"Inferred ASE decimation scale {scale} from channel counts.")
+    decimated_indices = data.get("ase_signal_indices") if hasattr(data, "get") else None
+    if decimated_indices is None:
+        decimated_indices = np.arange(0, system.n_channels, ase_decimation, dtype=int)
+    else:
+        decimated_indices = np.asarray(decimated_indices, dtype=int)
+
+    if ase.shape[1] != decimated_indices.size:
+        if ase.shape[1] == system.n_channels:
+            decimated_indices = np.arange(0, ase.shape[1], ase_decimation, dtype=int)
+            ase = ase[:, decimated_indices]
+            if ase_wavelengths is not None and ase_wavelengths.size == system.n_channels:
+                ase_wavelengths = ase_wavelengths[decimated_indices]
+        elif ase_wavelengths is None:
+            lg.warning(
+                f"ASE channels ({ase.shape[1]}) do not match decimation "
+                f"indices ({decimated_indices.size}); skipping ASE overlay."
+            )
+            return []
+
+    ase_out = ase[-1]
+    freqs = system.wdm.frequency_grid()
+    lines = []
+    if isinstance(system.wdm, pynlin.wdm.IrregularWDM):
+        for name, slc in system.wdm._band_slices.items():
+            f_band = freqs[slc]
+            f_min, f_max = float(np.min(f_band)), float(np.max(f_band))
+            if ase_wavelengths is not None:
+                ase_freqs = c / ase_wavelengths
+                mask = (ase_freqs >= f_min) & (ase_freqs <= f_max)
+            else:
+                mask = (decimated_indices >= slc.start) & (decimated_indices < slc.stop)
+            if not np.any(mask):
+                continue
+            avg_w = float(np.mean(ase_out[mask]) / scale)
+            lines.append((name, f_min, f_max, avg_w))
+    else:
+        avg_w = float(np.mean(ase_out) / scale)
+        lines.append(("all", float(np.min(freqs)), float(np.max(freqs)), avg_w))
+    return lines
+
+
 def _nlin_cache_path(profile_path: Path | str | None,
                      use_kappa: bool,
                      use_x_mode: bool) -> Path:
@@ -162,8 +310,9 @@ def plot_case_study_noise(
         also_plot_noninteracting=True,
         name="xxx",
         profile_path: Path | str = Path("results/uwb_power_profiles.npy"),
-        use_profile: bool = True):
-    """Plot NLIN per channel for MMF (and optionally SMF) case studies."""
+        use_profile: bool = True,
+        combined_height: float = 4.5):
+    """Plot output power, combined noise, and SNR per channel in one figure."""
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -176,11 +325,14 @@ def plot_case_study_noise(
     freqs = syst.wdm.frequency_grid()
 
     launch_override = _load_profile_launch_powers(profile_path, syst.n_channels) if use_profile else None
+    output_power = _load_profile_output_powers(profile_path, syst.n_channels) if use_profile else None
 
-    ccfs = collision_coeffs_system_uwb(syst, # FIXME this is the thing sucking the most time
-                                       ipulse=1,
-                                       recompute=True,
-                                       profile_path=profile_path)
+    ccfs = collision_coeffs_system_uwb(
+        syst,
+        ipulse=1,
+        recompute=False,
+        profile_path=profile_path,
+    )
     nlin_uwb = total_nlin_uwb(
         syst,
         ccfs,
@@ -205,50 +357,261 @@ def plot_case_study_noise(
     linestyles = ["-", "-", "-", "-", "--"]
     labels = ["LP01", "LP1", "LP11", "LP11", "SMF(LP01)"]
 
-    if use_dBm_scale:
-        ylabel = r'$P_\mathrm{NLIN} \; [\mathrm{dBm}]$'
-        plot_function = plt.plot
-        def y_function_uwb(x): return watt2dBm(x)
-    else:
-        ylabel = r'$\sum\limits_{B\neq A}\mathcal{N}_{AB} \quad [\mathrm{km}^2/\mathrm{ps}^{2}]$'
-        plot_function = plt.semilogy
-        def y_function_uwb(x): return x * 1e-30
-
-    plt.clf()
     lw = 1.4
-    plt.figure(figsize=(3.6, 3.2))
+    scatter_size = 8
+    scatter_lw = 0.05
+
+    ase_lines = _load_ase_band_lines(profile_path, syst) if use_profile else []
+    ase_per_channel = np.zeros_like(freqs, dtype=float)
+    assigned = np.zeros_like(freqs, dtype=bool)
+    if ase_lines:
+        for _, f_min, f_max, avg_w in ase_lines:
+            mask = (freqs >= f_min) & (freqs <= f_max)
+            ase_per_channel[mask] = avg_w
+            assigned[mask] = True
+        if not np.all(assigned):
+            lg.warning("Some channels missing ASE band assignment; assuming 0 ASE there.")
+    else:
+        lg.warning("ASE data unavailable; using NLIN-only noise/SNR.")
+
+    if output_power is not None:
+        signal_power = output_power
+    elif launch_override is not None:
+        signal_power = launch_override
+    else:
+        launch_dbm = syst.launch_power if syst.launch_power is not None else -5.0
+        signal_power = np.full_like(freqs, dBm2watt(launch_dbm), dtype=float)
+
+    denom_floor = 1e-18
+    fig, axes = plt.subplots(
+        3,
+        1,
+        sharex=True,
+        figsize=(3.6, float(combined_height)),
+        gridspec_kw={"hspace": 0.06},
+    )
+
+    def _nudge_offset(ax):
+        offset = ax.yaxis.get_offset_text()
+        offset.set_x(-0.2)
+        offset.set_y(2)
+        offset.set_horizontalalignment("left")
+        offset.set_verticalalignment("top")
+
+    # Output power subplot
+    ax_power = axes[0]
+    if output_power is None:
+        ax_power.text(
+            0.02,
+            0.5,
+            "No output power data",
+            transform=ax_power.transAxes,
+            fontsize=8,
+            va="center",
+        )
+    else:
+        output_dbm = watt2dBm(np.maximum(output_power, 1e-18))
+        ax_power.scatter(
+            freqs * 1e-12,
+            output_dbm,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors="black",
+            alpha=0.8,
+            linewidths=scatter_lw,
+        )
+    ax_power.set_ylabel(r'$P_\mathrm{out}\;[\mathrm{dBm}]$')
+    ax_power.grid(grid)
+    _nudge_offset(ax_power)
+
+    # Noise subplot (NLIN + ASE)
+    ax_noise = axes[1]
     for i in range(syst.n_modes):
-        plot_function(freqs * 1e-12,
-                      y_function_uwb(nlin_uwb[i, :]),
-                      lw=lw,
-                      color=colors[i],
-                      ls=linestyles[i],
-                      label=labels[i])
+        noise = np.maximum(nlin_uwb[i, :] + ase_per_channel, denom_floor)
+        noise_dbm = watt2dBm(noise)
+        ax_noise.scatter(
+            freqs * 1e-12,
+            noise_dbm,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors=colors[i],
+            alpha=0.8,
+            linewidths=scatter_lw,
+            label="NLIN" if i == 0 else None,
+        )
         if also_plot_noninteracting:
-            plot_function(freqs * 1e-12,
-                          y_function_uwb(nlin_uwb_noninteracting[i, :]),
-                          lw=lw,
-                          color=colors[i],
-                          ls='-.')
-    #
-    plt.xlabel(r'$f \; [\mathrm{THz}]$')
-    plt.ylabel(ylabel)
-    # plt.legend(labelspacing=0.1)
-    plt.grid(grid)
-    plt.tight_layout()
-    # plt.ylim([2e-2, 1e0])
-    plt.savefig(f"media/nlin"+name+".pdf", dpi=dpi)
-    lg.info("The figure is saved as media/nlin"+name+".pdf")
+            noise_non = np.maximum(nlin_uwb_noninteracting[i, :] + ase_per_channel, denom_floor)
+            noise_non_dbm = watt2dBm(noise_non)
+            ax_noise.scatter(
+                freqs * 1e-12,
+                noise_non_dbm,
+                s=scatter_size,
+                facecolors="none",
+                edgecolors=colors[i],
+                alpha=0.5,
+                marker="o",
+                linewidths=scatter_lw,
+            )
+    if ase_lines:
+        label_used = False
+        for band, f_min, f_max, avg_w in ase_lines:
+            avg_dbm = float(watt2dBm(max(avg_w, denom_floor)))
+            label = "ASE avg (band)" if not label_used else None
+            ax_noise.hlines(
+                avg_dbm,
+                f_min * 1e-12,
+                f_max * 1e-12,
+                colors="red",
+                linestyles="--",
+                linewidth=1.0,
+                label=label,
+            )
+            label_used = True
+    ax_noise.set_ylabel(r'$P_\mathrm{noise}\;[\mathrm{dBm}]$')
+    ax_noise.set_ylim(bottom=-90)
+    ax_noise.grid(grid)
+    ax_noise.legend(loc="best", fontsize=8, frameon=False)
+    _nudge_offset(ax_noise)
+
+    # SNR subplot
+    ax_snr = axes[2]
+    for i in range(syst.n_modes):
+        denom = np.maximum(nlin_uwb[i, :] + ase_per_channel, denom_floor)
+        snr_db = 10 * np.log10(np.maximum(signal_power, denom_floor) / denom)
+        ax_snr.scatter(
+            freqs * 1e-12,
+            snr_db,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors="green",
+            alpha=0.8,
+            linewidths=scatter_lw,
+            label=labels[i],
+        )
+    ax_snr.set_xlabel(r'$\mathnormal{f} \; [\mathrm{THz}]$')
+    ax_snr.set_ylabel(r'$\mathrm{SNR}\;[\mathrm{dB}]$')
+    ax_snr.grid(grid)
+    _nudge_offset(ax_snr)
+
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.06, left=0.18)
+    out_path = f"media/power_noise_snr{name}.pdf"
+    fig.savefig(out_path, dpi=dpi)
+    lg.info(f"The figure is saved as {out_path}")
+
+    # --- Individual plots (power / noise / SNR) ---
+    fig_power, ax_power = plt.subplots(figsize=(3.6, 3.2))
+    if output_power is None:
+        ax_power.text(
+            0.02,
+            0.5,
+            "No output power data",
+            transform=ax_power.transAxes,
+            fontsize=8,
+            va="center",
+        )
+    else:
+        output_dbm = watt2dBm(np.maximum(output_power, 1e-18))
+        ax_power.scatter(
+            freqs * 1e-12,
+            output_dbm,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors="black",
+            alpha=0.8,
+            linewidths=scatter_lw,
+        )
+    ax_power.set_xlabel(r'$f \; [\mathrm{THz}]$')
+    ax_power.set_ylabel(r'$P_\mathrm{out}\;[\mathrm{dBm}]$')
+    ax_power.grid(grid)
+    fig_power.tight_layout()
+    out_path = f"media/output_power{name}.pdf"
+    fig_power.savefig(out_path, dpi=dpi)
+    lg.info(f"The figure is saved as {out_path}")
+
+    fig_noise, ax_noise = plt.subplots(figsize=(3.6, 3.2))
+    for i in range(syst.n_modes):
+        noise = np.maximum(nlin_uwb[i, :] + ase_per_channel, denom_floor)
+        noise_dbm = watt2dBm(noise)
+        ax_noise.scatter(
+            freqs * 1e-12,
+            noise_dbm,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors=colors[i],
+            alpha=0.8,
+            linewidths=scatter_lw,
+            label="NLIN" if i == 0 else None,
+        )
+        if also_plot_noninteracting:
+            noise_non = np.maximum(nlin_uwb_noninteracting[i, :] + ase_per_channel, denom_floor)
+            noise_non_dbm = watt2dBm(noise_non)
+            ax_noise.scatter(
+                freqs * 1e-12,
+                noise_non_dbm,
+                s=scatter_size,
+                facecolors="none",
+                edgecolors=colors[i],
+                alpha=0.5,
+                marker="o",
+                linewidths=scatter_lw,
+            )
+    if ase_lines:
+        label_used = False
+        for band, f_min, f_max, avg_w in ase_lines:
+            avg_dbm = float(watt2dBm(max(avg_w, denom_floor)))
+            label = "ASE avg (band)" if not label_used else None
+            ax_noise.hlines(
+                avg_dbm,
+                f_min * 1e-12,
+                f_max * 1e-12,
+                colors="red",
+                linestyles="--",
+                linewidth=1.0,
+                label=label,
+            )
+            label_used = True
+    ax_noise.set_xlabel(r'$f \; [\mathrm{THz}]$')
+    ax_noise.set_ylabel(r'$P_\mathrm{noise}\;[\mathrm{dBm}]$')
+    ax_noise.set_ylim(bottom=-90)
+    ax_noise.grid(grid)
+    ax_noise.legend(loc="best", fontsize=8, frameon=False)
+    fig_noise.tight_layout()
+    out_path = f"media/noise{name}.pdf"
+    fig_noise.savefig(out_path, dpi=dpi)
+    lg.info(f"The figure is saved as {out_path}")
+
+    fig_snr, ax_snr = plt.subplots(figsize=(3.6, 3.2))
+    for i in range(syst.n_modes):
+        denom = np.maximum(nlin_uwb[i, :] + ase_per_channel, denom_floor)
+        snr_db = 10 * np.log10(np.maximum(signal_power, denom_floor) / denom)
+        ax_snr.scatter(
+            freqs * 1e-12,
+            snr_db,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors="green",
+            alpha=0.8,
+            linewidths=scatter_lw,
+            label=labels[i],
+        )
+    ax_snr.set_xlabel(r'$f \; [\mathrm{THz}]$')
+    ax_snr.set_ylabel(r'$\mathrm{SNR}\;[\mathrm{dB}]$')
+    ax_snr.grid(grid)
+    fig_snr.tight_layout()
+    out_path = f"media/snr{name}.pdf"
+    fig_snr.savefig(out_path, dpi=dpi)
+    lg.info(f"The figure is saved as {out_path}")
 
     functions = [np.mean, np.median, np.max, np.min]
     function_names = ["mean  ", "median", "max   ", "min   "]
     for foo, name in zip(functions, function_names):
-        avg_nlin_mmf = foo(nlin_uwb)
+        avg_nlin_uwb = foo(nlin_uwb)
         print(
-            name + f" NLIN coeff per channel: MMF -> {avg_nlin_mmf:4.3e} | SMF -> {avg_nlin_smf:4.3e}")
+            name + f" NLIN coeff per channel: UWB -> {avg_nlin_uwb:4.3e} ") #| SMF -> {avg_nlin_smf:4.3e}")
         # apply QAM 16 and -10 dBm input power
         print(
-            name + f" NLIN power per channel: MMF -> {watt2dBm(avg_nlin_mmf):4.1f} dBm | SMF -> {watt2dBm(avg_nlin_smf):4.1f} dBm")
+            name + f" NLIN power per channel: UWB -> {watt2dBm(avg_nlin_uwb):4.1f} dBm ")#| SMF -> {watt2dBm(avg_nlin_smf):4.1f} dBm")
         print("-" * 20)
 
 
