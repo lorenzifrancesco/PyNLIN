@@ -23,7 +23,8 @@ def plot_profiles(signal_wavelengths,
                   cf: System,
                   wallpaper_mode=False,
                   single_out_mode = None,
-                  use_active_naming: bool = True):
+                  use_active_naming: bool = True,
+                  plot_title: str | None = None):
     """Plot signal, ASE, and pump power profiles and save flatness snapshots."""
     # Guard against zeros/NaNs to avoid -inf in dBm plots
     eps = 1e-18
@@ -92,8 +93,11 @@ def plot_profiles(signal_wavelengths,
     # plt.plot(z_plot, watt2dBm(np.max(signal_solution, axis=(1, 2))), color=adjust_luminosity("cyan", 0.8),    lw = lww, ls ="-.")
     # plt.plot(z_plot, watt2dBm(np.min(signal_solution, axis=(1, 2))), color=adjust_luminosity("magenta", 0.8), lw = lww, ls ="-.")
     pass
+    if plot_title:
+        plt.title(plot_title)
     plt.ylabel(r"$\mathnormal P$ [dBm]")
     plt.xlabel(r"$\mathnormal z$ [km]")
+    plt.ylim(bottom=-70)
     # plt.legend()
     plt.tight_layout()
     plt.grid(False)
@@ -124,6 +128,7 @@ def plot_profiles(signal_wavelengths,
     plt.grid(False)
     plt.ylabel(r"$\mathnormal P$ [dBm]")
     plt.xlabel(r"$\mathnormal z$ [km]")
+    plt.ylim(bottom=-70)
     # plt.legend()
     plt.tight_layout()
     name = get_next_filename("media/optimization/pump_profile", "pdf", use_active_naming=use_active_naming)
