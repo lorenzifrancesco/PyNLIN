@@ -7,6 +7,13 @@ Pump power is chosen to (approximately) compensate signal loss => ~flat Ps(z).
 import matplotlib.pyplot as plt
 import numpy as np
 
+from pynlin.raman.undepleted import (
+    db_per_km_to_np_per_m,
+    effective_raman_gain,
+    pump_power_for_flat_signal,
+    signal_power_undepleted_counterprop,
+)
+
 # -------- Parameters --------
 L_km = 20.0               # fiber length [km]
 P_s0 = 1e-6               # signal input at z=0 [W]
@@ -25,31 +32,16 @@ save_path = "media/undepleted/raman_counterprop_profile.png"
 km = 1e3
 L = L_km * km
 
-def dB_per_km_to_np_per_m(val_db_km):
-    """Convert attenuation from dB/km to nepers per meter."""
-    return (val_db_km * np.log(10) / 10.0) / 1e3
-
-alpha_s = dB_per_km_to_np_per_m(alpha_s_dB_km)  # [1/m]
-alpha_p = dB_per_km_to_np_per_m(alpha_p_dB_km)  # [1/m]
-g = rho_pol * g_R / A_eff                       # [1/W/m]
+alpha_s = db_per_km_to_np_per_m(alpha_s_dB_km)  # [1/m]
+alpha_p = db_per_km_to_np_per_m(alpha_p_dB_km)  # [1/m]
+g_eff = effective_raman_gain(g_R, rho_pol, A_eff)  # [1/W/m]
 
 # Pump needed for Ps(L) = Ps(0) (flat overall gain):
-#   -alpha_s L + (g * Pp_in / alpha_p) * (1 - e^{-alpha_p L}) = 0
-Pp_in_flat = (alpha_s * L * alpha_p) / (g * (1.0 - np.exp(-alpha_p * L)))
+#   -alpha_s L + (g_eff * Pp_in / alpha_p) * (1 - e^{-alpha_p L}) = 0
+Pp_in_flat = pump_power_for_flat_signal(alpha_s, alpha_p, g_eff, L)
 Pp_in = margin * Pp_in_flat
 
 z = np.linspace(0.0, L, num_points)
-
-def Pp_counter(z):
-    """Backward-propagating pump launched at z=L."""
-    # Pump launched at z=L, propagates toward -z
-    return Pp_in * np.exp(-alpha_p * (L - z))
-
-def Ps_counter(z):
-    """Closed-form signal power under an undepleted counter-propagating pump."""
-    # Closed-form solution for undepleted counter-prop pump
-    integral = (g * Pp_in * np.exp(-alpha_p * L) / alpha_p) * (np.exp(alpha_p * z) - 1.0)
-    return P_s0 * np.exp(-alpha_s * z) * np.exp(integral)
 
 def to_dBm(Pw):
     """Convert Watts to dBm while avoiding log of zero."""
@@ -58,7 +50,7 @@ def to_dBm(Pw):
 # -------- Compute --------
 def main():
     """Compute and plot undepleted counter-propagating Raman gain profile."""
-    Ps_z = Ps_counter(z)
+    Ps_z = signal_power_undepleted_counterprop(z, P_s0, alpha_s, g_eff, Pp_in, alpha_p, L)
     Ps_dBm = to_dBm(Ps_z)
 
     # -------- Plot (dBm only) --------
