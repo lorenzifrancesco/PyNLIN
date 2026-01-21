@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from numpy import polyval
 from scipy.constants import speed_of_light as c0
+from scipy.interpolate import UnivariateSpline
 
 from pynlin.utils import (
     BaseModel,
@@ -289,6 +290,22 @@ class SMFiber(Fiber):
     def beta2_profile(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Return (wavelengths, beta2) if loaded."""
         return self._beta2_profile
+
+    def beta_spline_omega(self, s: float | None = 0.0, k: int = 3) -> UnivariateSpline:
+        """Return an interpolating spline for beta(omega) with omega in rad/s."""
+        if self._beta_profile is None:
+            raise ValueError("beta_profile is not available for this fiber.")
+        wl, beta = self._beta_profile
+        wl = np.asarray(wl, dtype=float)
+        beta = np.asarray(beta, dtype=float)
+        omega = 2.0 * np.pi * c0 / wl
+        order = np.argsort(omega)
+        omega = omega[order]
+        beta = beta[order]
+        if omega.size < k + 1:
+            raise ValueError("Not enough samples to build a beta spline.")
+        s_val = 0.0 if s is None else float(s)
+        return UnivariateSpline(omega, beta, s=s_val, k=int(k))
     
     @property
     def frequency_profile(self) -> Optional[np.ndarray]:
