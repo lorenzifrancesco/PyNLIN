@@ -9,7 +9,7 @@ INSTRUCTIONS.md
 /docs
 /logs 
 scalene*
-
+*.nb
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
