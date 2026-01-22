@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from analysis.log_init import init_logging
 from loguru import logger as lg
+from analysis.raman.rho_utils import effective_length, rho_attenuation, rho_undepleted
 from pynlin.raman.undepleted import effective_raman_gain
 from pynlin.system import System
 from pynlin.utils import alpha_to_linear, dBm2watt
@@ -36,62 +37,6 @@ def _log_complex_range(name: str, values: np.ndarray) -> None:
         imin=float(np.min(vals.imag)),
         imax=float(np.max(vals.imag)),
     )
-
-
-def _rho_undepleted(mu: np.ndarray, A: complex, alpha_p: float, length: float) -> np.ndarray:
-    """Compute rho from the closed-form undepleted-pump expression."""
-    try:
-        import mpmath as mp
-    except ImportError as exc:
-        raise ImportError(
-            "mpmath is required for complex incomplete Gamma evaluation. "
-            "Install it or provide real-valued inputs."
-        ) from exc
-    mp.mp.dps = 80
-    lg.debug("mpmath precision set to {dps} digits.", dps=mp.mp.dps)
-    mu_arr = np.asarray(mu, dtype=complex)
-    A_mp = mp.mpc(A)
-    exp_factor = mp.e ** (2.0 * alpha_p * length)
-    lg.debug(
-        "rho inputs: alpha_p={alpha_p:.3e}, L={length:.3e}, A={A}, exp_factor={exp_factor}",
-        alpha_p=alpha_p,
-        length=length,
-        A=_fmt_c(complex(A)),
-        exp_factor=str(exp_factor),
-    )
-    out = np.empty(mu_arr.shape, dtype=float)
-    fail_count = 0
-    for idx, mu_val in np.ndenumerate(mu_arr):
-        mu_mp = mp.mpc(mu_val)
-        lg.debug(
-            "gammainc call idx={} mu={} A={} Aexp={}",
-            idx,
-            _fmt_c(complex(mu_val)),
-            _fmt_c(complex(A_mp)),
-            _fmt_c(complex(A_mp * exp_factor)),
-        )
-        try:
-            term = mp.power(A_mp, mu_mp) * (
-                mp.gammainc(-mu_mp, A_mp, mp.inf)
-                - mp.gammainc(-mu_mp, A_mp * exp_factor, mp.inf)
-            )
-            rho_val = mp.e ** (A_mp) / (2.0 * alpha_p) * abs(term) ** 2
-            out_val = float(mp.re(rho_val))
-            out[idx] = out_val
-            if not np.isfinite(out_val):
-                lg.debug(
-                    "non-finite rho at idx={} mu={} rho={}",
-                    idx,
-                    _fmt_c(complex(mu_val)),
-                    _fmt_c(complex(rho_val)),
-                )
-        except Exception:
-            fail_count += 1
-            lg.debug("gammainc failed at idx={} mu={}", idx, _fmt_c(complex(mu_val)))
-            out[idx] = np.nan
-    if fail_count:
-        lg.warning("gammainc failed for {} of {} points; values set to NaN.", fail_count, out.size)
-    return out
 
 
 def _beta_of_omega(
@@ -116,6 +61,66 @@ def _beta_eval(
     if spline is not None:
         return np.asarray(spline(omega), dtype=float)
     return _beta_of_omega(np.asarray(omega, dtype=float), omega_prof, beta_prof)
+
+
+def _signal_launch_power(system: System, signal_wl: float) -> float:
+    freqs = system.wdm.frequency_grid()
+    if freqs.size == 0:
+        raise ValueError("No WDM channels available to infer signal launch power.")
+    wl_grid = c0 / freqs
+    if hasattr(system, "_initial_signal_powers_dbm"):
+        powers_dbm = system._initial_signal_powers_dbm()
+        idx = int(np.argmin(np.abs(wl_grid - signal_wl)))
+        p_dbm = float(powers_dbm[idx])
+        lg.info(
+            "Signal launch power from nearest channel: {:.3f} dBm at {:.2f} nm.",
+            p_dbm,
+            wl_grid[idx] * 1e9,
+        )
+        return float(dBm2watt(p_dbm))
+    launch_dbm = system.launch_power if system.launch_power is not None else -5.0
+    lg.info("Signal launch power from system.launch_power: {:.3f} dBm.", launch_dbm)
+    return float(dBm2watt(launch_dbm))
+
+
+def _pump_profile(
+    system: System,
+    fiber,
+    z: np.ndarray,
+    pump_wl: float,
+    override_dbm: float | None,
+) -> np.ndarray:
+    z = np.asarray(z, dtype=float)
+    pump_specs = system.pump_specs or []
+    total = np.zeros_like(z)
+    if override_dbm is not None or not pump_specs:
+        direction = -1
+        if pump_specs:
+            direction = -1 if np.any([p.direction < 0 for p in pump_specs]) else 1
+        p_launch = float(dBm2watt(override_dbm if override_dbm is not None else 0.0))
+        alpha_p_db_m = fiber.attenuation_at(pump_wl)
+        alpha_p = alpha_to_linear(alpha_p_db_m)
+        if direction < 0:
+            total = p_launch * np.exp(-alpha_p * (fiber.length - z))
+        else:
+            total = p_launch * np.exp(-alpha_p * z)
+        lg.info(
+            "Using single pump profile (override): dir={} P_launch={:.3e} W.",
+            direction,
+            p_launch,
+        )
+        return total
+
+    for pump in pump_specs:
+        p_launch = float(dBm2watt(pump.power_dbm))
+        alpha_p_db_m = fiber.attenuation_at(pump.wavelength)
+        alpha_p = alpha_to_linear(alpha_p_db_m)
+        if pump.direction < 0:
+            profile = p_launch * np.exp(-alpha_p * (fiber.length - z))
+        else:
+            profile = p_launch * np.exp(-alpha_p * z)
+        total += profile
+    return total
 
 
 def _clip_omega_range(omega_center: float, omega_max: float, omega_prof: np.ndarray) -> float:
@@ -157,23 +162,6 @@ def _report_inputs(alpha_s: float, alpha_p: float, length: float, A: complex, de
         lg.warning("exp(2*alpha_p*L) is extremely large; numerical stability may be limited.")
 
 
-def _rho_attenuation(alpha: float, delta_beta: np.ndarray, length: float) -> np.ndarray:
-    """Attenuation-only efficiency with full dispersion-based delta_beta."""
-    alpha = float(alpha)
-    delta_beta = np.asarray(delta_beta, dtype=float)
-    denom = 2.0 * alpha - 1j * delta_beta
-    numer = 1.0 - np.exp(-(2.0 * alpha - 1j * delta_beta) * length)
-    return np.abs(numer / denom) ** 2
-
-
-def _effective_length(alpha: float, length: float) -> float:
-    alpha = float(alpha)
-    length = float(length)
-    if alpha <= 0.0:
-        return length
-    return (1.0 - np.exp(-2.0 * alpha * length)) / (2.0 * alpha)
-
-
 def _select_beta2_zero(
     wl: np.ndarray,
     beta2: np.ndarray,
@@ -203,14 +191,44 @@ def _select_beta2_zero(
     return omega0, wl0, beta3
 
 
-def _resolve_pump_power(system: System, override_dbm: float | None) -> float:
+def _resolve_pump_power(system: System, fiber, override_dbm: float | None) -> float:
     if override_dbm is not None:
+        lg.info("Pump power override: {:.3f} dBm ({:.3e} W).", override_dbm, dBm2watt(override_dbm))
         return float(dBm2watt(override_dbm))
     pump_specs = system.pump_specs or []
     if not pump_specs:
         return 0.0
-    pump_dbm = np.array([p.power_dbm for p in pump_specs], dtype=float)
-    return float(np.sum(dBm2watt(pump_dbm)))
+    pump_p0 = []
+    backward_count = 0
+    for pump in pump_specs:
+        p_launch = float(dBm2watt(pump.power_dbm))
+        direction = getattr(pump, "direction", 1)
+        p_corr = p_launch
+        corr_factor = 1.0
+        if direction < 0:
+            alpha_p_db_m = fiber.attenuation_at(pump.wavelength)
+            alpha_p = alpha_to_linear(alpha_p_db_m)
+            corr_factor = float(np.exp(-alpha_p * fiber.length))
+            p_corr = p_launch * corr_factor
+            backward_count += 1
+        pump_p0.append(p_corr)
+        lg.info(
+            "Pump {:.1f} nm dir={} P_launch={:.3e} W ({:.2f} dBm) Pp0={:.3e} W corr={:.3e}",
+            pump.wavelength * 1e9,
+            direction,
+            p_launch,
+            pump.power_dbm,
+            p_corr,
+            corr_factor,
+        )
+    total = float(np.sum(pump_p0))
+    if backward_count:
+        lg.info(
+            "Applied backward pump correction to {} pumps; total Pp0={:.3e} W.",
+            backward_count,
+            total,
+        )
+    return total
 
 
 def main() -> None:
@@ -222,11 +240,22 @@ def main() -> None:
     ap.add_argument("--omega-max-ghz", type=float, default=100.0)
     ap.add_argument("--omega-points", type=int, default=400)
     ap.add_argument("--omega-offset-ghz", type=float, default=0.0)
+    ap.add_argument(
+        "--omega-both-signs",
+        action="store_true",
+        help="Include negative Omega values (symmetric about 0).",
+    )
     ap.add_argument("--target-wl-nm", type=float, default=1310.0)
     ap.add_argument("--signal-wl-nm", type=float, default=None)
     ap.add_argument("--pump-wl-nm", type=float, default=None)
     ap.add_argument("--pump-power-dbm", type=float, default=None)
     ap.add_argument("--rho-pol", type=float, default=2 / 3)
+    ap.add_argument(
+        "--rho-model",
+        choices=("raman", "attenuation"),
+        default="raman",
+        help="Select rho model: undepleted Raman or attenuation-only.",
+    )
     ap.add_argument("--logy", action="store_true", help="Use log scale on rho axis.")
     args = ap.parse_args()
     lg.info(
@@ -238,6 +267,8 @@ def main() -> None:
         args.omega_points,
         args.omega_offset_ghz,
     )
+    lg.info("omega_both_signs={}", args.omega_both_signs)
+    lg.info("rho_model={}", args.rho_model)
 
     system = System.from_toml(args.config)
     fiber = system.fiber
@@ -271,7 +302,7 @@ def main() -> None:
 
     aeff = fiber.effective_area_at(signal_wl)
     c_r = effective_raman_gain(fiber.raman_coefficient, args.rho_pol, aeff)
-    p_p0 = _resolve_pump_power(system, args.pump_power_dbm)
+    p_p0 = _resolve_pump_power(system, fiber, args.pump_power_dbm)
     lg.info("Aeff={:.3e} m^2  C_R={:.3e}  Pp0={:.3e} W", aeff, c_r, p_p0)
 
     A = -c_r * p_p0 / (2.0 * alpha_p)
@@ -289,15 +320,29 @@ def main() -> None:
         except Exception as exc:
             lg.warning("Beta spline unavailable; falling back to linear interpolation: {}", exc)
 
-    omega_offset = 2.0 * np.pi * args.omega_offset_ghz * 1e9
+    omega_min_ghz = abs(args.omega_min_ghz)
+    omega_max_ghz = abs(args.omega_max_ghz)
+    if args.omega_min_ghz < 0.0 or args.omega_max_ghz < 0.0:
+        lg.warning("omega-min/omega-max should be positive; using absolute values.")
+    omega_offset = args.omega_offset_ghz * 1e9
     omega_center = omega0 + omega_offset
-    omega_min = 2.0 * np.pi * args.omega_min_ghz * 1e9
-    omega_max = 2.0 * np.pi * args.omega_max_ghz * 1e9
+    omega_min = omega_min_ghz * 1e9
+    omega_max = omega_max_ghz * 1e9
     omega_max = _clip_omega_range(omega_center, omega_max, omega_prof)
+    omega_max_ghz = omega_max / 1e9
     if omega_min > omega_max:
         raise ValueError("omega_min exceeds omega_max after clipping.")
     lg.debug("omega_center={:.3e} omega_min={:.3e} omega_max={:.3e}", omega_center, omega_min, omega_max)
-    omega_grid = np.linspace(omega_min, omega_max, args.omega_points)
+    omega_pos = np.linspace(omega_min, omega_max, args.omega_points)
+    if args.omega_both_signs:
+        if omega_min == 0.0:
+            omega_neg = -omega_pos[1:][::-1]
+        else:
+            omega_neg = -omega_pos[::-1]
+        omega_grid = np.concatenate([omega_neg, omega_pos])
+        lg.debug("Omega grid includes negative values; total points={}.", omega_grid.size)
+    else:
+        omega_grid = omega_pos
 
     beta_c = _beta_eval(omega_center, omega_prof, beta_vals, beta_spline)
     beta_p = _beta_eval(omega_center + omega_grid, omega_prof, beta_vals, beta_spline)
@@ -321,37 +366,75 @@ def main() -> None:
         float(np.max(ratio_2)),
     )
 
-    rho3 = _rho_undepleted(mu3, A, alpha_p, fiber.length)
-    rho2 = _rho_undepleted(mu2, A, alpha_p, fiber.length)
-    rho_att_3 = _rho_attenuation(alpha_s, delta_beta_3, fiber.length)
-    rho_att_2 = _rho_attenuation(alpha_s, delta_beta_2, fiber.length)
-    l_eff = _effective_length(alpha_s, fiber.length)
+    rho_att_3 = rho_attenuation(alpha_s, delta_beta_3, fiber.length)
+    rho_att_2 = rho_attenuation(alpha_s, delta_beta_2, fiber.length)
+    l_eff = effective_length(alpha_s, fiber.length)
     l_eff_sq = l_eff ** 2
     lg.info("L_eff={:.3e} m  L_eff^2={:.3e}", l_eff, l_eff_sq)
     rho_att_3_norm = rho_att_3 / l_eff_sq
     rho_att_2_norm = rho_att_2 / l_eff_sq
+    if args.rho_model == "attenuation":
+        rho3 = rho_att_3_norm
+        rho2 = rho_att_2_norm
+        lg.info("Using attenuation-only rho (normalized by L_eff^2).")
+    else:
+        rho3 = rho_undepleted(mu3, A, alpha_p, fiber.length, log_points=True)
+        rho2 = rho_undepleted(mu2, A, alpha_p, fiber.length, log_points=True)
+        if l_eff_sq > 0.0:
+            rho3 = rho3 / l_eff_sq
+            rho2 = rho2 / l_eff_sq
+            lg.info("Normalized rho by L_eff^2.")
     if np.any(~np.isfinite(rho3)):
         lg.warning("rho3 contains non-finite values ({} / {}).", np.sum(~np.isfinite(rho3)), rho3.size)
     if np.any(~np.isfinite(rho2)):
         lg.warning("rho2 contains non-finite values ({} / {}).", np.sum(~np.isfinite(rho2)), rho2.size)
 
-    omega_ghz = omega_grid / (2.0 * np.pi * 1e9)
+    z_grid = np.linspace(0.0, fiber.length, 600)
+    pump_profile = _pump_profile(system, fiber, z_grid, pump_wl, args.pump_power_dbm)
+    integrand = c_r * pump_profile
+    gain_int = np.zeros_like(z_grid)
+    if z_grid.size > 1:
+        dz = np.diff(z_grid)
+        trap = 0.5 * (integrand[1:] + integrand[:-1]) * dz
+        gain_int[1:] = np.cumsum(trap)
+    signal_in = _signal_launch_power(system, signal_wl)
+    signal_profile = signal_in * np.exp(-alpha_s * z_grid + gain_int)
+    lg.info(
+        "Signal profile: P_in={:.3e} W, min={:.3e} W, max={:.3e} W.",
+        signal_in,
+        float(np.min(signal_profile)),
+        float(np.max(signal_profile)),
+    )
+
+    omega_ghz = omega_grid / 1e9
     lg.info(
         "Omega range for plotting: [{:.3f}, {:.3f}] GHz",
         float(np.min(omega_ghz)),
         float(np.max(omega_ghz)),
     )
-    plt.figure()
-    if args.logy:
-        plt.semilogy(omega_ghz, rho3, label=r"$\mathnormal \rho_3$")
-        plt.semilogy(omega_ghz, rho2, label=r"$\mathnormal \rho_2$")
+    if args.omega_both_signs:
+        omega_xlim_min = -omega_max_ghz
+        omega_xlim_max = omega_max_ghz
     else:
-        plt.plot(omega_ghz, rho3, label=r"$\mathnormal \rho_3$")
-        plt.plot(omega_ghz, rho2, label=r"$\mathnormal \rho_2$")
+        omega_xlim_min = omega_min_ghz
+        omega_xlim_max = omega_max_ghz
+    plt.figure()
+    if args.rho_model == "attenuation":
+        label3 = r"$\mathnormal \rho_{3,\mathrm{att}}$"
+        label2 = r"$\mathnormal \rho_{2,\mathrm{att}}$"
+    else:
+        label3 = r"$\mathnormal \rho_3$"
+        label2 = r"$\mathnormal \rho_2$"
+    if args.logy:
+        plt.semilogy(omega_ghz, rho3, label=label3)
+        plt.semilogy(omega_ghz, rho2, label=label2)
+    else:
+        plt.plot(omega_ghz, rho3, label=label3)
+        plt.plot(omega_ghz, rho2, label=label2)
     plt.axvline(0.0, color="0.7", lw=1.0, ls="--")
     plt.xlabel(r"$\mathnormal \Omega$ [GHz]")
-    plt.ylabel(r"$\mathnormal \rho$")
-    plt.xlim(args.omega_min_ghz, args.omega_max_ghz)
+    plt.ylabel(r"$\mathnormal \rho/L_{\mathrm{eff}}^2$")
+    plt.xlim(omega_xlim_min, omega_xlim_max)
     plt.legend(fontsize=8)
     plt.tight_layout()
 
@@ -367,7 +450,7 @@ def main() -> None:
     ax2.axhline(0.0, color="0.7", lw=1.0, ls="--")
     ax2.set_xlabel(r"$\mathnormal \Omega$ [GHz]")
     ax2.set_ylabel(r"$\mathnormal \Delta\beta$ [1/m]")
-    ax2.set_xlim(args.omega_min_ghz, args.omega_max_ghz)
+    ax2.set_xlim(omega_xlim_min, omega_xlim_max)
     ax2.legend(fontsize=8)
     fig2.tight_layout()
     out_beta = out_path.with_name(out_path.stem + "_deltabeta3" + out_path.suffix)
@@ -382,7 +465,7 @@ def main() -> None:
     axes_att[1].plot(omega_ghz, rho_att_2_norm, label=r"$\mathnormal \rho_{2,\mathrm{att}}/L_{\mathrm{eff}}^2$")
     axes_att[1].set_xlabel(r"$\mathnormal \Omega$ [GHz]")
     axes_att[1].set_ylabel(r"$\mathnormal \rho/L_{\mathrm{eff}}^2$")
-    axes_att[1].set_xlim(args.omega_min_ghz, args.omega_max_ghz)
+    axes_att[1].set_xlim(omega_xlim_min, omega_xlim_max)
     axes_att[1].legend(fontsize=8)
     fig_att.tight_layout()
     out_att = out_path.with_name(out_path.stem + "_atten" + out_path.suffix)
@@ -395,7 +478,7 @@ def main() -> None:
     ax3.axhline(beta_c, color="0.5", lw=1.0, ls="--", label=r"$\mathnormal \beta(\omega)$")
     ax3.set_xlabel(r"$\mathnormal \Omega$ [GHz]")
     ax3.set_ylabel(r"$\mathnormal \beta$ [1/m]")
-    ax3.set_xlim(args.omega_min_ghz, args.omega_max_ghz)
+    ax3.set_xlim(omega_xlim_min, omega_xlim_max)
     ax3.legend(fontsize=8)
     fig3.tight_layout()
     out_beta3 = out_path.with_name(out_path.stem + "_beta_threewave" + out_path.suffix)
@@ -407,12 +490,21 @@ def main() -> None:
     ax4.axhline(beta_c, color="0.5", lw=1.0, ls="--", label=r"$\mathnormal \beta(\omega)$")
     ax4.set_xlabel(r"$\mathnormal \Omega$ [GHz]")
     ax4.set_ylabel(r"$\mathnormal \beta$ [1/m]")
-    ax4.set_xlim(args.omega_min_ghz, args.omega_max_ghz)
+    ax4.set_xlim(omega_xlim_min, omega_xlim_max)
     ax4.legend(fontsize=8)
     fig4.tight_layout()
     out_beta2 = out_path.with_name(out_path.stem + "_beta_twowave" + out_path.suffix)
     fig4.savefig(out_beta2, dpi=200, bbox_inches="tight")
     lg.info("Saved two-wave beta plot to {}", out_beta2)
+
+    fig_sig, ax_sig = plt.subplots()
+    ax_sig.plot(z_grid, signal_profile)
+    ax_sig.set_xlabel(r"$\mathnormal z$ [m]")
+    ax_sig.set_ylabel(r"$\mathnormal P_s$ [W]")
+    fig_sig.tight_layout()
+    out_sig = out_path.with_name(out_path.stem + "_signal_profile" + out_path.suffix)
+    fig_sig.savefig(out_sig, dpi=200, bbox_inches="tight")
+    lg.info("Saved signal profile plot to {}", out_sig)
 
 
 if __name__ == "__main__":
