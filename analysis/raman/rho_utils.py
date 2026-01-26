@@ -1,11 +1,80 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
 import numpy as np
 from loguru import logger as lg
+
+from pynlin.utils import BaseModel, ConfigDict, EXTRA_IGNORE_CONFIG, _toml_load
 
 
 def _fmt_c(val: complex) -> str:
     return f"{val.real:.3e}{val.imag:+.3e}j"
+
+
+class FwmEstimationConfig(BaseModel):
+    config: str = "input/uwb_struct.toml"
+    out: Optional[str] = None
+    f_min_ghz: Optional[float] = None
+    f_max_ghz: Optional[float] = None
+    f_points: Optional[int] = None
+    f_offset_ghz: float = 0.0
+    f_both_signs: bool = False
+    f_grid_spacing_ghz: Optional[float] = None
+    target_wl_nm: float = 1310.0
+    center_wl_nm: Optional[float] = None
+    signal_wl_nm: Optional[float] = None
+    pump_wl_nm: Optional[float] = None
+    pump_power_dbm: Optional[float] = None
+    rho_pol: float = 2 / 3
+    rho_model: str = "raman"
+    logy: Optional[bool] = None
+    normalize_leff: Optional[bool] = None
+    db: Optional[bool] = None
+    db_floor: Optional[float] = None
+    band: str = "O"
+    animate_band: bool = False
+    animate_frames: int = 30
+    animate_fps: int = 4
+    animate_dpi: int = 200
+
+    if ConfigDict:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        class Config:
+            extra = "ignore"
+
+
+def load_fwm_config(path: Optional[str | Path] = None) -> FwmEstimationConfig:
+    cfg_path = Path(path) if path is not None else Path("input/fwm_estimation.toml")
+    if not cfg_path.exists():
+        lg.warning("FWM config file not found at {}; using defaults.", cfg_path)
+        return FwmEstimationConfig()
+    data = _toml_load(cfg_path)
+    if isinstance(data, dict) and "fwm_estimation" in data:
+        data = data["fwm_estimation"]
+    if isinstance(data, dict):
+        omega_keys = {
+            "omega_min_ghz": "f_min_ghz",
+            "omega_max_ghz": "f_max_ghz",
+            "omega_offset_ghz": "f_offset_ghz",
+            "omega_points": "f_points",
+            "omega_both_signs": "f_both_signs",
+        }
+        converted = False
+        for old_key, new_key in omega_keys.items():
+            if old_key in data and new_key not in data:
+                val = data[old_key]
+                if old_key in ("omega_min_ghz", "omega_max_ghz", "omega_offset_ghz") and val is not None:
+                    val = float(val) / (2.0 * np.pi)
+                data[new_key] = val
+                converted = True
+        if converted:
+            lg.warning("Deprecated omega_* config keys detected; converted to f_* (frequency GHz).")
+    cfg = FwmEstimationConfig(**(data or {}))
+    lg.info("Loaded FWM config from {}.", cfg_path)
+    return cfg
 
 
 def rho_undepleted(
