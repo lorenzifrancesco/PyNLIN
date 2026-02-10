@@ -1,0 +1,12 @@
+/* Code blocks (Pygments output) */
+div.highlight pre,
+div.highlight pre code,
+pre.literal-block {
+  font-size: 16px !important;
+  line-height: 1.45 !important;
+}
+
+/* Inline code */
+code, tt {
+  font-size: 0.95em !important;
+}

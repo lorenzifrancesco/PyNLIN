@@ -1,0 +1,9 @@
+sphinx>=7.0
+sphinx-rtd-theme
+myst-parser
+sphinx-autodoc-typehints
+numpy
+scipy
+matplotlib
+h5py
+tqdm
