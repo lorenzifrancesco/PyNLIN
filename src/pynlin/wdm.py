@@ -196,10 +196,15 @@ class BaseWDM:
             print(summary)
 
 
+DEFAULT_CENTER_FREQUENCY_HZ = 193.1e12
+
+
 class RegularWDM(BaseWDM):
     """Uniform-grid WDM."""
 
-    def __init__(self, spacing: float, num_channels: int, center_frequency: float):
+    def __init__(self, spacing: float, num_channels: int, center_frequency: float | None = None):
+        if center_frequency is None:
+            center_frequency = DEFAULT_CENTER_FREQUENCY_HZ
         self.spacing = spacing
         self.num_channels = num_channels
         self.central_frequency = center_frequency

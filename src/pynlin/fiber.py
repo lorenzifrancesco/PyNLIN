@@ -3,7 +3,20 @@ from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple
 
 import numpy as np
-import torch
+try:
+    import torch  # type: ignore
+    _TORCH_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    _TORCH_AVAILABLE = False
+
+    class _TorchStub:
+        class Tensor:
+            pass
+
+        def __getattr__(self, name):
+            raise ModuleNotFoundError("torch is required for this operation.")
+
+    torch = _TorchStub()  # type: ignore
 from numpy import polyval
 from scipy.constants import speed_of_light as c0
 from scipy.interpolate import UnivariateSpline
@@ -110,6 +123,7 @@ class SMFiberConfig(FiberConfig):
     effective_area_values: Optional[Sequence[float]] = None
     attenuation_wavelengths: Optional[Sequence[float]] = None
     attenuation_values: Optional[Sequence[float]] = None
+    force_constant_dispersion: bool = False
 
     if ConfigDict:
         model_config = ConfigDict(extra="ignore")
@@ -154,7 +168,7 @@ class Fiber:
 
     def __init__(
         self,
-        fiber_type,
+        fiber_type="SM",
         losses=None,
         raman_coefficient=7e-14,
         effective_area=80e-12,
@@ -212,6 +226,7 @@ class SMFiber(Fiber):
         beta_profile: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
         beta1_profile: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
         beta2_profile: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
+        force_constant_dispersion: bool = False,
     ):
         super().__init__("SM",
                          losses=losses,
@@ -231,6 +246,7 @@ class SMFiber(Fiber):
         self._beta1_profile = self._build_profile(beta1_profile)
         self._beta2_profile = self._build_profile(beta2_profile)
         self._freq_profile = None
+        self._force_constant_dispersion = bool(force_constant_dispersion)
 
         self.raman_efficiency = self.raman_coefficient / self.effective_area
 
@@ -275,6 +291,8 @@ class SMFiber(Fiber):
         return self._interp_profile(self._beta1_profile, wavelength)
 
     def beta2_at(self, wavelength: float) -> Optional[float]:
+        if self._force_constant_dispersion:
+            return self.beta2
         if self._beta2_profile is not None:
             return self._interp_profile(self._beta2_profile, wavelength)
         return self.beta2
@@ -293,6 +311,8 @@ class SMFiber(Fiber):
 
     def beta_spline_omega(self, s: float | None = 0.0, k: int = 3) -> UnivariateSpline:
         """Return an interpolating spline for beta(omega) with omega in rad/s."""
+        if self._force_constant_dispersion:
+            raise ValueError("beta_profile disabled by force_constant_dispersion.")
         if self._beta_profile is None:
             raise ValueError("beta_profile is not available for this fiber.")
         wl, beta = self._beta_profile
@@ -316,7 +336,11 @@ class SMFiber(Fiber):
     def from_config(cls, config: SMFiberConfig) -> "SMFiber":
         if config.path_to_csv:
             fiber_data = _load_fiber_csv(Path(config.path_to_csv), config.center_frequency)
-            beta2 = fiber_data["beta2_center"] if fiber_data["beta2_center"] is not None else config.resolved_beta2(cls._DEFAULT_BETA2)
+            beta2_from_csv = fiber_data["beta2_center"]
+            if config.force_constant_dispersion and (config.beta2 is not None or config.dispersion is not None):
+                beta2 = config.resolved_beta2(cls._DEFAULT_BETA2)
+            else:
+                beta2 = beta2_from_csv if beta2_from_csv is not None else config.resolved_beta2(cls._DEFAULT_BETA2)
             eff_area = fiber_data["aeff_center"] if fiber_data["aeff_center"] is not None else config.effective_area
             eff_profile = (fiber_data["wavelengths"], fiber_data["aeff_profile"])
             att_profile = (fiber_data["wavelengths"], fiber_data["alpha_profile"])
@@ -326,6 +350,17 @@ class SMFiber(Fiber):
             beta_center = None  # do not expose scalar beta in SMFiber
             beta1_center = None
             freq_profile = fiber_data["frequencies"]
+            if config.force_constant_dispersion:
+                beta2_profile = None
+                beta_profile = None
+                beta1_profile = None
+                beta1_center = fiber_data["beta1_center"]
+                if beta1_center is not None and freq_profile is not None:
+                    omega = 2.0 * np.pi * np.asarray(freq_profile, dtype=float)
+                    omega_c = 2.0 * np.pi * (
+                        float(config.center_frequency) if config.center_frequency is not None else float(np.mean(freq_profile))
+                    )
+                    beta1_profile = (fiber_data["wavelengths"], beta1_center + beta2 * (omega - omega_c))
         else:
             beta2 = config.resolved_beta2(cls._DEFAULT_BETA2)
             eff_area = config.effective_area
@@ -356,6 +391,7 @@ class SMFiber(Fiber):
             beta_profile=beta_profile,
             beta1_profile=beta1_profile,
             beta2_profile=beta2_profile,
+            force_constant_dispersion=config.force_constant_dispersion,
         )
         if freq_profile is not None:
             fiber._freq_profile = np.array(freq_profile)
@@ -415,11 +451,15 @@ class OICoefficients:
     values: list[torch.Tensor]
 
     def __init__(self, modes: int, input_values: np.ndarray):
+        if not _TORCH_AVAILABLE:
+            raise ModuleNotFoundError("torch is required for OICoefficients.")
         self.values = [torch.from_numpy(v[:modes, :modes]) for v in input_values]
         # self.num_modes, dim=2
         # ).float()
 
     def evaluate_oi_tensor(self, wavelengths: torch.Tensor) -> torch.Tensor:
+        if not _TORCH_AVAILABLE:
+            raise ModuleNotFoundError("torch is required for evaluate_oi_tensor.")
         """Evaluate the overlap integral between the pump and signal modes.+
 
         Parameters
@@ -468,6 +508,7 @@ class MMFiber(Fiber):
         gamma=1.3 * 1e-3,
         length=100e3,
         n_modes=4,
+        modes=None,
         overlap_integrals=None,
         mode_names=None,
     ):
@@ -483,6 +524,10 @@ class MMFiber(Fiber):
         =======
         self.overlap_integrals : (6, modes, modes) used only in the Numpy solver: can also contain also the average if needed!
         """
+        if modes is not None:
+            if n_modes is not None and n_modes != modes:
+                raise ValueError(f"Conflicting mode counts: n_modes={n_modes} vs modes={modes}")
+            n_modes = modes
         super().__init__("MM",
                          losses=losses,
                          raman_coefficient=raman_coefficient,
@@ -498,7 +543,10 @@ class MMFiber(Fiber):
         # all the quadratic fit parameters are used in oi_polynomial_expansion
 
         self.overlap_integrals = overlap_integrals
-        self.torch_oi = OICoefficients(self.n_modes, overlap_integrals) if overlap_integrals is not None else None
+        if overlap_integrals is not None and _TORCH_AVAILABLE:
+            self.torch_oi = OICoefficients(self.n_modes, overlap_integrals)
+        else:
+            self.torch_oi = None
         self.group_delay = GroupDelay(self.n_modes, group_delay) if group_delay is not None else None
         self.mode_names = mode_names
 

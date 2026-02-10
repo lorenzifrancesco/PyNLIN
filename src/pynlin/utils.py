@@ -3,7 +3,20 @@ from typing import Mapping
 
 import numpy as np
 import scipy.constants
-import torch
+try:
+    import torch  # type: ignore
+    _TORCH_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    _TORCH_AVAILABLE = False
+
+    class _TorchStub:
+        class Tensor:
+            pass
+
+        def __getattr__(self, name):
+            raise ModuleNotFoundError("torch is required for this operation.")
+
+    torch = _TorchStub()  # type: ignore
 from scipy.constants import lambda2nu, nu2lambda
 from scipy.constants import speed_of_light as c0
 
@@ -108,6 +121,8 @@ def oi_law(l1, l2, params):
 
  
 def oi_polynomial_expansion(wl, values):
+    if not _TORCH_AVAILABLE:
+        raise ModuleNotFoundError("torch is required for oi_polynomial_expansion.")
   
     A1, B1, A2, B2, X, C = values
     batch_size = wl.shape[0]

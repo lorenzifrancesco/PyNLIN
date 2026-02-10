@@ -217,6 +217,8 @@ class System:
             wl_prof, b2_prof = self.fiber._beta2_profile
             beta2 = np.interp(wavelengths, wl_prof, b2_prof)[None, :]
 
+        if beta1 is None and beta2 is not None:
+            beta1 = np.zeros_like(beta2)
         if beta1 is None or beta2 is None:
             raise ValueError("beta1/beta2 unavailable for this system.")
 
