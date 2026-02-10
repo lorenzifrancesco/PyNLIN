@@ -146,7 +146,7 @@ def _array_stats(arr: np.ndarray) -> Dict[str, Any]:
     return stats
 
 
-def _log_profile_stats(label: str, arr: np.ndarray, level: str = "info") -> None:
+def _log_profile_stats(label: str, arr: np.ndarray, level: str = "trace") -> None:
     """Lightweight logger for array stats."""
     stats = _array_stats(arr)
     msg = (
@@ -410,7 +410,7 @@ class SMFWidebandAmplifier:
 
         for s, lmb in enumerate(lam):
             pumP = pumP_tgt * float(lmb)
-            lg.info(f" step {s+1}/{lam.size}: pump scale lambda={lmb:.3e}")
+            lg.trace(f" step {s+1}/{lam.size}: pump scale lambda={lmb:.3e}")
             _log_profile_stats(f" step {s+1} pump target W", pumP, level="debug")
 
             P_u = self._solve_jiang_unidirectional_inner(
@@ -429,7 +429,7 @@ class SMFWidebandAmplifier:
 
             # Keep for warm-start next outer step
             P_prev_init = P_u
-            _log_power_stats(f" step {s+1} combined profile", P_u, level="info")
+            _log_power_stats(f" step {s+1} combined profile", P_u, level="trace")
             if Np:
                 _log_power_stats(f" step {s+1} pumps", P_u[pump_idx, :], level="debug")
             _log_power_stats(f" step {s+1} signals", P_u[sig_idx, :], level="debug")
@@ -479,7 +479,7 @@ class SMFWidebandAmplifier:
         Ns = sig_idx.size
         N = Np + Ns
         span_m = float(z[-1] - z[0])
-        lg.info(f" grid: M={M}, dz={dz:.3e} m, span={span_m:.3e} m ({span_m*1e-3:.3f} km)")
+        lg.trace(f" grid: M={M}, dz={dz:.3e} m, span={span_m:.3e} m ({span_m*1e-3:.3f} km)")
 
         # Build boundary vector at z=0 (signals fixed; pumps unknown but will be iteratively determined)
         # Use initial guess for pumps at z=0 derived from backward loss-only anchored at z=L.
@@ -489,7 +489,7 @@ class SMFWidebandAmplifier:
             L = float(z[-1] - z[0])
             # physical backward: P(z) = P(L) * exp(-loss*(L - z)) => at z=0: P0 = P(L)*exp(-loss*L)
             Pin0[pump_idx] = np.maximum(pumP * np.exp(-losses[pump_idx] * L), cfg.pump_power_floor)
-        _log_power_stats(" Pin0 (signals+init pumps)", Pin0, level="info")
+        _log_power_stats(" Pin0 (signals+init pumps)", Pin0, level="trace")
 
         # Initialize full profiles
         if P_init is not None and P_init.shape == (N, M):
@@ -507,7 +507,7 @@ class SMFWidebandAmplifier:
                 P[pump_idx, :] = pumP[:, None] * np.exp(-losses[pump_idx, None] * (L - (z[None, :] - z[0])))
                 P[pump_idx, :] = np.maximum(P[pump_idx, :], cfg.pump_power_floor)
             lg.debug(" Initialized P with loss-only profiles")
-        _log_power_stats(" P initial", P, level="info")
+        _log_power_stats(" P initial", P, level="trace")
 
         # --- Jiang "ts_dB" initial down-scaling to avoid divergence when pumps dominate ---
         if Np:
@@ -522,7 +522,7 @@ class SMFWidebandAmplifier:
                 ts_db = 0.0
         else:
             ts_db = 0.0
-        lg.info(f" Initial total pump scaling ts_dB={ts_db:.3f} dB")
+        lg.trace(f" Initial total pump scaling ts_dB={ts_db:.3f} dB")
         
         # Iteration count
         if cfg.inner_iters is None:
@@ -544,24 +544,24 @@ class SMFWidebandAmplifier:
         else:
             pump_ref0 = np.array([], dtype=float)
 
-        lg.info(
+        lg.trace(
             f" ts_dB={ts_db:.3f}, liter={liter}, dz={dz:.3e}, M={M}, N={N}, pump_ref0(L) sum={float(np.sum(pump_ref0)) if pump_ref0.size else 0.0:.3e}"
         )
         if delta_db.size:
             _log_profile_stats(" delta_db schedule per iter", delta_db, level="debug")
             _log_profile_stats(" cumulative delta_db", cum_db, level="debug")
         if pump_ref0.size:
-            _log_power_stats(" pump_ref0 at z=L", pump_ref0, level="info")
+            _log_power_stats(" pump_ref0 at z=L", pump_ref0, level="trace")
 
         # Fixed-point iterations
         last_sig = None
         for k in range(liter):
-            lg.info(f" iteration {k+1}/{liter}")
+            lg.trace(f" iteration {k+1}/{liter}")
             # Integrals of current powers
             I = _cumtrapz_rows(P, dz)  # (N,M)
             S = G @ I  # (N,M)
-            _log_profile_stats(f" iter {k+1} integral I (W*m)", I, level="debug")
-            _log_profile_stats(f" iter {k+1} source S (dimensionless)", S, level="debug")
+            _log_profile_stats(f" iter {k+1} integral I (W*m)", I, level="trace")
+            _log_profile_stats(f" iter {k+1} source S (dimensionless)", S, level="trace")
 
             # Effective "input" at z=0 for this iteration
             Pin_k = np.array(P[:, 0], copy=False)
@@ -569,16 +569,16 @@ class SMFWidebandAmplifier:
             # Exponent: direction * (-loss*z + S)
             z_rel = (z - z[0])[None, :]  # (1,M)
             expo_raw = (-losses[:, None] * direction[:, None] * z_rel) + (direction[:, None] * S)
-            _log_profile_stats(f" iter {k+1} exponent raw", expo_raw, level="debug")
+            _log_profile_stats(f" iter {k+1} exponent raw", expo_raw, level="trace")
 
             # Clamp exponent to avoid overflow (still allows huge gain but prevents NaNs)
             expo = np.clip(expo_raw, -cfg.max_exponent, cfg.max_exponent)
-            _log_profile_stats(f" iter {k+1} exponent clipped", expo, level="debug")
+            _log_profile_stats(f" iter {k+1} exponent clipped", expo, level="trace")
 
             P_tilde = Pin_k[:, None] * np.exp(expo)
-            _log_power_stats(f" iter {k+1} P_tilde pre-boundary", P_tilde, level="info")
-            _log_power_stats(f" iter {k+1} P_tilde z=0", P_tilde[:, 0], level="debug")
-            _log_power_stats(f" iter {k+1} P_tilde z=L", P_tilde[:, -1], level="debug")
+            _log_power_stats(f" iter {k+1} P_tilde pre-boundary", P_tilde, level="trace")
+            _log_power_stats(f" iter {k+1} P_tilde z=0", P_tilde[:, 0], level="trace")
+            _log_power_stats(f" iter {k+1} P_tilde z=L", P_tilde[:, -1], level="trace")
 
             if cfg.nan_guard:
                 if not np.all(np.isfinite(P_tilde)):
@@ -603,20 +603,20 @@ class SMFWidebandAmplifier:
                 scale_vec = ref / out
                 P_tilde[pump_idx, :] *= scale_vec[:, None]
                 P_tilde[pump_idx, :] = np.maximum(P_tilde[pump_idx, :], cfg.pump_power_floor)
-                _log_power_stats(f" iter {k+1} pump ref at z=L", ref, level="info")
-                _log_power_stats(f" iter {k+1} pump out pre-scale z=L", out, level="info")
-                _log_profile_stats(f" iter {k+1} pump scale_vec", scale_vec, level="info")
-                _log_power_stats(f" iter {k+1} pumps post-scale z=0", P_tilde[pump_idx, 0], level="debug")
-                _log_power_stats(f" iter {k+1} pumps post-scale z=L", P_tilde[pump_idx, -1], level="info")
+                _log_power_stats(f" iter {k+1} pump ref at z=L", ref, level="trace")
+                _log_power_stats(f" iter {k+1} pump out pre-scale z=L", out, level="trace")
+                _log_profile_stats(f" iter {k+1} pump scale_vec", scale_vec, level="trace")
+                _log_power_stats(f" iter {k+1} pumps post-scale z=0", P_tilde[pump_idx, 0], level="trace")
+                _log_power_stats(f" iter {k+1} pumps post-scale z=L", P_tilde[pump_idx, -1], level="trace")
 
             # Early stop (signals)
             if cfg.early_stop_rtol is not None and last_sig is not None:
                 cur_sig = P_tilde[sig_idx, :]
                 denom = np.maximum(np.abs(last_sig), 1e-30)
                 rchg = float(np.max(np.abs(cur_sig - last_sig) / denom))
-                lg.info(f" iter {k+1} max rel change signals={rchg:.2e}")
+                lg.trace(f" iter {k+1} max rel change signals={rchg:.2e}")
                 if rchg < float(cfg.early_stop_rtol) and (k > max(5, int(0.3 * liter))):
-                    lg.debug(f" early stop at k={k} (max rel change signals={rchg:.2e})")
+                    lg.trace(f" early stop at k={k} (max rel change signals={rchg:.2e})")
                     P = P_tilde
                     break
                 last_sig = cur_sig.copy()
@@ -631,13 +631,13 @@ class SMFWidebandAmplifier:
             scale_final = pumP / outL
             P[pump_idx, :] *= scale_final[:, None]
             P[pump_idx, :] = np.maximum(P[pump_idx, :], cfg.pump_power_floor)
-            _log_profile_stats(" final pump scale factors", scale_final, level="info")
-            _log_power_stats(" final pumps z=L", P[pump_idx, -1], level="info")
+            _log_profile_stats(" final pump scale factors", scale_final, level="trace")
+            _log_power_stats(" final pumps z=L", P[pump_idx, -1], level="trace")
             _log_power_stats(" final pumps z=0", P[pump_idx, 0], level="debug")
 
         # Ensure exact signal boundary
         P[sig_idx, 0] = sigP
-        _log_power_stats(" Final P", P, level="info")
+        _log_power_stats(" Final P", P, level="trace")
         return P
 
 
