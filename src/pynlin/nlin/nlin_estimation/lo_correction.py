@@ -9,7 +9,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 import pynlin.io_utils as cfg
 from pynlin.log_init import init_logging
-from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
+from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator, ensure_i_low_dataset
 
 init_logging()
 from mpl_toolkits.axes_grid1.inset_locator import (
@@ -36,14 +36,16 @@ def build_lookup_integral_table_with_raman_custom(cf,
                                                   m_lo_truncation: int = 2,
                                                   ipulse: int = 1,
                                                   recompute=False,
-                                                  index=0) -> Tuple[callable, callable]:
+                                                  index=0,
+                                                  max_lld: float | None = None) -> Tuple[callable, callable]:
     """Precompute LO correction grid for an arbitrary Raman profile and return an interpolator."""
     # sampling the gvda, gvdb space, build the callable function
     # giving the correction integrals for fB_max and fB_min: integral(L/gvda, L/gvdb).
     _, _, _, fB_min, fB_max = load_fB(cf)
     n_samples = 20
     fiber_length = cf.fiber_length
-    lld = np.linspace(1e-30, MAX_LLD, n_samples)
+    lld_max = MAX_LLD if max_lld is None else max(float(max_lld), MAX_LLD)
+    lld = np.linspace(1e-30, lld_max, n_samples)
     ld = fiber_length / lld
     lg.debug(
         f"Useful range of L/LD from LO time integral data: {lld[0]:.2e} to {lld[-1]:.2e}")
@@ -57,6 +59,14 @@ def build_lookup_integral_table_with_raman_custom(cf,
     else:
         lg.info(f"Computing Raman correction grid and saving to {filename}")
         for m_lo in range(m_lo_truncation+1):
+            ensure_i_low_dataset(
+                m_lo=m_lo,
+                ipulse=ipulse,
+                baud_rate=float(cf.baud_rate),
+                fiber_length=float(fiber_length),
+                max_lld=float(lld[-1]),
+                recompute=recompute,
+            )
             add = np.zeros((n_samples, n_samples))
             lg.info(f"Calculating m_lo={m_lo}")
             I_low_dataset = np.load(
@@ -111,14 +121,16 @@ def build_lookup_integral_table_with_raman_custom(cf,
 def build_lookup_integral_table_with_raman(cf,
                                            m_lo_truncation: int = 2,
                                            ipulse: int = 1,
-                                           recompute=False) -> Tuple[callable, callable]:
+                                           recompute=False,
+                                           max_lld: float | None = None) -> Tuple[callable, callable]:
     """Generate interpolants for Raman-inclusive LO corrections at fB_min and fB_max."""
     # sampling the gvda, gvdb space, build the callable function
     # giving the correction integrals for fB_max and fB_min: integral(L/gvda, L/gvdb).
     _, _, _, fB_min, fB_max = load_fB(cf)
     n_samples = 20
     fiber_length = cf.fiber_length
-    lld = np.linspace(1e-30, MAX_LLD, n_samples)
+    lld_max = MAX_LLD if max_lld is None else max(float(max_lld), MAX_LLD)
+    lld = np.linspace(1e-30, lld_max, n_samples)
     ld = fiber_length / lld
     lg.debug(
         f"Useful range of L/LD from LO time integral data: {lld[0]:.2e} to {lld[-1]:.2e}")
@@ -138,6 +150,14 @@ def build_lookup_integral_table_with_raman(cf,
     else:
         lg.info(f"Computing Raman correction grid and saving to {filename}")
         for m_lo in range(m_lo_truncation+1):
+            ensure_i_low_dataset(
+                m_lo=m_lo,
+                ipulse=ipulse,
+                baud_rate=float(cf.baud_rate),
+                fiber_length=float(fiber_length),
+                max_lld=float(lld[-1]),
+                recompute=recompute,
+            )
             add_min = np.zeros((n_samples, n_samples))
             add_max = np.zeros((n_samples, n_samples))
             lg.info(f"Calculating m_lo={m_lo}")

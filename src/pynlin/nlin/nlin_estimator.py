@@ -44,6 +44,19 @@ _G = {
 }
 
 
+def _max_lld_from_beta2(cf, beta2: np.ndarray) -> float | None:
+    """Return max L/LD from beta2 grid."""
+    try:
+        L = float(cf.fiber_length)
+        br = float(cf.baud_rate)
+    except (TypeError, ValueError):
+        return None
+    max_b2 = float(np.nanmax(np.abs(beta2)))
+    if not np.isfinite(max_b2) or max_b2 <= 0.0:
+        return None
+    return L * br * br * max_b2
+
+
 def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
                  cf, ipulse, raman_min, raman_max, n_workers):
     """Initializer for multiprocessing workers to mmap shared grids and configs."""
@@ -290,7 +303,19 @@ def collision_coeffs_system(cf,
         fiber_type = "smf"
     else:
         fiber_type = "mmf"
-    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}.npy"
+
+    def _hz_tag(value_hz: float) -> str:
+        return f"{value_hz/1e9:.3f}GHz".replace(".", "p")
+
+    br_hz = float(cf.baud_rate)
+    spacing_hz = getattr(cf, "channel_spacing", None)
+    n_ch = int(cf.n_channels)
+
+    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
+    filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
+    if spacing_hz is not None:
+        filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
+    filename = f"{filename}.npy"
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
@@ -339,8 +364,9 @@ def collision_coeffs_system(cf,
         d_min = nc.dgd1
         d_max = nc.dgd2_g
         d_span = d_max - d_min
+        max_lld = _max_lld_from_beta2(cf, beta2)
         raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
-            cf, ipulse=ipulse)
+            cf, ipulse=ipulse, max_lld=max_lld)
         fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(cf)
 
         # precompute the Raman corrections from the numerical results of the integrals
@@ -412,7 +438,7 @@ def total_nlin(cf,
                use_kappa: bool = False,
                use_x_mode: bool = False,
                ) -> np.ndarray:
-    """Convert collision coefficients to NLIN power spectral density per channel."""
+    """Convert collision coefficients to NLIN power per channel."""
 
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2

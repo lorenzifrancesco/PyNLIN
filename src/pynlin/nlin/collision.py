@@ -281,6 +281,70 @@ def get_I_low(fiber, m_lo, recompute=False):
     return I_low_values_multipulse, lld_range
 
 
+def ensure_i_low_dataset(m_lo: int,
+                         ipulse: int,
+                         baud_rate: float,
+                         fiber_length: float,
+                         max_lld: float,
+                         recompute: bool = False) -> str:
+    """Ensure an I_low dataset exists for the requested L/LD range."""
+    if max_lld <= 0 or not np.isfinite(max_lld):
+        raise ValueError("max_lld must be a positive finite value.")
+    if ipulse not in (0, 1):
+        raise ValueError(f"Unsupported ipulse={ipulse}. Expected 0 (gaussian) or 1 (nyquist).")
+
+    save_path = f"results/I_low_{PULSE_NAMES[ipulse]}_m{m_lo}.npz"
+    if os.path.exists(save_path) and not recompute:
+        dataset = np.load(save_path, allow_pickle=False)
+        lld_range = dataset["lld_range"]
+        if float(lld_range[-1]) >= max_lld:
+            return save_path
+
+    lg.info(
+        f"Computing I_low table for m_lo={m_lo}, pulse={PULSE_NAMES[ipulse]}, "
+        f"L/LD_max={max_lld:.2f}"
+    )
+    if ipulse == 0:
+        pulse = GaussianPulse(
+            baud_rate=baud_rate,
+            num_symbols=220,
+            samples_per_symbol=32,
+        )
+    else:
+        pulse = NyquistPulse(
+            baud_rate=baud_rate,
+            num_symbols=220,
+            samples_per_symbol=32,
+            rolloff=0.0,
+        )
+
+    z = np.linspace(0, fiber_length, 2)
+    lld_range = np.linspace(1e-30, max_lld, 50)
+    LD_min = fiber_length / lld_range[-1]
+    beta2_max = 1.0 / (baud_rate**2 * LD_min)
+    beta2_range = np.linspace(1e-30, beta2_max, 50)
+
+    def compute_I_low(beta2a, beta2b):
+        I_low = np.real(m_th_time_integral_general(
+            m_lo, [z[-1]], pulse, 0.0, beta2a, beta2b
+        ))
+        return I_low[-1]
+
+    I_low_values = np.array([
+        [compute_I_low(beta2a, beta2b) for beta2a in beta2_range]
+        for beta2b in beta2_range
+    ], dtype=float) / baud_rate
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    np.savez(
+        save_path,
+        I_low_values=I_low_values,
+        lld_range=np.asarray(lld_range),
+        z=np.asarray(z),
+    )
+    return save_path
+
+
 # TODO implement the argument exchange symmetry, somehow
 def build_I_low_interpolator(I_low_dataset, ipulse: int):
     """Wrap RegularGridInterpolator for I_low values with basic input validation."""
