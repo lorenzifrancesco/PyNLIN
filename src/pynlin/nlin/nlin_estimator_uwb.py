@@ -67,6 +67,17 @@ def _get_effective_area(system: System) -> float:
     return area
 
 
+def _effective_area_array(system: System, freqs: np.ndarray) -> np.ndarray:
+    """Return effective area per channel, falling back to scalar if needed."""
+    fiber = getattr(system, "fiber", None)
+    if fiber is not None and hasattr(fiber, "effective_area_at"):
+        wl = c / freqs
+        vals = np.array([fiber.effective_area_at(float(w)) for w in wl], dtype=float)
+        if np.all(np.isfinite(vals)) and np.all(vals > 0):
+            return vals
+    return np.full_like(freqs, _get_effective_area(system), dtype=float)
+
+
 def _get_launch_power_w(system: System) -> float:
     lp_dbm = getattr(system, "launch_power", None)
     if lp_dbm is None:
@@ -214,7 +225,7 @@ def total_nlin_uwb(system: System,
                    launch_powers_w: Optional[np.ndarray] = None,
                    cache_path: Path | str | None = None,
                    recompute: bool = False) -> np.ndarray:
-    """Convert collision coefficients to NLIN PSD per channel with optional caching."""
+    """Convert collision coefficients to NLIN power per channel with optional caching."""
     cache_target = Path(cache_path) if cache_path is not None else None
     if cache_target is not None and cache_target.exists() and not recompute:
         lg.info(f"Loading cached total NLIN from {cache_target}")
@@ -256,12 +267,25 @@ def total_nlin_uwb(system: System,
             raise ValueError(f"launch_powers_w shape {P_raw.shape} incompatible with (n_modes,n_freqs)=({n_modes},{n_freqs})")
         lg.info("Using per-channel launch power override for NLIN.")
 
-    omega_0 = 2 * np.pi * system.center_frequency
+    freqs = system.wdm.frequency_grid()
+    if freqs.size != n_freqs:
+        raise ValueError(f"freq grid size {freqs.size} != n_freqs {n_freqs}")
     n2 = 2.6e-20  # constant of SiO2
-    gamma = n2 * omega_0 / (_get_effective_area(system) * c)
+    aeff = _effective_area_array(system, freqs)
+    gamma = n2 * (2 * np.pi * freqs) / (aeff * c)
+    gamma = gamma[None, :]
     constant_prefactor = (P_in_arr**3) * (gamma**2) / (br**2)
     lg.trace(
-        f"gamma={gamma:.2e} 1/(W m), P_in mean={P_in_arr.mean():.2e} W -> prefactor range [{constant_prefactor.min():.2e}, {constant_prefactor.max():.2e}]")
+        "gamma[min/mean/max]=({:.2e}, {:.2e}, {:.2e}) 1/(W m), "
+        "P_in mean={:.2e} W -> prefactor range [{:.2e}, {:.2e}]".format(
+            float(np.min(gamma)),
+            float(np.mean(gamma)),
+            float(np.max(gamma)),
+            float(P_in_arr.mean()),
+            float(constant_prefactor.min()),
+            float(constant_prefactor.max()),
+        )
+    )
 
     kappa2 = get_kappa2_matrix_uwb(system, use_kappa, use_x_mode)
 
@@ -310,6 +334,19 @@ def _beta_grids_from_system(system: System, freqs: np.ndarray) -> tuple[np.ndarr
     return system.beta_grids(freqs=freqs)
 
 
+def _max_lld_from_beta2(system: System, beta2: np.ndarray) -> float | None:
+    """Return max L/LD from beta2 grid."""
+    try:
+        L = float(system.fiber_length)
+        br = float(system.baud_rate)
+    except (TypeError, ValueError):
+        return None
+    max_b2 = float(np.nanmax(np.abs(beta2)))
+    if not np.isfinite(max_b2) or max_b2 <= 0.0:
+        return None
+    return L * br * br * max_b2
+
+
 def collision_coeffs_system_uwb(system: System,
                                 ipulse: int = 1,
                                 recompute: bool = False,
@@ -318,9 +355,20 @@ def collision_coeffs_system_uwb(system: System,
     """Compute or load channel-pair collision coefficients (SMF or MMF)."""
     fiber_type = "smf" if system.n_modes == 1 else "mmf"
     profile_tag = Path(profile_path).stem if profile_path is not None else None
+    def _hz_tag(value_hz: float) -> str:
+        return f"{value_hz/1e9:.3f}GHz".replace(".", "p")
+
+    br_hz = _get_baud_rate(system)
+    spacing_hz = getattr(system.wdm, "spacing", None)
+    freqs = system.wdm.frequency_grid()
+    n_ch = len(freqs)
+
     filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
     if profile_tag:
         filename = f"{filename}_{profile_tag}"
+    filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
+    if spacing_hz is not None:
+        filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
     filename = f"{filename}.npy"
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
@@ -328,14 +376,13 @@ def collision_coeffs_system_uwb(system: System,
 
     lg.info("Computing collision coefficients from scratch")
     nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
-    wdm = system.wdm
-    freqs = wdm.frequency_grid()
     beta1, beta2 = _beta_grids_from_system(system, freqs)
+    max_lld = _max_lld_from_beta2(system, beta2)
 
     d_min = nc.dgd1
     d_max = nc.dgd2_g
     raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
-        system, ipulse=ipulse, profile_path=profile_path)
+        system, ipulse=ipulse, profile_path=profile_path, max_lld=max_lld)
     fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(system, profile_path=profile_path)
 
     beta1_path = "/tmp/beta1_grid.npy"
@@ -385,7 +432,7 @@ def collision_coeffs_system_uwb(system: System,
         for fut in as_completed(futures):
             mA, nuA, block, elapsed = fut.result()
             collision_coeffs[mA, nuA, :, :] = block
-            lg.info(f"Finished NLIN for A(m={mA},nu={nuA:>5}) in {elapsed:>6.2f} s")
+            lg.trace(f"Finished NLIN for A(m={mA},nu={nuA:>5}) in {elapsed:>6.2f} s")
 
     np.save(filename, collision_coeffs)
     return collision_coeffs

@@ -40,7 +40,9 @@ def plot_case_study_fits():
 def compute_raman_profiles(system: System,
                            save_path: str = "results/uwb_power_profiles.npy",
                            integration_steps: int = 300,
-                           recompute: bool = False):
+                           recompute: bool = False,
+                           jiang_cfg=None,
+                           max_power_w: float | None = None):
     """Compute Raman profiles using the standard Jiang pipeline in power_profiles.py."""
     save_path = Path(save_path)
     if save_path.exists() and not recompute:
@@ -51,7 +53,21 @@ def compute_raman_profiles(system: System,
         cfg_path=cfg_path,
         output_path=save_path,
         z_points=integration_steps,
+        jiang_cfg=jiang_cfg,
     )
+    if max_power_w is not None:
+        payload = np.load(save_path, allow_pickle=True).item()
+        sig = payload.get("signal_sol")
+        if sig is None:
+            raise ValueError(f"Raman profile {save_path} missing signal_sol.")
+        sig = np.asarray(sig, dtype=float)
+        if not np.all(np.isfinite(sig)):
+            raise ValueError(f"Raman profile {save_path} contains non-finite values.")
+        max_val = float(np.nanmax(sig))
+        if max_val > float(max_power_w):
+            raise ValueError(
+                f"Raman profile {save_path} max power {max_val:.3e} W exceeds {max_power_w:.3e} W."
+            )
     lg.info(f"Saved Raman/ISRS power profiles to {save_path}")
     return
 
@@ -110,7 +126,7 @@ def plot_power_profiles(system: System, profile_path: Path | str) -> None:
 
 
 def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int) -> np.ndarray | None:
-    """Load per-channel launch powers (W) from a saved Raman profile file."""
+    """Load per-channel launch powers (W) from a saved Raman profile file (z≈0)."""
     p_path = Path(profile_path)
     if not p_path.exists():
         lg.warning(f"Profile file {p_path} not found; using uniform launch power.")
@@ -141,12 +157,13 @@ def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int
         lg.warning(f"Unexpected signal_sol shape {sig_power.shape}; using uniform launch power.")
         return None
 
-    span = float(z_grid[-1] - z_grid[0])
-    launch_override = np.trapezoid(sig_power, z_grid, axis=0) / span
+    # Use launch powers at fiber input (closest to z=0), not span-averaged power.
+    idx0 = int(np.argmin(np.abs(z_grid)))
+    launch_override = sig_power[idx0]
     if launch_override.size != expected_channels:
         lg.warning(f"Profile channels ({launch_override.size}) != expected ({expected_channels}); ignoring override.")
         return None
-    lg.info("Using per-channel launch powers from Raman profile for NLIN.")
+    lg.info("Using per-channel launch powers from Raman profile for NLIN (z≈0).")
     return launch_override
 
 
@@ -741,6 +758,10 @@ def plot_case_study_noise_histogram(
 
 
 if __name__ == "__main__":
+    if os.getenv("POGGIOLINI_WORKFLOW") == "1":
+        from analysis.poggiolini_nlin import run_poggiolini_workflow
+        run_poggiolini_workflow()
+        raise SystemExit(0)
     # First, compute and save Raman/ISRS power profiles using provided pumps
     cfg_path = Path("./input/uwb_struct.toml")
     system = System.from_toml(cfg_path)
