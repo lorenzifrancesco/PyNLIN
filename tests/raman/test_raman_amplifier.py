@@ -3,12 +3,9 @@ import numpy as np
 import pytest
 
 import pynlin.fiber
-import pynlin.raman.pytorch
-import pynlin.raman.pytorch.solvers
 import pynlin.raman.solvers
 import pynlin.utils
 import pynlin.wdm
-from pynlin.raman.pytorch.solvers import MMFRamanAmplifier
 from pynlin.utils import dBm2watt, watt2dBm
 
 
