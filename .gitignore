@@ -6,13 +6,18 @@
 INSTRUCTIONS.md
 /input
 /output
-/docs
+/docs/build
+/docs/log
 /logs 
-
+scalene*
+*.nb
+PCFM_v1.1
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.ipynb
+nlin.m
 
 # C extensions
 *.so
