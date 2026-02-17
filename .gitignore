@@ -16,6 +16,7 @@ PCFM_v1.1
 __pycache__/
 *.py[cod]
 *$py.class
+*.ipynb
 
 # C extensions
 *.so
