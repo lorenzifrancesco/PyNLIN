@@ -674,8 +674,12 @@ def log_fiber(fiber: Fiber, logger=None, level: str = "trace"):
 
 
 if __name__ == "__main__":
+    import sys
+
     # Simple smoke test: load nested-fiber TOML and print a short summary
-    cfg_path = Path("input/uwb_struct.toml")
+    if len(sys.argv) <= 1:
+        raise SystemExit("Usage: python -m pynlin.fiber <system.toml>")
+    cfg_path = Path(sys.argv[1])
     smf = SMFiber.from_toml(cfg_path)
     print(f"Loaded fiber from {cfg_path}:")
     print(fiber_summary(smf))

@@ -432,7 +432,9 @@ WDM = RegularWDM
 
 if __name__ == "__main__":
     import sys
-    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/uwb_struct.toml")
+    if len(sys.argv) <= 1:
+        raise SystemExit("Usage: python -m pynlin.wdm <system.toml>")
+    cfg_path = Path(sys.argv[1])
     wdm = wdm_from_toml(cfg_path)
     print(f"Loaded WDM from {cfg_path}:")
     print(wdm.summary())

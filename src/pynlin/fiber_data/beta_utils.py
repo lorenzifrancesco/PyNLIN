@@ -410,7 +410,7 @@ def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
     )
 
     freqs = wdm.frequency_grid()
-    X, Y = get_systems_dispersions()
+    X, Y = get_systems_dispersions(cf)
     max_gvd = np.max(np.abs(X))
     lg.info(f"max val X: {np.max(X):.2e}, max val Y: {np.max(Y):.2e}")
     

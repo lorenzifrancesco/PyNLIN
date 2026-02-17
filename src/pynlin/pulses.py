@@ -311,7 +311,9 @@ def pulse_from_toml(filepath: Path | str, **overrides) -> Pulse:
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     # quick load test from TOML (structured or flat)
-    toml_paths = sys.argv[1:] if len(sys.argv) > 1 else ["input/smf_struct.toml", "input/smf.toml"]
+    if len(sys.argv) <= 1:
+        raise SystemExit("Usage: python -m pynlin.pulses <system.toml> [more.toml ...]")
+    toml_paths = sys.argv[1:]
     for path in toml_paths:
         try:
             cfg = PulseConfig.from_toml(path)

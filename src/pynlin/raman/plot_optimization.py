@@ -41,7 +41,10 @@ def plot_profiles(signal_wavelengths,
     plt.figure()
 
     cmap = plt.get_cmap("plasma")
-    z_plot = np.linspace(0, cf.fiber_length, len(pump_solution[:, 0, 0])) * 1e-3
+    if pump_solution is None or pump_solution.size == 0:
+        z_plot = np.linspace(0, cf.fiber_length, signal_solution.shape[0]) * 1e-3
+    else:
+        z_plot = np.linspace(0, cf.fiber_length, len(pump_solution[:, 0, 0])) * 1e-3
     # lss = ["-", "--", "-.", ":", "-"]
     mode_labels = ["LP01", "LP11", "LP21", "LP02"]
     
@@ -106,34 +109,36 @@ def plot_profiles(signal_wavelengths,
     lg.info(f"Plot saved as {name}")
     plt.clf()
     #
-    plt.figure()
-    cmap = plt.get_cmap("plasma")
-    z_plot = np.linspace(0, cf.fiber_length, len(pump_solution[:, 0, 0])) * 1e-3  
-    #
-    if cf.n_modes == 1 and pump_solution is not None and pump_solution.size:
-        pump_freqs = lambda2nu(pump_wavelengths) if pump_wavelengths is not None else np.arange(pump_solution.shape[1])
-        order = np.argsort(pump_freqs)
-        colors = cmap(np.linspace(0, 1, len(order))) if len(order) else []
-        for idx, color in zip(order, colors):
-            plt.plot(
-                z_plot,
-                watt2dBm(pump_solution[:, idx, 0]),
-                color=color,
-                alpha=0.6,
-            )
+    if pump_solution is None or pump_solution.size == 0:
+        lg.info("No pump solution provided; skipping pump profile plot.")
     else:
-        for i in range(cf.n_modes):
-            plt.plot(z_plot,
-                     watt2dBm(pump_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.2)
-    plt.grid(False)
-    plt.ylabel(r"$\mathnormal P$ [dBm]")
-    plt.xlabel(r"$\mathnormal z$ [km]")
-    plt.ylim(bottom=-70)
-    # plt.legend()
-    plt.tight_layout()
-    name = get_next_filename("media/optimization/pump_profile", "pdf", use_active_naming=use_active_naming)
-    plt.savefig(name)
-    lg.info(f"Plot saved as {name}")
+        plt.figure()
+        cmap = plt.get_cmap("plasma")
+        z_plot = np.linspace(0, cf.fiber_length, len(pump_solution[:, 0, 0])) * 1e-3
+        if cf.n_modes == 1 and pump_solution.size:
+            pump_freqs = lambda2nu(pump_wavelengths) if pump_wavelengths is not None else np.arange(pump_solution.shape[1])
+            order = np.argsort(pump_freqs)
+            colors = cmap(np.linspace(0, 1, len(order))) if len(order) else []
+            for idx, color in zip(order, colors):
+                plt.plot(
+                    z_plot,
+                    watt2dBm(pump_solution[:, idx, 0]),
+                    color=color,
+                    alpha=0.6,
+                )
+        else:
+            for i in range(cf.n_modes):
+                plt.plot(z_plot,
+                         watt2dBm(pump_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.2)
+        plt.grid(False)
+        plt.ylabel(r"$\mathnormal P$ [dBm]")
+        plt.xlabel(r"$\mathnormal z$ [km]")
+        plt.ylim(bottom=-70)
+        # plt.legend()
+        plt.tight_layout()
+        name = get_next_filename("media/optimization/pump_profile", "pdf", use_active_naming=use_active_naming)
+        plt.savefig(name)
+        lg.info(f"Plot saved as {name}")
     #
     fiber_len = getattr(cf, "fiber_length", None)
     loss = -0.2e-3 * fiber_len if fiber_len is not None else 0.0

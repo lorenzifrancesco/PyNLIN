@@ -1,3 +1,5 @@
+"""Legacy NLIN estimator with Raman/GVD softplus fitting and collision summation."""
+
 import itertools as it
 import os
 import time
@@ -9,7 +11,7 @@ from scipy.constants import c
 from scipy.integrate import quad
 
 import pynlin
-import pynlin.io_utils as cfg
+from pynlin.constellation_stats import qam_mu0
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
@@ -31,8 +33,8 @@ from pynlin.nlin.nlin_estimation.raman_integrals import (
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 LLW_MIN = 0.01  # target L/LW
 LLW_MAX = 100.0
-# 64-QAM <|b_0|^4>/<|b_0|^2>^2 this is compatible with the (mu_0 - 1)=0.32*1.19 previously used.
-MU0 = 1.3809
+# 64-QAM <|b_0|^4>/<|b_0|^2>^2 from analytical constellation stats.
+MU0 = qam_mu0(64)
 
 # --- module-level globals that workers will read ---
 _G = {
@@ -42,6 +44,23 @@ _G = {
     "raman_min": None, "raman_max": None,
     "n_workers": None,
 }
+
+
+def _get_n_samples_numeric_n(cf) -> int:
+    """Read and validate ``n_samples_numeric_n`` from the active run config."""
+    numerics = getattr(cf, "numerics", None)
+    n_samples = getattr(numerics, "n_samples_numeric_n", None)
+    if n_samples is None:
+        n_samples = getattr(cf, "n_samples_numeric_n", None)
+    if n_samples is None:
+        raise ValueError(
+            "n_samples_numeric_n is required on the active run config "
+            "(cf.n_samples_numeric_n or cf.numerics.n_samples_numeric_n)."
+        )
+    n_samples = int(n_samples)
+    if n_samples <= 0:
+        raise ValueError(f"Invalid n_samples_numeric_n: {n_samples}")
+    return n_samples
 
 
 def _max_lld_from_beta2(cf, beta2: np.ndarray) -> float | None:
@@ -209,7 +228,14 @@ def fit_nlin(cf,
 
     lda = 1/(cf.baud_rate**2 * gvda) if gvda != 0 else 1e30
     ldb = 1/(cf.baud_rate**2 * gvdb) if gvdb != 0 else 1e30
-    ps_ideal = ideal_fit_coefficients(0.0, 0.0)
+    ps_ideal = ideal_fit_coefficients(
+        0.0,
+        0.0,
+        ipulse=ipulse,
+        fiber_length=float(cf.fiber_length),
+        baud_rate=float(cf.baud_rate),
+        n_samples_numeric_n=_get_n_samples_numeric_n(cf),
+    )
 
     if np.all(fB == 1.0):
         lo_value_perfect = gvd_correction(cf,
@@ -321,8 +347,7 @@ def collision_coeffs_system(cf,
         return np.load(filename)
     else:
         lg.info(f"Computing collision coefficients from scratch")
-        # load numerical config
-        nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
+        _get_n_samples_numeric_n(cf)
         T = 1 / cf.baud_rate
         L = cf.fiber_length
         x_norm = L / T
@@ -361,9 +386,6 @@ def collision_coeffs_system(cf,
         collision_coeffs = np.zeros(
             (cf.n_modes, len(freqs), cf.n_modes, len(freqs)))
 
-        d_min = nc.dgd1
-        d_max = nc.dgd2_g
-        d_span = d_max - d_min
         max_lld = _max_lld_from_beta2(cf, beta2)
         raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
             cf, ipulse=ipulse, max_lld=max_lld)
@@ -421,6 +443,8 @@ def get_kappa2_matrix(cf,
     """Build squared coupling matrix and optionally disable cross-mode terms."""
     kappa2 = np.zeros((cf.n_modes, cf.n_modes))
     if use_kappa:
+        # FIXME: Check the Manakov averaging.
+        lg.warning("Applying kappa.csv coupling weights. Check the Manakov averaging.")
         kappa = np.loadtxt('input/fiber_data/kappa.csv', delimiter=',')
         kappa2 = kappa**2
     else:
@@ -473,14 +497,25 @@ def total_nlin(cf,
 
 
 if __name__ == "__main__":
+    import sys
     import time
+    from pynlin.system import System
+
+    if len(sys.argv) < 2:
+        raise SystemExit(
+            "Usage: python -m pynlin.nlin.nlin_estimator <system.toml> [numerical_config.toml]"
+        )
+    system_path = sys.argv[1]
+    numerics_path = sys.argv[2] if len(sys.argv) > 2 else None
+    cf = System.from_toml(system_path, numerical_path=numerics_path)
+
     start = time.perf_counter()
-    ccfs = collision_coeffs_system(cfg.load_toml_to_struct("./input/mmf.toml"),
+    ccfs = collision_coeffs_system(cf,
                                    ipulse=1,
                                    recompute=False)
     lg.debug(
         f"A few collisions (should be of order 1e-1, 1e-2): {ccfs[0, 0, :, :5]}")
-    ttnl = total_nlin(cfg.load_toml_to_struct("./input/mmf.toml"),
+    ttnl = total_nlin(cf,
                       ccfs,
                       use_kappa=True,
                       use_x_mode=False,
@@ -488,12 +523,3 @@ if __name__ == "__main__":
     lg.debug(f"Total NLIN shape: {ttnl.shape}")
     lg.debug(
         f"A few total NLIN: \n {ttnl[0, 0:5]} W, \n {watt2dBm(ttnl[0, 0:5])} dBm")
-    exit()
-    import pynlin.io_utils as cfg
-    cf = cfg.load_toml_to_struct("./input/mmf.toml")
-
-    # build the interpolator and pass it to the corrector
-    I_low_n = np.load(f"results/I_low_nyquist.npz")
-    interp = build_I_low_interpolator(I_low_dataset=I_low_n, ipulse=0)
-    lg.debug("Useful range of L/LD from LO time integral data: ",
-             I_low_n['lld_range'])

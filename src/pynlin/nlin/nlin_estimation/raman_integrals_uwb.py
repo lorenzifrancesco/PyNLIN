@@ -1,3 +1,5 @@
+"""Raman profile and integral helpers for UWB profile-driven NLIN workflows."""
+
 from typing import Tuple
 from pathlib import Path
 import os

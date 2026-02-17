@@ -25,8 +25,12 @@ init_logging()
 
 def main():
     """Generate NLIN/noise figures for a given collision configuration."""
+    import sys
+    if len(sys.argv) < 2:
+        raise SystemExit("Usage: python -m pynlin.nlin.noise <config.toml>")
+    config_path = sys.argv[1]
     # config_collisions is useful to print the plot of Marco, illustrative one
-    cf = cfg.load_toml_to_struct("./input/config_collision.toml")
+    cf = cfg.load_toml_to_struct(config_path)
     oi_fit = np.load('results/oi_fit.npy')
     oi_avg = np.load('results/oi_avg.npy')
 

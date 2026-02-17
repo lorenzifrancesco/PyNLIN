@@ -4,6 +4,7 @@ per-channel launch power overrides, while keeping the original code unchanged.
 """
 
 import itertools as it
+import hashlib
 import os
 from pathlib import Path
 from typing import Tuple, Optional
@@ -14,12 +15,12 @@ from scipy.constants import c
 from scipy.integrate import quad
 
 import pynlin
-import pynlin.io_utils as cfg
+from pynlin.constellation_stats import qam_mu0
 from pynlin.system import System
 from pynlin.fiber import MMFiber
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
-from pynlin.nlin.collision import build_I_low_interpolator
+from pynlin.nlin.collision import build_I_low_interpolator, ensure_i_low_dataset
 from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus, LLW_MIN, LLW_MAX
 from pynlin.nlin.nlin_estimation.lo_correction_uwb import build_lookup_integral_table_with_raman
 from pynlin.nlin.nlin_estimation.raman_integrals_uwb import (
@@ -34,7 +35,34 @@ init_logging()
 # Local constants mirroring the legacy estimator
 # Constants imported from ideal_fits_uwb; kept for clarity
 SPATIAL_MODES = np.array([1, 2, 2, 1])
-MU0 = 1.3809
+MU0 = qam_mu0(64)
+
+
+def _flat_profiles_enabled(system) -> bool:
+    """Return whether flat-profile mode is enabled in run configuration."""
+    raw = getattr(system, "raw_config", None)
+    if not isinstance(raw, dict):
+        return False
+    pog = raw.get("poggiolini")
+    if isinstance(pog, dict):
+        run = pog.get("run")
+        if isinstance(run, dict):
+            mode = run.get("power_profiles_mode")
+            if isinstance(mode, str):
+                mode = mode.strip().lower()
+                if mode == "flat":
+                    return True
+                if mode in {
+                    "cached",
+                    "recompute",
+                    "cached_no_profile_launch",
+                    "recompute_no_profile_launch",
+                }:
+                    return False
+    nlin_section = raw.get("nlin")
+    if not isinstance(nlin_section, dict):
+        return False
+    return bool(nlin_section.get("flat_profiles") or nlin_section.get("flat_profile"))
 
 # --------------------
 # Kappa handling
@@ -47,6 +75,8 @@ def get_kappa2_matrix_uwb(system: System,
     n_modes = getattr(system, "n_modes", 1)
     kappa2 = np.ones((n_modes, n_modes))
     if use_kappa and n_modes > 1:
+        # FIXME: Check the Manakov averaging.
+        lg.warning("Applying kappa.csv coupling weights. Check the Manakov averaging.")
         kappa = np.loadtxt('input/fiber_data/kappa.csv', delimiter=',')
         kappa2 = kappa ** 2
     if not use_x_mode:
@@ -59,6 +89,7 @@ def get_kappa2_matrix_uwb(system: System,
 # --------------------
 
 def _get_effective_area(system: System) -> float:
+    """Get scalar effective area from ``system`` or ``system.fiber``."""
     area = getattr(system, "effective_area", None)
     if area is None and hasattr(system, "fiber"):
         area = getattr(system.fiber, "effective_area", None)
@@ -79,6 +110,7 @@ def _effective_area_array(system: System, freqs: np.ndarray) -> np.ndarray:
 
 
 def _get_launch_power_w(system: System) -> float:
+    """Resolve scalar launch power from system settings and convert to Watt."""
     lp_dbm = getattr(system, "launch_power", None)
     if lp_dbm is None:
         lp_dbm = getattr(getattr(system, "wdm", None), "launch_power_dbm", None)
@@ -88,6 +120,7 @@ def _get_launch_power_w(system: System) -> float:
 
 
 def _get_baud_rate(system: System) -> float:
+    """Resolve baud rate from ``system`` or ``system.pulse``."""
     br = getattr(system, "baud_rate", None)
     if br is None and hasattr(system, "pulse"):
         br = getattr(system.pulse, "baud_rate", None)
@@ -97,12 +130,28 @@ def _get_baud_rate(system: System) -> float:
 
 
 def _get_fiber_length(system: System) -> float:
+    """Resolve fiber length from ``system`` or ``system.fiber``."""
     fl = getattr(system, "fiber_length", None)
     if fl is None and hasattr(system, "fiber"):
         fl = getattr(system.fiber, "length", None)
     if fl is None:
         raise ValueError("fiber length not found on System or fiber")
     return fl
+
+
+def _get_n_samples_numeric_n(system: System) -> int:
+    """Read and validate ``system.numerics.n_samples_numeric_n``."""
+    numerics = getattr(system, "numerics", None)
+    n_samples = getattr(numerics, "n_samples_numeric_n", None)
+    if n_samples is None:
+        raise ValueError(
+            "system.numerics.n_samples_numeric_n is required for ideal_fit_coefficients. "
+            "Provide a numerical_config.toml for this run."
+        )
+    n_samples = int(n_samples)
+    if n_samples <= 0:
+        raise ValueError(f"Invalid system.numerics.n_samples_numeric_n: {n_samples}")
+    return n_samples
 
 
 def nlin_prefactor(system: System, mode_a, mode_b):
@@ -129,8 +178,18 @@ def gvd_correction(system: System,
     br = _get_baud_rate(system)
     lda = 1/(br**2 * gvda) if gvda != 0 else 1e30
     ldb = 1/(br**2 * gvdb) if gvdb != 0 else 1e30
+    lld_max = max(abs(br**2 * gvda * L), abs(br**2 * gvdb * L), 1e-30)
     lo_value = 0.0
+    use_trapezoid_only = _flat_profiles_enabled(system)
     for m_lo in range(m_lo_truncation+1):
+        ensure_i_low_dataset(
+            m_lo=m_lo,
+            ipulse=ipulse,
+            baud_rate=br,
+            fiber_length=L,
+            max_lld=lld_max,
+            recompute=False,
+        )
         I_low_dataset = np.load(
             f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
         interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
@@ -138,7 +197,12 @@ def gvd_correction(system: System,
         def I_specific(x):
             return interp(x/lda, x/ldb)
 
-        added_noise = (quad(I_specific, 0, L)[0] / L)**2
+        if use_trapezoid_only:
+            x = np.linspace(0.0, L, 2001)
+            y = np.vectorize(I_specific)(x)
+            added_noise = (float(np.trapezoid(y, x)) / L) ** 2
+        else:
+            added_noise = (quad(I_specific, 0, L)[0] / L) ** 2
         if m_lo != 0:
             added_noise *= 2
         lo_value += added_noise
@@ -175,27 +239,40 @@ def fit_nlin(system: System,
     """Return a fitted NLIN curve for a channel pair with given GVDs and Raman profile."""
 
     br = _get_baud_rate(system)
+    L = _get_fiber_length(system)
+    n_samples_numeric_n = _get_n_samples_numeric_n(system)
     lda = 1/(br**2 * gvda) if gvda != 0 else 1e30
     ldb = 1/(br**2 * gvdb) if gvdb != 0 else 1e30
-    try:
-        ps_ideal = ideal_fit_coefficients(0.0, 0.0, ipulse=ipulse)
-    except Exception as exc:
-        lg.warning(f"ideal_fit_coefficients failed ({exc}); using fallback softplus params.")
-        ps_ideal = np.array([0.4, 4.5, 0.5])
+    ps_ideal = ideal_fit_coefficients(
+        0.0,
+        0.0,
+        ipulse=ipulse,
+        fiber_length=L,
+        baud_rate=br,
+        n_samples_numeric_n=n_samples_numeric_n,
+    )
 
     if np.all(fB == 1.0):
-        lo_value_perfect = gvd_correction(
-            system, gvda, gvdb, _get_fiber_length(system), ipulse=ipulse, m_lo_truncation=m_lo_truncation)
-        ps_ramanless = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
-        lg.info("You are using a flat fB, no Raman correction will be applied")
-        ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
+        lg.trace("You are using a flat fB, no Raman correction will be applied")
+        lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
+        lo_value_min = raman_gvd_correction_min(L/lda, L/ldb)
+        extremes = _G.get("raman_extremes")
+        if extremes is None:
+            extremes = load_raman_integral_extremes(system)
+        r_lo_min, r_lo_max, _, _ = extremes
+        if np.isclose(r_lo_max, r_lo_min):
+            lo_value_fB = lo_value_min
+        else:
+            raman_integral_fB_lo = raman_integral(system, "LO", fB)
+            lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
+                (lo_value_max - lo_value_min) + lo_value_min
+        ps = apply_plateau_correction(ps_ideal.copy(), lo_value_fB)
 
         def nlin_basic(dgd):
-            return softplus(dgd * _get_fiber_length(system) * br, *ps)
+            return softplus(dgd * L * br, *ps)
         nlin_basic.ps_params = ps
         return nlin_basic
 
-    L = _get_fiber_length(system)
     lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
     lo_value_min = raman_gvd_correction_min(L/lda, L/ldb)
     extremes = _G.get("raman_extremes")
@@ -362,6 +439,13 @@ def collision_coeffs_system_uwb(system: System,
     spacing_hz = getattr(system.wdm, "spacing", None)
     freqs = system.wdm.frequency_grid()
     n_ch = len(freqs)
+    beta1, beta2 = _beta_grids_from_system(system, freqs)
+
+    disp_signature = np.ascontiguousarray(
+        np.stack([beta1, beta2], axis=0),
+        dtype=np.float64,
+    ).view(np.uint8)
+    disp_tag = hashlib.sha1(disp_signature).hexdigest()[:12]
 
     filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
     if profile_tag:
@@ -369,18 +453,15 @@ def collision_coeffs_system_uwb(system: System,
     filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
     if spacing_hz is not None:
         filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
+    filename = f"{filename}_disp{disp_tag}"
     filename = f"{filename}.npy"
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
 
     lg.info("Computing collision coefficients from scratch")
-    nc = cfg.load_nc_toml_to_struct("input/numerical_config.toml")
-    beta1, beta2 = _beta_grids_from_system(system, freqs)
+    _get_n_samples_numeric_n(system)
     max_lld = _max_lld_from_beta2(system, beta2)
-
-    d_min = nc.dgd1
-    d_max = nc.dgd2_g
     raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
         system, ipulse=ipulse, profile_path=profile_path, max_lld=max_lld)
     fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(system, profile_path=profile_path)
@@ -420,6 +501,10 @@ def collision_coeffs_system_uwb(system: System,
     # freqs = freqs[:100]
     raman_extremes = load_raman_integral_extremes(system, profile_path=profile_path)
     collision_coeffs = np.zeros((system.n_modes, len(freqs), system.n_modes, len(freqs)))
+    try:
+        from tqdm import tqdm
+    except Exception:
+        tqdm = None
     with ProcessPoolExecutor(
         max_workers=n_workers,
         initializer=_init_worker,
@@ -429,10 +514,15 @@ def collision_coeffs_system_uwb(system: System,
                   n_workers, raman_extremes),
     ) as ex:
         futures = [ex.submit(_work_A, a) for a in A_tasks]
+        progress = tqdm(total=len(futures), desc="TD channels", unit="ch") if tqdm else None
         for fut in as_completed(futures):
             mA, nuA, block, elapsed = fut.result()
             collision_coeffs[mA, nuA, :, :] = block
             lg.trace(f"Finished NLIN for A(m={mA},nu={nuA:>5}) in {elapsed:>6.2f} s")
+            if progress is not None:
+                progress.update(1)
+        if progress is not None:
+            progress.close()
 
     np.save(filename, collision_coeffs)
     return collision_coeffs

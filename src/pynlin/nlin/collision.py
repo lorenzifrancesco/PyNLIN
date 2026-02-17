@@ -1,3 +1,5 @@
+"""Collision-integral utilities and plotting helpers for NLIN workflows."""
+
 from loguru import logger as lg
 
 from pynlin.log_init import init_logging
@@ -12,7 +14,6 @@ import numpy as np
 from matplotlib.ticker import ScalarFormatter
 from scipy.interpolate import RegularGridInterpolator
 
-import pynlin.io_utils as cfg
 import pynlin
 from pynlin.fiber_data.beta_utils import (
     beta2avg_complementary,
@@ -363,9 +364,8 @@ def build_I_low_interpolator(I_low_dataset, ipulse: int):
     return interp_func_wrapped
 
 
-def get_systems_dispersions():
+def get_systems_dispersions(cf):
     """Return normalized dispersion (L/L_D) combinations for all mode/channel pairs."""
-    cf = cfg.load_toml_to_struct("./input/mmf.toml")
     fiber = MMFiber(
         effective_area=cf.effective_area,
         overlap_integrals=np.load('results/oi_fit.npy'),
@@ -395,12 +395,15 @@ def get_systems_dispersions():
 def plot_dispersion_analysis(fiber, 
                              m_lo=3, 
                              recompute=True, 
-                             with_system_data=False):
+                             with_system_data=False,
+                             system_config=None):
     """Plot contour maps of I_low over dispersion ranges and optionally overlay system points."""
     lg.debug("Plotting Fig.1 (pulse collisions)...")
     I_low_values, lld_range = get_I_low(fiber, m_lo, recompute=recompute)
     if with_system_data:
-        X, Y = get_systems_dispersions()
+        if system_config is None:
+            raise ValueError("system_config is required when with_system_data=True.")
+        X, Y = get_systems_dispersions(system_config)
         
     for ipulse, I_low_values in enumerate(I_low_values):
         plt.figure(figsize=(3, 2.3))

@@ -405,7 +405,7 @@ class RamanAmplifier:
         odeint_kwargs=None,
         solver: str = "radau",
         ase_direction=1.0,
-        ase_decimation: int = 100,
+        ase_decimation: int = 1,
     ) -> np.ndarray:
         """Compute ASE evolution along fixed pump/signal profiles.
 
@@ -1803,7 +1803,7 @@ def main():
 
     ase_decimation = _get(["ase_decimation", "ase_decimation_factor", "ase_stride"])
     if ase_decimation is None:
-        ase_decimation = 20
+        ase_decimation = 1
     ase_decimation = int(ase_decimation)
     if ase_decimation > 1:
         lg.info(

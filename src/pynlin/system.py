@@ -180,13 +180,14 @@ class System:
             freqs = self.wdm.frequency_grid()
         wavelengths = nu2lambda(freqs)
 
+        force_constant = bool(getattr(self.fiber, "_force_constant_dispersion", False))
         gd = getattr(self.fiber, "group_delay", None)
-        if gd is not None:
+        if gd is not None and not force_constant:
             beta1 = np.array([gd.evaluate_beta1(m, freqs) for m in range(self.n_modes)])
             beta2 = np.array([gd.evaluate_beta2(m, freqs) for m in range(self.n_modes)])
             return beta1, beta2
 
-        if self.n_modes > 1:
+        if self.n_modes > 1 and not force_constant:
             from pynlin.fiber_data.load_fiber_values import load_group_delay
             gd = load_group_delay()
             beta1 = np.array([gd.evaluate_beta1(m, freqs) for m in range(self.n_modes)])
@@ -195,30 +196,38 @@ class System:
 
         beta1 = None
         beta2 = None
+
+        # Prefer wavelength-dependent beta1 whenever available. In constant-
+        # dispersion mode this may be a synthetic linear profile generated from
+        # a constant beta2 and CSV anchor beta1.
+        if getattr(self.fiber, "_beta1_profile", None) is not None:
+            wl_prof, b1_prof = self.fiber._beta1_profile
+            beta1 = np.interp(wavelengths, wl_prof, b1_prof)[None, :]
+        # Keep beta2 profile disabled when constant dispersion is requested.
+        if not force_constant and getattr(self.fiber, "_beta2_profile", None) is not None:
+            wl_prof, b2_prof = self.fiber._beta2_profile
+            beta2 = np.interp(wavelengths, wl_prof, b2_prof)[None, :]
+
         b1_raw = getattr(self.fiber, "beta1", None)
-        if b1_raw is not None:
+        if beta1 is None and b1_raw is not None:
             b1_raw = np.array(b1_raw)
             if b1_raw.ndim == 0:
                 beta1 = np.full((self.n_modes, freqs.size), float(b1_raw))
             elif b1_raw.ndim == 1 and b1_raw.size == freqs.size:
                 beta1 = b1_raw[None, :]
         b2_raw = getattr(self.fiber, "beta2", None)
-        if b2_raw is not None:
+        if beta2 is None and b2_raw is not None:
             b2_raw = np.array(b2_raw)
             if b2_raw.ndim == 0:
                 beta2 = np.full((self.n_modes, freqs.size), float(b2_raw))
             elif b2_raw.ndim == 1 and b2_raw.size == freqs.size:
                 beta2 = b2_raw[None, :]
 
-        if beta1 is None and getattr(self.fiber, "_beta1_profile", None) is not None:
-            wl_prof, b1_prof = self.fiber._beta1_profile
-            beta1 = np.interp(wavelengths, wl_prof, b1_prof)[None, :]
-        if beta2 is None and getattr(self.fiber, "_beta2_profile", None) is not None:
-            wl_prof, b2_prof = self.fiber._beta2_profile
-            beta2 = np.interp(wavelengths, wl_prof, b2_prof)[None, :]
-
         if beta1 is None and beta2 is not None:
-            beta1 = np.zeros_like(beta2)
+            raise ValueError(
+                "beta1 unavailable while beta2 is available. Refusing beta1=0 fallback "
+                "because it collapses channel-pair DGD in TD computations."
+            )
         if beta1 is None or beta2 is None:
             raise ValueError("beta1/beta2 unavailable for this system.")
 
