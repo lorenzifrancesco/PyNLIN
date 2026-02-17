@@ -41,7 +41,7 @@ def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
     """Load workflow/runtime flags from [poggiolini] in the system TOML."""
     defaults: dict[str, object] = {
         "profile_path": "results/poggiolini_power_profiles.npy",
-        "launch_csv_path": "results/poggiolini_launch_power.csv",
+        "launch_csv_path": None,
         "pcfm_numeric_xci": False,
         "include_lumped_losses": False,
         "power_profiles_mode": "recompute",
