@@ -49,11 +49,18 @@ autodoc_mock_imports = [
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "myst_parser",
     "sphinx_autodoc_typehints",
 ]
+
+# Prefer local MathJax if available (useful for offline builds), otherwise fall back to CDN.
+mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+_mathjax_local = os.path.join(os.path.dirname(__file__), "_static", "mathjax", "es5", "tex-mml-chtml.js")
+if os.path.exists(_mathjax_local):
+    mathjax_path = "mathjax/es5/tex-mml-chtml.js"
 
 autosummary_generate = True
 
