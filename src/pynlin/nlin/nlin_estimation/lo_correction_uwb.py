@@ -1,3 +1,5 @@
+"""Low-order Raman correction lookup-table builders for UWB/SMF NLIN paths."""
+
 import os
 from pathlib import Path
 from typing import Tuple
@@ -11,6 +13,33 @@ from pynlin.log_init import init_logging
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator, ensure_i_low_dataset
 from pynlin.nlin.nlin_estimation.raman_integrals_uwb import load_fB
 
+
+def _flat_profiles_enabled(system) -> bool:
+    """Return whether the run requests flat-profile shortcuts for Raman terms."""
+    raw = getattr(system, "raw_config", None)
+    if not isinstance(raw, dict):
+        return False
+    pog = raw.get("poggiolini")
+    if isinstance(pog, dict):
+        run = pog.get("run")
+        if isinstance(run, dict):
+            mode = run.get("power_profiles_mode")
+            if isinstance(mode, str):
+                mode = mode.strip().lower()
+                if mode == "flat":
+                    return True
+                if mode in {
+                    "cached",
+                    "recompute",
+                    "cached_no_profile_launch",
+                    "recompute_no_profile_launch",
+                }:
+                    return False
+    nlin_section = raw.get("nlin")
+    if not isinstance(nlin_section, dict):
+        return False
+    return bool(nlin_section.get("flat_profiles") or nlin_section.get("flat_profile"))
+
 init_logging()
 
 
@@ -22,6 +51,9 @@ def build_lookup_integral_table_with_raman(cf,
                                            max_lld: float | None = None) -> Tuple[callable, callable]:
     """Generate interpolants for Raman-inclusive LO corrections at fB_min and fB_max."""
     _, _, _, fB_min, fB_max = load_fB(cf, profile_path=profile_path)
+    use_trapezoid_only = _flat_profiles_enabled(cf)
+    if use_trapezoid_only:
+        lg.info("flat_profiles enabled; using trapezoid shortcut for Raman LO corrections.")
     n_samples = 20
     fiber_length = cf.fiber_length
     lld_max = MAX_LLD if max_lld is None else max(float(max_lld), MAX_LLD)
@@ -59,6 +91,10 @@ def build_lookup_integral_table_with_raman(cf,
             def _safe_integrate(func, a: float, b: float, label: str) -> float:
                 import warnings
 
+                if use_trapezoid_only:
+                    x = np.linspace(a, b, 2001)
+                    y = np.vectorize(func)(x)
+                    return float(np.trapezoid(y, x))
                 with warnings.catch_warnings(record=True) as caught:
                     warnings.simplefilter("always", IntegrationWarning)
                     val, _err = quad(func, a, b, limit=200)
@@ -79,8 +115,8 @@ def build_lookup_integral_table_with_raman(cf,
                     else:
                         def I_specific(x):
                             return interp(x/lda, x/ldb)
-                        lg.debug(f"Maximum of fB_max: {fB_max(fiber_length):.2e}")
-                        lg.debug(f"Maximum of fB_min: {fB_min(fiber_length):.2e}")
+                        lg.trace(f"Maximum of fB_max: {fB_max(fiber_length):.2e}")
+                        lg.trace(f"Maximum of fB_min: {fB_min(fiber_length):.2e}")
                         int_max = _safe_integrate(
                             lambda x: I_specific(x) * fB_max(x), 0, fiber_length, "fB_max"
                         )
