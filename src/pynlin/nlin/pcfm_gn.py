@@ -24,18 +24,34 @@ MIN_POWER_W = 1e-12
 MAX_POWER_W = 10.0
 MAX_SPP = 1e3
 MIN_BETA2 = 1e-30
+POLARIZATION_COUNT = 2.0
 _WARNED_ONCE: set[str] = set()
 
 
 def _warn_once(key: str, message: str) -> None:
+    """Emit a warning message only once for a given key.
+
+    Parameters
+    ----------
+    key:
+        Stable identifier used to deduplicate repeated warnings.
+    message:
+        Warning text forwarded to the module logger.
+    """
     if key in _WARNED_ONCE:
         return
     _WARNED_ONCE.add(key)
     lg.warning(message)
 
 
+def _to_per_polarization_power(power_w: np.ndarray | float) -> np.ndarray | float:
+    """Convert channel power from dual-pol normalization to per-polarization."""
+    return power_w / POLARIZATION_COUNT
+
+
 @dataclass
 class PcfmConfig:
+    """Configuration knobs for PCFM/GN kernel evaluation and integration grids."""
     degree: int = 9
     include_mci: bool = False
     use_numeric_sci: bool = True
@@ -47,6 +63,25 @@ class PcfmConfig:
 
 
 def _load_profile_payload(profile_path: Path | str):
+    """Load a Raman/power-profile payload from ``.npy``/``.npz`` files.
+
+    Parameters
+    ----------
+    profile_path:
+        Path to a cached profile file produced by analysis workflows.
+
+    Returns
+    -------
+    object
+        A mapping-like payload exposing keys such as ``signal_sol`` and ``z``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the path does not exist.
+    TypeError
+        If the file content is not a supported payload type.
+    """
     path = Path(profile_path)
     if not path.exists():
         raise FileNotFoundError(f"Profile file not found: {path}")
@@ -61,9 +96,24 @@ def _load_profile_payload(profile_path: Path | str):
 
 
 def load_signal_profiles(profile_path: Path | str, system: System) -> tuple[np.ndarray, np.ndarray]:
-    """Return (signal_power_ch_z, z) from a Raman profile file.
+    """Load channel power profiles and longitudinal grid from a profile file.
 
-    Output signal_power_ch_z has shape (n_channels, n_z) in Watts.
+    The function accepts the different historical array layouts used by saved
+    solutions and normalizes them to a common shape.
+
+    Parameters
+    ----------
+    profile_path:
+        Path to profile cache containing at least ``signal_sol`` and ``z``.
+    system:
+        Active system configuration, used to validate channel count.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``(signal_power_ch_z, z)``, where:
+        - ``signal_power_ch_z`` has shape ``(n_channels, n_z)`` in Watt.
+        - ``z`` has shape ``(n_z,)`` in meter.
     """
     data = _load_profile_payload(profile_path)
     sig = None
@@ -115,6 +165,23 @@ def load_signal_profiles(profile_path: Path | str, system: System) -> tuple[np.n
 
 
 def apply_lumped_losses(p_ch_z: np.ndarray, z: np.ndarray, lumped_losses: Optional[Iterable[tuple[float, float]]]):
+    """Apply stepwise lumped losses to channel power profiles.
+
+    Parameters
+    ----------
+    p_ch_z:
+        Channel power profiles with shape ``(n_channels, n_z)``.
+    z:
+        Longitudinal grid in meter, shape ``(n_z,)``.
+    lumped_losses:
+        Iterable of ``(z_location_m, loss_db)``. Each loss is cumulatively
+        applied from its location to the end of the span.
+
+    Returns
+    -------
+    np.ndarray
+        Adjusted profiles with the same shape as ``p_ch_z``.
+    """
     if not lumped_losses:
         return p_ch_z
     p_adj = np.array(p_ch_z, dtype=float, copy=True)
@@ -127,7 +194,25 @@ def apply_lumped_losses(p_ch_z: np.ndarray, z: np.ndarray, lumped_losses: Option
 
 def normalize_spp(signal_power_ch_z: np.ndarray, z: np.ndarray,
                   lumped_losses: Optional[Iterable[tuple[float, float]]] = None) -> np.ndarray:
-    """Normalize SPPs so p(z=0)=1 for each channel."""
+    """Normalize signal power profiles to unit launch value per channel.
+
+    Optionally applies lumped-loss events before normalization.
+
+    Parameters
+    ----------
+    signal_power_ch_z:
+        Absolute channel powers, shape ``(n_channels, n_z)`` in Watt.
+    z:
+        Longitudinal grid in meter.
+    lumped_losses:
+        Optional lumped-loss list passed to :func:`apply_lumped_losses`.
+
+    Returns
+    -------
+    np.ndarray
+        Normalized profiles ``p(z) = P(z)/P(0)`` with shape ``(n_channels, n_z)``.
+        Non-finite values are sanitized and values are clipped to ``[0, MAX_SPP]``.
+    """
     p_ch_z = signal_power_ch_z
     if lumped_losses:
         p_ch_z = apply_lumped_losses(p_ch_z, z, lumped_losses)
@@ -141,9 +226,24 @@ def normalize_spp(signal_power_ch_z: np.ndarray, z: np.ndarray,
 
 
 def fit_spp_polynomials(z: np.ndarray, p_ch_z: np.ndarray, degree: int) -> np.ndarray:
-    """Fit p(z) with a polynomial in normalized z (0..1).
+    """Fit normalized channel profiles with polynomials in normalized distance.
 
-    Returns coefficients in ascending order (p0 + p1*z + ...).
+    The fit variable is ``z_norm = (z - z0) / L`` in ``[0, 1]``.
+
+    Parameters
+    ----------
+    z:
+        Longitudinal grid in meter.
+    p_ch_z:
+        Normalized channel profiles with shape ``(n_channels, n_z)``.
+    degree:
+        Polynomial degree.
+
+    Returns
+    -------
+    np.ndarray
+        Polynomial coefficients with shape ``(n_channels, degree+1)``, in
+        ascending order ``a0 + a1 z + ...`` for use with ``numpy.polynomial``.
     """
     if z.size < degree + 1:
         raise ValueError(f"Not enough z samples ({z.size}) for degree {degree} polynomial fit.")
@@ -161,18 +261,58 @@ def fit_spp_polynomials(z: np.ndarray, p_ch_z: np.ndarray, degree: int) -> np.nd
 
 
 def poly_eval(coeffs: np.ndarray, x: np.ndarray | float) -> np.ndarray:
-    """Evaluate polynomial with ascending coefficients at x."""
+    """Evaluate a polynomial defined by ascending coefficients.
+
+    Parameters
+    ----------
+    coeffs:
+        Coefficients ``[a0, a1, ...]``.
+    x:
+        Evaluation point(s).
+
+    Returns
+    -------
+    np.ndarray
+        Evaluated polynomial values.
+    """
     return np.polynomial.polynomial.polyval(x, coeffs)
 
 
 def poly_sum(coeffs: np.ndarray) -> float:
-    """Compute sum_{n,k} a_n a_k / (n+k+1) using convolution."""
+    """Compute ``sum_{n,k} a_n a_k / (n+k+1)`` from polynomial coefficients.
+
+    This term appears in the closed-form XCI approximation.
+
+    Parameters
+    ----------
+    coeffs:
+        Ascending polynomial coefficients ``[a0, a1, ...]``.
+
+    Returns
+    -------
+    float
+        Scalar weighted convolution sum.
+    """
     conv = np.convolve(coeffs, coeffs)
     denom = np.arange(conv.size, dtype=float) + 1.0
     return float(np.sum(conv / denom))
 
 
 def _beta2_array(system: System, freqs: np.ndarray) -> np.ndarray:
+    """Sample channel-wise ``beta2`` from the fiber model.
+
+    Parameters
+    ----------
+    system:
+        Active system/fiber container.
+    freqs:
+        Channel frequencies in Hz.
+
+    Returns
+    -------
+    np.ndarray
+        Dispersion values ``beta2`` in SI units at each channel frequency.
+    """
     wl = c / freqs
     beta2 = np.array([system.fiber.beta2_at(float(w)) for w in wl], dtype=float)
     if np.any(~np.isfinite(beta2)):
@@ -184,7 +324,20 @@ def _beta2_array(system: System, freqs: np.ndarray) -> np.ndarray:
 
 
 def _beta_coeffs_from_profile(system: System, fc_hz: float) -> tuple[float, float, float, float] | None:
-    """Return (beta2, beta3, beta4, fc_hz) from beta(omega) spline."""
+    """Extract ``(beta2, beta3, beta4, fc_hz)`` from a ``beta(omega)`` spline.
+
+    Parameters
+    ----------
+    system:
+        Active system whose fiber may provide ``beta_spline_omega``.
+    fc_hz:
+        Reference center frequency in Hz where derivatives are evaluated.
+
+    Returns
+    -------
+    tuple[float, float, float, float] | None
+        ``(beta2, beta3, beta4, fc_hz)`` if available, otherwise ``None``.
+    """
     fiber = getattr(system, "fiber", None)
     if fiber is None or not hasattr(fiber, "beta_spline_omega"):
         _warn_once(
@@ -212,7 +365,11 @@ def _beta_coeffs_from_profile(system: System, fc_hz: float) -> tuple[float, floa
 
 
 def _check_loss_profile(system: System) -> None:
-    """Warn if the Eq. (30) loss approximation cannot use a frequency profile."""
+    """Warn when frequency-dependent attenuation data are unavailable.
+
+    The PCFM Eq. (30)-style loss approximation is more accurate with an
+    attenuation profile. This helper emits one-time warnings for fallbacks.
+    """
     fiber = getattr(system, "fiber", None)
     if fiber is None:
         _warn_once(
@@ -229,7 +386,22 @@ def _check_loss_profile(system: System) -> None:
 
 
 def _beta2_eff(fm_hz: float, fk_hz: float, coeffs: tuple[float, float, float, float]) -> float:
-    """Effective beta2 for an XCI island (Eq. 28 in Poggiolini)."""
+    """Compute effective ``beta2`` for a channel pair using Poggiolini Eq. (28).
+
+    Parameters
+    ----------
+    fm_hz:
+        Channel-under-test frequency in Hz.
+    fk_hz:
+        Interferer channel frequency in Hz.
+    coeffs:
+        Tuple ``(beta2, beta3, beta4, fc_hz)``.
+
+    Returns
+    -------
+    float
+        Effective dispersion coefficient for the integration island.
+    """
     # Eq. (28): beta2_eff = beta2 + πβ3(fm+fk−2fc) + (2/3)π^2β4[(fm−fc)^2+(fm−fc)(fk−fc)+(fk−fc)^2]
     beta2, beta3, beta4, fc_hz = coeffs
     dfm = fm_hz - fc_hz
@@ -240,11 +412,40 @@ def _beta2_eff(fm_hz: float, fk_hz: float, coeffs: tuple[float, float, float, fl
 
 
 def _aeff_array(system: System, freqs: np.ndarray) -> np.ndarray:
+    """Sample effective area ``A_eff`` for each channel frequency.
+
+    Parameters
+    ----------
+    system:
+        Active system/fiber container.
+    freqs:
+        Channel frequencies in Hz.
+
+    Returns
+    -------
+    np.ndarray
+        ``A_eff`` array in square meter, one value per channel.
+    """
     wl = c / freqs
     return np.array([system.fiber.effective_area_at(float(w)) for w in wl], dtype=float)
 
 
 def _launch_powers_from_system(system: System) -> np.ndarray:
+    """Resolve per-channel launch powers from the active ``System`` config.
+
+    Supports either per-band launch powers (when WDM band specs are present) or
+    a single global launch power.
+
+    Parameters
+    ----------
+    system:
+        Active system configuration.
+
+    Returns
+    -------
+    np.ndarray
+        Launch powers in Watt, shape ``(n_channels,)``.
+    """
     freqs = system.wdm.frequency_grid()
     if hasattr(system.wdm, "band_specs") and system.wdm.band_specs:
         p = np.zeros_like(freqs, dtype=float)
@@ -261,6 +462,30 @@ def _launch_powers_from_system(system: System) -> np.ndarray:
 
 def compute_sci_numeric(coeffs: np.ndarray, L: float, beta2_eff: float, B: float,
                         n_f: int, n_z: int, phase_coeff: float) -> float:
+    """Numerically compute the SCI kernel over a rectangular frequency island.
+
+    Parameters
+    ----------
+    coeffs:
+        Ascending polynomial coefficients for normalized profile ``p(z/L)``.
+    L:
+        Span length in meter.
+    beta2_eff:
+        Effective dispersion for SCI in SI units.
+    B:
+        Channel bandwidth (baud rate) in Hz.
+    n_f:
+        Frequency samples per axis.
+    n_z:
+        Longitudinal integration samples.
+    phase_coeff:
+        Multiplicative constant in the phase term, typically ``4*pi^2``.
+
+    Returns
+    -------
+    float
+        SCI kernel value.
+    """
     z = np.linspace(0.0, L, int(n_z))
     z_norm = z / L if L > 0 else z
     p_z = poly_eval(coeffs, z_norm)
@@ -277,7 +502,28 @@ def compute_sci_numeric(coeffs: np.ndarray, L: float, beta2_eff: float, B: float
 
 def compute_sci_numeric_direct(p_z: np.ndarray, z: np.ndarray, beta2_eff: float, B: float,
                                n_f: int, phase_coeff: float) -> float:
-    """Numerical SCI kernel using direct p(z) samples."""
+    """Numerically compute SCI kernel directly from sampled ``p(z)``.
+
+    Parameters
+    ----------
+    p_z:
+        Normalized power profile samples for one channel.
+    z:
+        Longitudinal grid in meter.
+    beta2_eff:
+        Effective dispersion for SCI in SI units.
+    B:
+        Channel bandwidth (baud rate) in Hz.
+    n_f:
+        Frequency samples per axis.
+    phase_coeff:
+        Multiplicative constant in the phase term, typically ``4*pi^2``.
+
+    Returns
+    -------
+    float
+        SCI kernel value.
+    """
     p_z = np.asarray(p_z, dtype=float)
     z = np.asarray(z, dtype=float)
     if p_z.size != z.size:
@@ -296,6 +542,34 @@ def compute_sci_numeric_direct(p_z: np.ndarray, z: np.ndarray, beta2_eff: float,
 def compute_xci_numeric(coeffs: np.ndarray, L: float, beta2_eff: float, B_cut: float,
                         delta_f: float, B_int: float,
                         n_f: int, n_z: int, phase_coeff: float) -> float:
+    """Numerically compute the XCI kernel over cut/interferer frequency islands.
+
+    Parameters
+    ----------
+    coeffs:
+        Ascending polynomial coefficients for interferer profile ``p(z/L)``.
+    L:
+        Span length in meter.
+    beta2_eff:
+        Effective dispersion for the CUT/interferer pair.
+    B_cut:
+        CUT bandwidth in Hz.
+    delta_f:
+        Interferer center offset from CUT in Hz.
+    B_int:
+        Interferer bandwidth in Hz.
+    n_f:
+        Frequency samples per axis.
+    n_z:
+        Longitudinal integration samples.
+    phase_coeff:
+        Multiplicative constant in the phase term, typically ``4*pi^2``.
+
+    Returns
+    -------
+    float
+        XCI kernel value.
+    """
     z = np.linspace(0.0, L, int(n_z))
     z_norm = z / L if L > 0 else z
     p_z = poly_eval(coeffs, z_norm)
@@ -313,7 +587,32 @@ def compute_xci_numeric(coeffs: np.ndarray, L: float, beta2_eff: float, B_cut: f
 def compute_xci_numeric_direct(p_z: np.ndarray, z: np.ndarray, beta2_eff: float, B_cut: float,
                                delta_f: float, B_int: float,
                                n_f: int, phase_coeff: float) -> float:
-    """Numerical XCI kernel using direct p(z) samples."""
+    """Numerically compute XCI kernel directly from sampled ``p(z)``.
+
+    Parameters
+    ----------
+    p_z:
+        Normalized interferer profile samples.
+    z:
+        Longitudinal grid in meter.
+    beta2_eff:
+        Effective dispersion for the CUT/interferer pair.
+    B_cut:
+        CUT bandwidth in Hz.
+    delta_f:
+        Interferer center offset from CUT in Hz.
+    B_int:
+        Interferer bandwidth in Hz.
+    n_f:
+        Frequency samples per axis.
+    phase_coeff:
+        Multiplicative constant in the phase term, typically ``4*pi^2``.
+
+    Returns
+    -------
+    float
+        XCI kernel value.
+    """
     p_z = np.asarray(p_z, dtype=float)
     z = np.asarray(z, dtype=float)
     if p_z.size != z.size:
@@ -328,7 +627,6 @@ def compute_xci_numeric_direct(p_z: np.ndarray, z: np.ndarray, beta2_eff: float,
     k_val = np.trapezoid(np.trapezoid(inner_sq, f2, axis=1), f1, axis=0)
     return float(k_val)
 
-
 def compute_pcfm_nlin(
     system: System,
     profile_path: Path | str,
@@ -337,6 +635,34 @@ def compute_pcfm_nlin(
     lumped_losses: Optional[Iterable[tuple[float, float]]] = None,
     return_components: bool = False,
 ) -> np.ndarray:
+    """Compute per-channel PCFM NLIN power (SCI + XCI, MCI disabled).
+
+    This is the Poggiolini-style semi-analytical workflow using polynomial fits
+    of Raman power profiles and optional numerical/closed-form XCI kernels.
+
+    Parameters
+    ----------
+    system:
+        Active system definition (WDM grid, fiber, baud rate, etc.).
+    profile_path:
+        Path to saved profile containing channel powers versus ``z``.
+    launch_powers_w:
+        Optional per-channel launch powers in Watt. If ``None``, values are
+        resolved from ``system``.
+    config:
+        Optional :class:`PcfmConfig` with integration and modeling settings.
+    lumped_losses:
+        Optional list of ``(z_location_m, loss_db)`` applied to profiles before
+        normalization.
+    return_components:
+        If ``True``, returns total power plus SCI and XCI components.
+
+    Returns
+    -------
+    np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]
+        NLIN power per channel with shape ``(1, n_channels)`` in Watt, or
+        ``(total, sci, xci)`` when ``return_components=True``.
+    """
     cfg = config or PcfmConfig()
     if cfg.include_mci:
         lg.warning("PCFM MCI disabled by design in this workflow; ignoring include_mci=True.")
@@ -404,7 +730,8 @@ def compute_pcfm_nlin(
             k_sci = compute_sci_numeric(
                 coeffs[i], L, beta2_sci, B_ch, cfg.n_f, cfg.n_z, cfg.phase_coeff
             )
-        g_sci = (16.0 / 27.0) * p_cut_L * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
+        # FIXME: temporary experiment: omit p(L) scaling in PCFM NLI PSD.
+        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
         for j in range(n_channels):
@@ -425,13 +752,14 @@ def compute_pcfm_nlin(
                 log_term = np.log((delta_abs + B_ch / 2.0) / (delta_abs - B_ch / 2.0))
                 beta2_eff = max(abs(beta2_xci), MIN_BETA2)
                 k_xci = (L / (2.0 * np.pi * beta2_eff)) * log_term * poly_sums[j]
-            g_xci = (32.0 / 27.0) * p_cut_L * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
+            # FIXME: temporary experiment: omit p(L) scaling in PCFM NLI PSD.
+            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
             g_xci_sum += g_xci
 
         g_sci_psd[0, i] = g_sci
         g_xci_psd[0, i] = g_xci_sum
         if i in (0, n_channels // 2, n_channels - 1):
-            nli_power = (g_sci + g_xci_sum) * B_ch
+            nli_power = _to_per_polarization_power((g_sci + g_xci_sum) * B_ch)
             lg.info(
                 f"PCFM ch {i}: f={freqs[i]*1e-12:.2f} THz, "
                 f"p_L={p_cut_L:.3e}, g_cut={g_cut:.3e}, "
@@ -441,9 +769,13 @@ def compute_pcfm_nlin(
             )
 
     nlin_psd = g_sci_psd + g_xci_psd
-    nlin_power = nlin_psd * B_ch
+    nlin_power = _to_per_polarization_power(nlin_psd * B_ch)
     if return_components:
-        return nlin_power, g_sci_psd * B_ch, g_xci_psd * B_ch
+        return (
+            nlin_power,
+            _to_per_polarization_power(g_sci_psd * B_ch),
+            _to_per_polarization_power(g_xci_psd * B_ch),
+        )
     return nlin_power
 
 
@@ -454,11 +786,42 @@ def compute_gn_numeric(
     lumped_losses: Optional[Iterable[tuple[float, float]]] = None,
     n_f: int = 40,
     n_z: int = 200,
-    phase_coeff: float = 4.0 * np.pi,
+    phase_coeff: float = 4.0 * np.pi ** 2,
     use_beta2_eff: bool = True,
     return_components: bool = False,
 ) -> np.ndarray:
-    """Numerical GN solution (SCI+XCI) on rectangular islands."""
+    """Compute per-channel GN NLIN using fully numerical SCI/XCI kernels.
+
+    Parameters
+    ----------
+    system:
+        Active system definition (WDM grid, fiber, baud rate, etc.).
+    profile_path:
+        Path to saved profile containing channel powers versus ``z``.
+    launch_powers_w:
+        Optional per-channel launch powers in Watt. If ``None``, values are
+        resolved from ``system``.
+    lumped_losses:
+        Optional list of ``(z_location_m, loss_db)`` applied before profile
+        normalization.
+    n_f:
+        Frequency samples per axis for 2D frequency integration.
+    n_z:
+        Longitudinal samples for profile-based kernels.
+    phase_coeff:
+        Multiplicative constant in the phase term, typically ``4*pi^2``.
+    use_beta2_eff:
+        If ``True``, use Eq. (28)-style ``beta2_eff``; otherwise use sampled
+        channel ``beta2`` values.
+    return_components:
+        If ``True``, returns total power plus SCI and XCI components.
+
+    Returns
+    -------
+    np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]
+        NLIN power per channel with shape ``(1, n_channels)`` in Watt, or
+        ``(total, sci, xci)`` when ``return_components=True``.
+    """
     freqs = system.wdm.frequency_grid()
     n_channels = freqs.size
     B_ch = float(system.pulse.baud_rate)
@@ -491,11 +854,11 @@ def compute_gn_numeric(
 
     for i in range(n_channels):
         g_cut = g_ch[i]
-        p_cut_L = float(poly_eval(coeffs[i], 1.0))
         gamma_sci = 2.0 * np.pi * freqs[i] / c * (N2_SIO2 / aeff[i])
         beta2_sci = _beta2_eff(freqs[i], freqs[i], beta_coeffs) if beta_coeffs else beta2[i]
         k_sci = compute_sci_numeric(coeffs[i], L, beta2_sci, B_ch, n_f, n_z, phase_coeff)
-        g_sci = (16.0 / 27.0) * p_cut_L * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
+        # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
         for j in range(n_channels):
@@ -509,16 +872,21 @@ def compute_gn_numeric(
             k_xci = compute_xci_numeric(
                 coeffs[j], L, beta2_xci, B_ch, delta_f, B_ch, n_f, n_z, phase_coeff
             )
-            g_xci = (32.0 / 27.0) * p_cut_L * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
+            # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
             g_xci_sum += g_xci
 
         g_sci_psd[0, i] = g_sci
         g_xci_psd[0, i] = g_xci_sum
 
     nlin_psd = g_sci_psd + g_xci_psd
-    nlin_power = nlin_psd * B_ch
+    nlin_power = _to_per_polarization_power(nlin_psd * B_ch)
     if return_components:
-        return nlin_power, g_sci_psd * B_ch, g_xci_psd * B_ch
+        return (
+            nlin_power,
+            _to_per_polarization_power(g_sci_psd * B_ch),
+            _to_per_polarization_power(g_xci_psd * B_ch),
+        )
     return nlin_power
 
 
@@ -532,7 +900,39 @@ def compute_gn_direct(
     use_beta2_eff: bool = True,
     return_components: bool = False,
 ) -> np.ndarray:
-    """Direct numerical GN solution (SCI+XCI) using p(z) samples."""
+    """Compute per-channel GN NLIN using direct sampled profiles ``p(z)``.
+
+    Compared to :func:`compute_gn_numeric`, this path avoids polynomial fitting
+    and integrates kernels directly on the stored longitudinal samples.
+
+    Parameters
+    ----------
+    system:
+        Active system definition (WDM grid, fiber, baud rate, etc.).
+    profile_path:
+        Path to saved profile containing channel powers versus ``z``.
+    launch_powers_w:
+        Optional per-channel launch powers in Watt. If ``None``, values are
+        resolved from ``system``.
+    lumped_losses:
+        Optional list of ``(z_location_m, loss_db)`` applied before profile
+        normalization.
+    n_f:
+        Frequency samples per axis for 2D frequency integration.
+    phase_coeff:
+        Multiplicative constant in the phase term, typically ``4*pi^2``.
+    use_beta2_eff:
+        If ``True``, use Eq. (28)-style ``beta2_eff``; otherwise use sampled
+        channel ``beta2`` values.
+    return_components:
+        If ``True``, returns total power plus SCI and XCI components.
+
+    Returns
+    -------
+    np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]
+        NLIN power per channel with shape ``(1, n_channels)`` in Watt, or
+        ``(total, sci, xci)`` when ``return_components=True``.
+    """
     freqs = system.wdm.frequency_grid()
     n_channels = freqs.size
     B_ch = float(system.pulse.baud_rate)
@@ -563,11 +963,11 @@ def compute_gn_direct(
 
     for i in range(n_channels):
         g_cut = g_ch[i]
-        p_cut_L = float(max(spp[i, -1], 0.0))
         gamma_sci = 2.0 * np.pi * freqs[i] / c * (N2_SIO2 / aeff[i])
         beta2_sci = _beta2_eff(freqs[i], freqs[i], beta_coeffs) if beta_coeffs else beta2[i]
         k_sci = compute_sci_numeric_direct(spp[i], z, beta2_sci, B_ch, n_f, phase_coeff)
-        g_sci = (16.0 / 27.0) * p_cut_L * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
+        # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
         for j in range(n_channels):
@@ -581,16 +981,21 @@ def compute_gn_direct(
             k_xci = compute_xci_numeric_direct(
                 spp[j], z, beta2_xci, B_ch, delta_f, B_ch, n_f, phase_coeff
             )
-            g_xci = (32.0 / 27.0) * p_cut_L * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
+            # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
             g_xci_sum += g_xci
 
         g_sci_psd[0, i] = g_sci
         g_xci_psd[0, i] = g_xci_sum
 
     nlin_psd = g_sci_psd + g_xci_psd
-    nlin_power = nlin_psd * B_ch
+    nlin_power = _to_per_polarization_power(nlin_psd * B_ch)
     if return_components:
-        return nlin_power, g_sci_psd * B_ch, g_xci_psd * B_ch
+        return (
+            nlin_power,
+            _to_per_polarization_power(g_sci_psd * B_ch),
+            _to_per_polarization_power(g_xci_psd * B_ch),
+        )
     return nlin_power
 
 
