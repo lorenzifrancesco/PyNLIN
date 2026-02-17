@@ -292,7 +292,6 @@ def plot_poggiolini_diagnostics(
     freqs = system.wdm.frequency_grid()
     freqs_thz = freqs * 1e-12
     launch_dbm = 10.0 * np.log10(np.maximum(launch_powers_w, 1e-18) / 1e-3)
-    out_dbm = None
 
     fig, ax = plt.subplots(figsize=(3.6, 2.4))
     ax.plot(freqs_thz, launch_dbm, lw=0.8, color="black")
@@ -304,169 +303,156 @@ def plot_poggiolini_diagnostics(
     lg.success(f"Saved launch power plot to {out_dir / 'poggiolini_launch_power.pdf'}")
     plt.close(fig)
 
-    try:
-        sig_ch_z, z_axis = load_signal_profiles(profile_path, system)
-        span = float(z_axis[-1] - z_axis[0]) if z_axis.size else 0.0
-        if span > 0:
-            avg_power = np.trapezoid(sig_ch_z, z_axis, axis=1) / span
-        else:
-            avg_power = sig_ch_z[:, 0]
-        out_power = sig_ch_z[:, -1]
-        avg_dbm = 10.0 * np.log10(np.maximum(avg_power, 1e-18) / 1e-3)
-        out_dbm = 10.0 * np.log10(np.maximum(out_power, 1e-18) / 1e-3)
+    sig_ch_z, z_axis = load_signal_profiles(profile_path, system)
+    span = float(z_axis[-1] - z_axis[0]) if z_axis.size else 0.0
+    avg_power = np.trapezoid(sig_ch_z, z_axis, axis=1) / max(span, 1.0)
+    out_power = sig_ch_z[:, -1]
+    avg_dbm = 10.0 * np.log10(np.maximum(avg_power, 1e-18) / 1e-3)
+    out_dbm = 10.0 * np.log10(np.maximum(out_power, 1e-18) / 1e-3)
 
-        fig, ax = plt.subplots(figsize=(3.6, 2.4))
-        ax.plot(freqs_thz, avg_dbm, lw=0.8, color="tab:blue", label="avg")
-        ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
-        ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-        ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
-        ax.grid(False)
-        ax.legend(loc="best", fontsize=7)
-        fig.tight_layout()
-        fig.savefig(out_dir / "poggiolini_profile_power.pdf", dpi=300)
-        lg.success(f"Saved profile power plot to {out_dir / 'poggiolini_profile_power.pdf'}")
-        plt.close(fig)
+    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    ax.plot(freqs_thz, avg_dbm, lw=0.8, color="tab:blue", label="avg")
+    ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
+    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
+    ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
+    ax.grid(False)
+    ax.legend(loc="best", fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out_dir / "poggiolini_profile_power.pdf", dpi=300)
+    lg.success(f"Saved profile power plot to {out_dir / 'poggiolini_profile_power.pdf'}")
+    plt.close(fig)
 
-        spp = normalize_spp(sig_ch_z, z_axis)
-        coeffs = fit_spp_polynomials(z_axis, spp, degree=9)
-        length = float(z_axis[-1] - z_axis[0]) if z_axis.size else 1.0
-        z_norm = (z_axis - z_axis[0]) / length if length > 0 else z_axis
+    spp = normalize_spp(sig_ch_z, z_axis)
+    coeffs = fit_spp_polynomials(z_axis, spp, degree=9)
+    length = float(z_axis[-1] - z_axis[0])
+    z_norm = (z_axis - z_axis[0]) / length
 
-        picks = []
-        labels = []
-        band_slices = (
-            getattr(system.wdm, "_band_slices", {}) if hasattr(system.wdm, "_band_slices") else {}
+    picks = []
+    labels = []
+    band_slices = (
+        getattr(system.wdm, "_band_slices", {}) if hasattr(system.wdm, "_band_slices") else {}
+    )
+    if band_slices:
+        for band_name in ("L", "C", "S"):
+            for key, slc in band_slices.items():
+                if str(key).lower().startswith(band_name.lower()):
+                    idx = int((slc.start + slc.stop - 1) // 2)
+                    picks.append(idx)
+                    labels.append(f"Ch {idx}: center-{band_name}")
+                    break
+    if not picks:
+        n_ch = spp.shape[0]
+        picks = [n_ch // 6, n_ch // 2, 5 * n_ch // 6]
+        labels = [f"Ch {p}" for p in picks]
+
+    fig, ax = plt.subplots(figsize=(4.0, 2.8))
+    first = True
+    for idx, label in zip(picks, labels):
+        p_fit = np.polynomial.polynomial.polyval(z_norm, coeffs[idx])
+        ax.plot(
+            z_axis / 1e3,
+            spp[idx],
+            color="tab:blue",
+            lw=0.9,
+            label="exact" if first else None,
         )
-        if band_slices:
-            for band_name in ("L", "C", "S"):
-                for key, slc in band_slices.items():
-                    if str(key).lower().startswith(band_name.lower()):
-                        idx = int((slc.start + slc.stop - 1) // 2)
-                        picks.append(idx)
-                        labels.append(f"Ch {idx}: center-{band_name}")
-                        break
-        if not picks:
-            n_ch = spp.shape[0]
-            picks = [n_ch // 6, n_ch // 2, 5 * n_ch // 6]
-            labels = [f"Ch {p}" for p in picks]
-
-        fig, ax = plt.subplots(figsize=(4.0, 2.8))
-        first = True
-        for idx, label in zip(picks, labels):
-            p_fit = np.polynomial.polynomial.polyval(z_norm, coeffs[idx])
-            ax.plot(
-                z_axis / 1e3,
-                spp[idx],
-                color="tab:blue",
-                lw=0.9,
-                label="exact" if first else None,
-            )
-            ax.plot(
-                z_axis / 1e3,
-                p_fit,
-                color="tab:red",
-                lw=0.9,
-                ls="--",
-                label="polynomial Np=9" if first else None,
-            )
-            z_anno = z_axis[int(0.4 * (len(z_axis) - 1))] / 1e3
-            y_anno = np.interp(z_anno * 1e3, z_axis, spp[idx])
-            ax.annotate(
-                label,
-                xy=(z_anno, y_anno),
-                xytext=(z_anno + 5, y_anno + 0.08),
-                textcoords="data",
-                fontsize=7,
-                arrowprops=dict(arrowstyle="->", lw=0.6),
-            )
-            first = False
-        ax.set_xlabel(r"$z\;[\mathrm{km}]$")
-        ax.set_ylabel(r"normalized power")
-        ax.grid(False)
-        ax.legend(loc="best", fontsize=7)
-        fig.tight_layout()
-        fig.savefig(out_dir / "poggiolini_spp_fit.pdf", dpi=300)
-        lg.success(f"Saved SPP fit plot to {out_dir / 'poggiolini_spp_fit.pdf'}")
-        plt.close(fig)
-
-        p_l = np.array([np.polynomial.polynomial.polyval(1.0, c) for c in coeffs], dtype=float)
-        poly_sum = np.array(
-            [
-                np.sum(np.convolve(c, c) / (np.arange(len(c) * 2 - 1) + 1.0))
-                for c in coeffs
-            ],
-            dtype=float,
+        ax.plot(
+            z_axis / 1e3,
+            p_fit,
+            color="tab:red",
+            lw=0.9,
+            ls="--",
+            label="polynomial Np=9" if first else None,
         )
-        fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
-        ax1.plot(freqs_thz, p_l, lw=0.8, color="tab:blue")
-        ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
-        ax1.set_ylabel(r"$p(L)$", color="tab:blue")
-        ax2 = ax1.twinx()
-        ax2.plot(freqs_thz, poly_sum, lw=0.8, color="tab:orange")
-        ax2.set_ylabel(r"$\\sum a_n a_k/(n+k+1)$", color="tab:orange")
-        ax1.grid(False)
-        fig.tight_layout()
-        fig.savefig(out_dir / "poggiolini_pcfm_terms.pdf", dpi=300)
-        lg.success(f"Saved PCFM terms plot to {out_dir / 'poggiolini_pcfm_terms.pdf'}")
-        plt.close(fig)
-    except Exception as exc:
-        lg.warning(f"Diagnostics skipped (profile-dependent): {exc}")
+        z_anno = z_axis[int(0.4 * (len(z_axis) - 1))] / 1e3
+        y_anno = np.interp(z_anno * 1e3, z_axis, spp[idx])
+        ax.annotate(
+            label,
+            xy=(z_anno, y_anno),
+            xytext=(z_anno + 5, y_anno + 0.08),
+            textcoords="data",
+            fontsize=7,
+            arrowprops=dict(arrowstyle="->", lw=0.6),
+        )
+        first = False
+    ax.set_xlabel(r"$z\;[\mathrm{km}]$")
+    ax.set_ylabel(r"normalized power")
+    ax.grid(False)
+    ax.legend(loc="best", fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out_dir / "poggiolini_spp_fit.pdf", dpi=300)
+    lg.success(f"Saved SPP fit plot to {out_dir / 'poggiolini_spp_fit.pdf'}")
+    plt.close(fig)
 
-    try:
-        pump_specs = system.pump_specs or []
-        if pump_specs:
-            pump_freqs_thz = np.array([3e8 / p.wavelength for p in pump_specs], dtype=float) * 1e-12
-            pump_powers_dbm = np.array([p.power_dbm for p in pump_specs], dtype=float)
-        else:
-            pump_freqs_thz = np.array([])
-            pump_powers_dbm = np.array([])
-        fig, ax = plt.subplots(figsize=(3.6, 2.4))
-        ax.scatter(freqs_thz, launch_dbm, s=6, alpha=0.7, label="signals (launch)")
-        if out_dbm is not None:
-            ax.scatter(
-                freqs_thz,
-                out_dbm,
-                s=6,
-                facecolors="none",
-                edgecolors="tab:blue",
-                linewidths=0.6,
-                label="signals (out)",
-            )
-        if pump_powers_dbm.size:
-            ax.scatter(
-                pump_freqs_thz,
-                pump_powers_dbm,
-                marker="x",
-                s=16,
-                color="tab:red",
-                label="pumps",
-            )
-        ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-        ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
-        ax.grid(False)
-        ax.legend(loc="best", fontsize=7)
-        fig.tight_layout()
-        fig.savefig(out_dir / "poggiolini_launch_spectrum.pdf", dpi=300)
-        lg.success(f"Saved launch spectrum plot to {out_dir / 'poggiolini_launch_spectrum.pdf'}")
-        plt.close(fig)
-    except Exception as exc:
-        lg.warning(f"Launch spectrum plot skipped: {exc}")
+    p_l = np.array([np.polynomial.polynomial.polyval(1.0, coeff) for coeff in coeffs], dtype=float)
+    poly_sum = np.array(
+        [
+            np.sum(np.convolve(coeff, coeff) / (np.arange(len(coeff) * 2 - 1) + 1.0))
+            for coeff in coeffs
+        ],
+        dtype=float,
+    )
+    fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
+    ax1.plot(freqs_thz, p_l, lw=0.8, color="tab:blue")
+    ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
+    ax1.set_ylabel(r"$p(L)$", color="tab:blue")
+    ax2 = ax1.twinx()
+    ax2.plot(freqs_thz, poly_sum, lw=0.8, color="tab:orange")
+    ax2.set_ylabel(r"$\\sum a_n a_k/(n+k+1)$", color="tab:orange")
+    ax1.grid(False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "poggiolini_pcfm_terms.pdf", dpi=300)
+    lg.success(f"Saved PCFM terms plot to {out_dir / 'poggiolini_pcfm_terms.pdf'}")
+    plt.close(fig)
 
-    try:
-        wl = 3e8 / freqs
-        beta2 = np.array([system.fiber.beta2_at(float(w)) for w in wl], dtype=float)
-        aeff = np.array([system.fiber.effective_area_at(float(w)) for w in wl], dtype=float)
-        fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
-        ax1.plot(freqs_thz, beta2 * 1e24, lw=0.8, color="tab:blue")
-        ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
-        ax1.set_ylabel(r"$\\beta_2\\;[10^{-24}\\,s^2/m]$", color="tab:blue")
-        ax2 = ax1.twinx()
-        ax2.plot(freqs_thz, aeff * 1e12, lw=0.8, color="tab:orange")
-        ax2.set_ylabel(r"$A_{eff}\\;[\\mu m^2]$", color="tab:orange")
-        ax1.grid(False)
-        fig.tight_layout()
-        fig.savefig(out_dir / "poggiolini_fiber_params.pdf", dpi=300)
-        lg.success(f"Saved fiber parameters plot to {out_dir / 'poggiolini_fiber_params.pdf'}")
-        plt.close(fig)
-    except Exception as exc:
-        lg.warning(f"Diagnostics skipped (fiber params): {exc}")
+    pump_specs = system.pump_specs or []
+    if pump_specs:
+        pump_freqs_thz = np.array([3e8 / p.wavelength for p in pump_specs], dtype=float) * 1e-12
+        pump_powers_dbm = np.array([p.power_dbm for p in pump_specs], dtype=float)
+    else:
+        pump_freqs_thz = np.array([])
+        pump_powers_dbm = np.array([])
+    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    ax.scatter(freqs_thz, launch_dbm, s=6, alpha=0.7, label="signals (launch)")
+    ax.scatter(
+        freqs_thz,
+        out_dbm,
+        s=6,
+        facecolors="none",
+        edgecolors="tab:blue",
+        linewidths=0.6,
+        label="signals (out)",
+    )
+    if pump_powers_dbm.size:
+        ax.scatter(
+            pump_freqs_thz,
+            pump_powers_dbm,
+            marker="x",
+            s=16,
+            color="tab:red",
+            label="pumps",
+        )
+    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
+    ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
+    ax.grid(False)
+    ax.legend(loc="best", fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out_dir / "poggiolini_launch_spectrum.pdf", dpi=300)
+    lg.success(f"Saved launch spectrum plot to {out_dir / 'poggiolini_launch_spectrum.pdf'}")
+    plt.close(fig)
+
+    wl = 3e8 / freqs
+    beta2 = np.array([system.fiber.beta2_at(float(w)) for w in wl], dtype=float)
+    aeff = np.array([system.fiber.effective_area_at(float(w)) for w in wl], dtype=float)
+    fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
+    ax1.plot(freqs_thz, beta2 * 1e24, lw=0.8, color="tab:blue")
+    ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
+    ax1.set_ylabel(r"$\\beta_2\\;[10^{-24}\\,s^2/m]$", color="tab:blue")
+    ax2 = ax1.twinx()
+    ax2.plot(freqs_thz, aeff * 1e12, lw=0.8, color="tab:orange")
+    ax2.set_ylabel(r"$A_{eff}\\;[\\mu m^2]$", color="tab:orange")
+    ax1.grid(False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "poggiolini_fiber_params.pdf", dpi=300)
+    lg.success(f"Saved fiber parameters plot to {out_dir / 'poggiolini_fiber_params.pdf'}")
+    plt.close(fig)

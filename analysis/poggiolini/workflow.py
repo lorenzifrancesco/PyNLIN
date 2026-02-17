@@ -18,7 +18,6 @@ from .config import (
     _to_optional_path,
 )
 from .io import (
-    _profile_needs_recompute,
     _resolve_launch_powers,
     _resolve_signal_power,
     _save_nlin_csv,
@@ -33,55 +32,24 @@ from .plotting import (
 from .reporting import _log_td_pcfm_parameters
 from .td import _qam_mu0, _td_modulation_components
 
-try:
-    from analysis.uwb_nlin import (
-        _nlin_cache_path,
-        compute_raman_profiles,
-        plot_power_profiles,
-    )
-except ModuleNotFoundError:
-    from uwb_nlin import (  # type: ignore[no-redef]
-        _nlin_cache_path,
-        compute_raman_profiles,
-        plot_power_profiles,
-    )
+from analysis.uwb_nlin import _nlin_cache_path, compute_raman_profiles, plot_power_profiles
 
 MANAKOV_SCALE_POGGIOLINI = 16.0 / 9.0
-_POGGIOLINI_MANAKOV_WARNED = False
+
 
 def _apply_poggiolini_manakov_scaling(values: np.ndarray) -> np.ndarray:
     """Apply manual 16/9 Manakov scaling for Poggiolini TD comparisons."""
-    # FIXME: Putting by hand the Manakov scaling.
-    global _POGGIOLINI_MANAKOV_WARNED
-    if not _POGGIOLINI_MANAKOV_WARNED:
-        lg.warning(
-            "Poggiolini TD path: putting by hand the Manakov scaling (16/9) "
-            "and disregarding kappas."
-        )
-        _POGGIOLINI_MANAKOV_WARNED = True
     return np.asarray(values, dtype=float) * MANAKOV_SCALE_POGGIOLINI
 
 
 def _log_td_gn_vs_pcfm_xci_diff_stats(
-    td_modulations: dict[str, np.ndarray] | None,
+    td_modulations: dict[str, np.ndarray],
     nlin_pcfm_xci: dict[str, np.ndarray],
 ) -> None:
     """Print TD(Gaussian) minus PCFM(XCI) summary stats in linear and dB domains."""
-    if not td_modulations or "Gaussian" not in td_modulations:
-        lg.warning("TD Gaussian modulation result unavailable; skipping TD-GN vs PCFM-XCI diff summary.")
-        return
     td_gn = np.asarray(td_modulations["Gaussian"], dtype=float).reshape(-1)
-    if td_gn.size == 0:
-        lg.warning("TD Gaussian modulation result is empty; skipping TD-GN vs PCFM-XCI diff summary.")
-        return
     for label, pcfm_xci in nlin_pcfm_xci.items():
         pcfm_xci_flat = np.asarray(pcfm_xci, dtype=float).reshape(-1)
-        if pcfm_xci_flat.size != td_gn.size:
-            lg.warning(
-                "Cannot compare TD-GN and PCFM-XCI for "
-                f"{label}: size mismatch {td_gn.size} vs {pcfm_xci_flat.size}."
-            )
-            continue
         diff_w = td_gn - pcfm_xci_flat
         ratio = td_gn / np.maximum(pcfm_xci_flat, 1e-30)
         td_db = 10.0 * np.log10(np.maximum(td_gn, 1e-30))
@@ -203,10 +171,6 @@ def run_poggiolini_workflow(
     flat_profiles = flat_profiles_mode or _flat_profiles_enabled(system)
 
     if flat_profiles:
-        if power_profiles_mode != "flat":
-            lg.warning(
-                "flat profile mode active; ignoring profile recompute/launch-power settings."
-            )
         use_profile_launch_powers = False
         launch_powers = _resolve_launch_powers(system, None, launch_csv_path, use_profile=False)
         _write_flat_profile(profile_path, system, launch_powers_w=launch_powers)
@@ -247,11 +211,6 @@ def run_poggiolini_workflow(
                 jiang_cfg=jiang_cfg,
                 max_power_w=PROFILE_MAX_W,
             )
-        if _profile_needs_recompute(profile_path):
-            raise ValueError(
-                f"Raman profile at {profile_path} appears invalid; "
-                "set [poggiolini.run].power_profiles_mode='recompute'."
-            )
         launch_powers = _resolve_launch_powers(
             system,
             profile_path,
@@ -259,21 +218,17 @@ def run_poggiolini_workflow(
             use_profile=use_profile_launch_powers,
         )
 
-    try:
-        sig_ch_z, z_axis = load_signal_profiles(profile_path, system)
-        span = float(z_axis[-1] - z_axis[0]) if z_axis.size else 0.0
-        if span > 0:
-            avg_power = np.trapezoid(sig_ch_z, z_axis, axis=1) / span
-            out_power = sig_ch_z[:, -1]
-            lg.info(
-                "Profile power summary (per-channel): "
-                f"avg_W min/med/max = {float(np.min(avg_power)):.3e} / "
-                f"{float(np.median(avg_power)):.3e} / {float(np.max(avg_power)):.3e}; "
-                f"out_W min/med/max = {float(np.min(out_power)):.3e} / "
-                f"{float(np.median(out_power)):.3e} / {float(np.max(out_power)):.3e}"
-            )
-    except Exception as exc:
-        lg.warning(f"Failed to compute profile power summary: {exc}")
+    sig_ch_z, z_axis = load_signal_profiles(profile_path, system)
+    span = float(z_axis[-1] - z_axis[0]) if z_axis.size else 0.0
+    avg_power = np.trapezoid(sig_ch_z, z_axis, axis=1) / max(span, 1.0)
+    out_power = sig_ch_z[:, -1]
+    lg.info(
+        "Profile power summary (per-channel): "
+        f"avg_W min/med/max = {float(np.min(avg_power)):.3e} / "
+        f"{float(np.median(avg_power)):.3e} / {float(np.max(avg_power)):.3e}; "
+        f"out_W min/med/max = {float(np.min(out_power)):.3e} / "
+        f"{float(np.median(out_power)):.3e} / {float(np.max(out_power)):.3e}"
+    )
 
     if do_plot:
         plot_power_profiles(system, profile_path)
@@ -313,9 +268,6 @@ def run_poggiolini_workflow(
         recompute=recompute_td,
         profile_path=profile_path,
     )
-    if not np.all(np.isfinite(ccfs)):
-        lg.warning("Collision coefficients contain non-finite values; replacing NaNs with 0.")
-        ccfs = np.nan_to_num(ccfs, nan=0.0, posinf=0.0, neginf=0.0)
     nlin_td = total_nlin_uwb(
         system,
         ccfs,
@@ -330,32 +282,26 @@ def run_poggiolini_workflow(
         ),
         recompute=recompute_td,
     )
-    if not np.all(np.isfinite(nlin_td)):
-        raise ValueError("TD NLIN contains non-finite values. Re-run with td_mode='recompute'.")
     nlin_td_flat = _apply_poggiolini_manakov_scaling(nlin_td).reshape(-1)
 
-    td_modulations = None
-    try:
-        qam_orders = [16, 64, 256]
-        const_pref, sum_a, sum_b = _td_modulation_components(
-            system,
-            ccfs,
-            launch_powers,
-            use_kappa=False,
-            use_x_mode=True,
-        )
-        const_pref = _apply_poggiolini_manakov_scaling(const_pref)
-        
-        td_modulations = {}
-        for order in qam_orders:
-            mu0 = _qam_mu0(order)
-            nlin_mod = const_pref * (mu0 * sum_a + sum_b)
-            td_modulations[f"{order}-QAM"] = np.asarray(nlin_mod, dtype=float).reshape(-1)
-        mu0_gaussian = gaussian_mu0()
-        nlin_gaussian = const_pref * (mu0_gaussian * sum_a + sum_b)
-        td_modulations["Gaussian"] = np.asarray(nlin_gaussian, dtype=float).reshape(-1)
-    except Exception as exc:
-        lg.warning(f"TD modulation sweep skipped: {exc}")
+    qam_orders = [16, 64, 256]
+    const_pref, sum_a, sum_b = _td_modulation_components(
+        system,
+        ccfs,
+        launch_powers,
+        use_kappa=False,
+        use_x_mode=True,
+    )
+    const_pref = _apply_poggiolini_manakov_scaling(const_pref)
+
+    td_modulations: dict[str, np.ndarray] = {}
+    for order in qam_orders:
+        mu0 = _qam_mu0(order)
+        nlin_mod = const_pref * (mu0 * sum_a + sum_b)
+        td_modulations[f"{order}-QAM"] = np.asarray(nlin_mod, dtype=float).reshape(-1)
+    mu0_gaussian = gaussian_mu0()
+    nlin_gaussian = const_pref * (mu0_gaussian * sum_a + sum_b)
+    td_modulations["Gaussian"] = np.asarray(nlin_gaussian, dtype=float).reshape(-1)
 
     _save_nlin_csv(
         Path("results") / f"total_nlin_{Path(profile_path).stem}_k1_x1.csv",
