@@ -207,8 +207,8 @@ def _load_profile_output_powers(profile_path: Path | str, expected_channels: int
     return output_power
 
 
-def _load_ase_band_lines(profile_path: Path | str, system: System):
-    """Return ASE band averages as (name, f_min, f_max, avg_w) tuples."""
+def _load_ase_profile(profile_path: Path | str, system: System):
+    """Load ASE profile payload and return end-of-span ASE data."""
     ase_path = Path("results/uwb_ase_power_profiles.npy")
     if not ase_path.exists():
         raise FileNotFoundError(f"ASE profile not found at {ase_path}")
@@ -244,7 +244,7 @@ def _load_ase_band_lines(profile_path: Path | str, system: System):
         ase = data.get("ase_solution")
     if ase is None:
         lg.warning("ASE profile missing ASE solution; skipping ASE overlay.")
-        return []
+        return None
 
     ase = np.asarray(ase, dtype=float)
     if ase.ndim == 3 and ase.shape[-1] == 1:
@@ -253,7 +253,7 @@ def _load_ase_band_lines(profile_path: Path | str, system: System):
         ase = np.sum(ase, axis=-1)
     if ase.ndim != 2:
         lg.warning(f"Unexpected ASE shape {ase.shape}; skipping ASE overlay.")
-        return []
+        return None
 
     ase_wavelengths = None
     if hasattr(data, "get"):
@@ -267,59 +267,94 @@ def _load_ase_band_lines(profile_path: Path | str, system: System):
     ase_decimation = 1
     if hasattr(data, "get"):
         ase_decimation = int(data.get("ase_decimation", 1))
-    scale = ase_decimation if ase_decimation > 0 else 1
-    if scale == 1 and system.n_channels and ase.shape[1] and system.n_channels % ase.shape[1] == 0:
-        inferred = system.n_channels // ase.shape[1]
-        if inferred > 1:
-            scale = inferred
-            lg.info(f"Inferred ASE decimation scale {scale} from channel counts.")
     decimated_indices = data.get("ase_signal_indices") if hasattr(data, "get") else None
-    if decimated_indices is None:
-        decimated_indices = np.arange(0, system.n_channels, ase_decimation, dtype=int)
-    else:
+    if decimated_indices is not None:
         decimated_indices = np.asarray(decimated_indices, dtype=int)
-
-    if ase.shape[1] != decimated_indices.size:
-        if ase.shape[1] == system.n_channels:
-            decimated_indices = np.arange(0, ase.shape[1], ase_decimation, dtype=int)
-            ase = ase[:, decimated_indices]
-            if ase_wavelengths is not None and ase_wavelengths.size == system.n_channels:
-                ase_wavelengths = ase_wavelengths[decimated_indices]
-        elif ase_wavelengths is None:
-            lg.warning(
-                f"ASE channels ({ase.shape[1]}) do not match decimation "
-                f"indices ({decimated_indices.size}); skipping ASE overlay."
-            )
-            return []
-
     ase_out = ase[-1]
+
+    return {
+        "ase_out": ase_out,
+        "ase_wavelengths": ase_wavelengths,
+        "ase_decimation": ase_decimation,
+        "ase_indices": decimated_indices,
+    }
+
+
+def _resolve_ase_per_channel(ase_profile: dict, system: System):
+    """Return per-channel ASE power, optional band averages, and plot mode."""
     freqs = system.wdm.frequency_grid()
+    n_channels = freqs.size
+    ase_out = np.asarray(ase_profile.get("ase_out", []), dtype=float).reshape(-1)
+    ase_wavelengths = ase_profile.get("ase_wavelengths")
+    ase_decimation = int(ase_profile.get("ase_decimation", 1))
+    ase_indices = ase_profile.get("ase_indices")
+
+    if ase_out.size == 0:
+        return None, [], "none"
+
+    # Per-channel ASE available.
+    if ase_out.size == n_channels:
+        if ase_wavelengths is not None and ase_wavelengths.size == ase_out.size:
+            ase_freqs = c / np.asarray(ase_wavelengths, dtype=float)
+            order = np.argsort(ase_freqs)
+            ase_per_channel = np.interp(freqs, ase_freqs[order], ase_out[order])
+        else:
+            ase_per_channel = ase_out.copy()
+        return ase_per_channel, [], "per-channel"
+
+    # Decimated ASE: expand to per-channel averages.
+    ase_decimation = max(int(ase_decimation), 1)
+    if ase_indices is None or ase_indices.size != ase_out.size:
+        ase_indices = np.arange(0, n_channels, ase_decimation, dtype=int)
+    if ase_indices.size != ase_out.size:
+        lg.warning(
+            f"ASE channels ({ase_out.size}) do not match decimation indices ({ase_indices.size}); "
+            "skipping ASE overlay."
+        )
+        return None, [], "none"
+
+    ase_per_channel = np.zeros((n_channels,), dtype=float)
+    group_slices = [
+        slice(idx, min(idx + ase_decimation, n_channels))
+        for idx in range(0, n_channels, ase_decimation)
+    ]
+    if len(group_slices) != ase_out.size:
+        lg.warning(
+            f"ASE group count ({len(group_slices)}) != ase_out size ({ase_out.size}); skipping ASE overlay."
+        )
+        return None, [], "none"
+    scale = float(ase_decimation)
+    for idx, slc in enumerate(group_slices):
+        ase_per_channel[slc] = float(ase_out[idx]) / scale
+
     lines = []
     if isinstance(system.wdm, pynlin.wdm.IrregularWDM):
         for name, slc in system.wdm._band_slices.items():
             f_band = freqs[slc]
             f_min, f_max = float(np.min(f_band)), float(np.max(f_band))
-            if ase_wavelengths is not None:
-                ase_freqs = c / ase_wavelengths
-                mask = (ase_freqs >= f_min) & (ase_freqs <= f_max)
-            else:
-                mask = (decimated_indices >= slc.start) & (decimated_indices < slc.stop)
-            if not np.any(mask):
-                continue
-            avg_w = float(np.mean(ase_out[mask]) / scale)
+            avg_w = float(np.mean(ase_per_channel[slc]))
             lines.append((name, f_min, f_max, avg_w))
     else:
-        avg_w = float(np.mean(ase_out) / scale)
+        avg_w = float(np.mean(ase_per_channel))
         lines.append(("all", float(np.min(freqs)), float(np.max(freqs)), avg_w))
-    return lines
+    return ase_per_channel, lines, "band-avg"
 
 
-def _nlin_cache_path(profile_path: Path | str | None,
-                     use_kappa: bool,
-                     use_x_mode: bool) -> Path:
+def _nlin_cache_path(
+    profile_path: Path | str | None,
+    use_kappa: bool,
+    use_x_mode: bool,
+    extra_tag: str | None = None,
+) -> Path:
     """Return a cache path for total NLIN arrays."""
     tag = Path(profile_path).stem if profile_path is not None else "default"
-    return Path("results") / f"total_nlin_{tag}_k{int(use_kappa)}_x{int(use_x_mode)}.npy"
+    suffix = ""
+    if extra_tag:
+        safe_tag = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in str(extra_tag))
+        safe_tag = safe_tag.strip("_")
+        if safe_tag:
+            suffix = f"_{safe_tag}"
+    return Path("results") / f"total_nlin_{tag}{suffix}_k{int(use_kappa)}_x{int(use_x_mode)}.npy"
 
 
 def plot_case_study_noise(
@@ -378,17 +413,17 @@ def plot_case_study_noise(
     scatter_size = 8
     scatter_lw = 0.05
 
-    ase_lines = _load_ase_band_lines(profile_path, syst) if use_profile else []
+    ase_profile = _load_ase_profile(profile_path, syst) if use_profile else None
     ase_per_channel = np.zeros_like(freqs, dtype=float)
-    assigned = np.zeros_like(freqs, dtype=bool)
-    if ase_lines:
-        for _, f_min, f_max, avg_w in ase_lines:
-            mask = (freqs >= f_min) & (freqs <= f_max)
-            ase_per_channel[mask] = avg_w
-            assigned[mask] = True
-        if not np.all(assigned):
-            lg.warning("Some channels missing ASE band assignment; assuming 0 ASE there.")
-    else:
+    ase_lines = []
+    ase_plot_mode = "none"
+    if ase_profile:
+        ase_per_channel, ase_lines, ase_plot_mode = _resolve_ase_per_channel(ase_profile, syst)
+        if ase_per_channel is None:
+            ase_per_channel = np.zeros_like(freqs, dtype=float)
+            ase_lines = []
+            ase_plot_mode = "none"
+    if ase_plot_mode == "none":
         lg.warning("ASE data unavailable; using NLIN-only noise/SNR.")
 
     if output_power is not None:
@@ -469,6 +504,19 @@ def plot_case_study_noise(
                 marker="o",
                 linewidths=scatter_lw,
             )
+    if ase_plot_mode == "per-channel":
+        ase_dbm = watt2dBm(np.maximum(ase_per_channel, denom_floor))
+        ax_noise.scatter(
+            freqs * 1e-12,
+            ase_dbm,
+            s=scatter_size,
+            facecolors="none",
+            edgecolors="red",
+            alpha=0.8,
+            linewidths=scatter_lw,
+            marker="x",
+            label="ASE",
+        )
     if ase_lines:
         label_used = False
         for band, f_min, f_max, avg_w in ase_lines:
