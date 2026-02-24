@@ -39,9 +39,13 @@ MU0 = qam_mu0(64)
 # --- module-level globals that workers will read ---
 _G = {
     "beta1": None, "beta2": None, "fB": None,
+    "raman_lo": None, "raman_hi": None,
     "n_modes": None, "n_freqs": None, "n_pairs": None,
     "cf": None, "ipulse": None,
     "raman_min": None, "raman_max": None,
+    "raman_extremes": None,
+    "ps_ideal": None,
+    "dgd_scale": None,
     "n_workers": None,
 }
 
@@ -77,7 +81,8 @@ def _max_lld_from_beta2(cf, beta2: np.ndarray) -> float | None:
 
 
 def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
-                 cf, ipulse, raman_min, raman_max, n_workers):
+                 cf, ipulse, raman_min, raman_max, n_workers,
+                 raman_extremes, ps_ideal):
     """Initializer for multiprocessing workers to mmap shared grids and configs."""
     import os
 
@@ -90,6 +95,17 @@ def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
     _G["beta1"] = np.load(beta1_path, mmap_mode="r")
     _G["beta2"] = np.load(beta2_path, mmap_mode="r")
     _G["fB"] = np.load(fB_path,    mmap_mode="r")
+    fB = _G["fB"]
+    n_z = int(fB.shape[0])
+    if n_z > 1:
+        dz = float(cf.fiber_length) / float(n_z - 1)
+    else:
+        dz = 0.0
+    fB_sum = np.sum(fB, axis=0)
+    # Cache Raman LO/HI integrals per (mode, channel) once per worker process.
+    # This avoids recomputing raman_integral(...) in the innermost channel loops.
+    _G["raman_lo"] = (fB_sum * dz / float(cf.fiber_length))**2
+    _G["raman_hi"] = np.sum(fB * fB, axis=0) * dz / float(cf.fiber_length)
     _G["n_modes"] = n_modes
     _G["n_freqs"] = n_freqs
     _G["n_pairs"] = (n_modes * n_freqs) ** 2
@@ -97,6 +113,9 @@ def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
     _G["ipulse"] = ipulse
     _G["raman_min"] = raman_min
     _G["raman_max"] = raman_max
+    _G["raman_extremes"] = raman_extremes
+    _G["ps_ideal"] = ps_ideal
+    _G["dgd_scale"] = float(cf.fiber_length) * float(cf.baud_rate)
     _G["n_workers"] = n_workers
 
 
@@ -105,24 +124,22 @@ def work_A(task_A):
     
     this strangely takes about 10s. Maybe it is the manual iteration on all the channels
     """
-    import os
-    import time
-
-    import numpy as np
     mA, nuA = task_A
-    pid = os.getpid()
 
     beta1 = _G["beta1"]
     beta2 = _G["beta2"]
     fBmm = _G["fB"]
+    raman_lo = _G["raman_lo"]
+    raman_hi = _G["raman_hi"]
     n_modes = _G["n_modes"]
     n_freqs = _G["n_freqs"]
-    n_pairs = _G["n_pairs"]
     cf = _G["cf"]
     ipulse = _G["ipulse"]
     rmin = _G["raman_min"]
     rmax = _G["raman_max"]
-    nw = _G["n_workers"]
+    raman_extremes = _G["raman_extremes"]
+    ps_ideal = _G["ps_ideal"]
+    dgd_scale = _G["dgd_scale"]
 
     beta1_A = beta1[mA, nuA]
     gvda = beta2[mA, nuA]
@@ -133,9 +150,6 @@ def work_A(task_A):
     start = time.time()
     for mB in range(n_modes):
         for nuB in range(n_freqs):
-            idx = (mA*n_freqs + nuA) * n_modes * \
-                n_freqs + (mB*n_freqs + nuB) + 1
-
             # pretty progress
             # try:
             #     import logging
@@ -151,7 +165,9 @@ def work_A(task_A):
             gvdb = beta2[mB, nuB]
             dgd = abs(beta1_A - beta1[mB, nuB])
 
-            val = fit_nlin(          # ensure this is importable at module scope too
+            # _fit_nlin_params accepts cached invariants to avoid repeated
+            # ideal-fit and Raman-extreme lookups on every channel pair.
+            ps = _fit_nlin_params(
                 cf,
                 abs(gvda),
                 abs(gvdb),
@@ -159,8 +175,12 @@ def work_A(task_A):
                 raman_gvd_correction_min=rmin,
                 raman_gvd_correction_max=rmax,
                 ipulse=ipulse,
-            )(dgd)
-            block[mB, nuB] = val
+                ps_ideal=ps_ideal,
+                raman_extremes=raman_extremes,
+                raman_integral_fB_lo=float(raman_lo[mB, nuB]),
+                raman_integral_fB_hi=float(raman_hi[mB, nuB]),
+            )
+            block[mB, nuB] = softplus(dgd * dgd_scale, *ps)
 
     # block_sum = np.sum(block)
     return mA, nuA, block, time.time() - start
@@ -218,6 +238,65 @@ def apply_turning_point_correction(ps: Tuple[float, float, float],
     return ps
 
 
+def _fit_nlin_params(cf,
+                     gvda: float,
+                     gvdb: float,
+                     fB: np.ndarray,
+                     raman_gvd_correction_min: callable,
+                     raman_gvd_correction_max: callable,
+                     ipulse: int,
+                     m_lo_truncation: int = 3,
+                     ps_ideal: np.ndarray | None = None,
+                     raman_extremes: Tuple[float, float, float, float] | None = None,
+                     raman_integral_fB_lo: float | None = None,
+                     raman_integral_fB_hi: float | None = None) -> np.ndarray:
+    """Compute fitted softplus parameters for one NLIN channel pair."""
+    lda = 1/(cf.baud_rate**2 * gvda) if gvda != 0 else 1e30
+    ldb = 1/(cf.baud_rate**2 * gvdb) if gvdb != 0 else 1e30
+    if ps_ideal is None:
+        ps_ideal = ideal_fit_coefficients(
+            0.0,
+            0.0,
+            ipulse=ipulse,
+            fiber_length=float(cf.fiber_length),
+            baud_rate=float(cf.baud_rate),
+            n_samples_numeric_n=_get_n_samples_numeric_n(cf),
+        )
+
+    if np.all(fB == 1.0):
+        lo_value_perfect = gvd_correction(
+            cf,
+            gvda,
+            gvdb,
+            cf.fiber_length,
+            ipulse=ipulse,
+            m_lo_truncation=m_lo_truncation,
+        )
+        lg.info("You are using a flat fB, no Raman correction will be applied")
+        return apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
+
+    lo_value_max = raman_gvd_correction_max(
+        cf.fiber_length/lda, cf.fiber_length/ldb)
+    lo_value_min = raman_gvd_correction_min(
+        cf.fiber_length/lda, cf.fiber_length/ldb)
+    if raman_extremes is None:
+        raman_extremes = load_raman_integral_extremes(cf)
+    r_lo_min, r_lo_max, _, _ = raman_extremes
+
+    # Optional precomputed integrals are used by worker fast-path.
+    if raman_integral_fB_lo is None:
+        raman_integral_fB_lo = raman_integral(cf, "LO", fB)
+    if raman_integral_fB_hi is None:
+        raman_integral_fB_hi = raman_integral(cf, "HI", fB)
+    lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
+        (lo_value_max - lo_value_min) + lo_value_min
+    lg.trace(f"LO value: {lo_value_fB:.2e}")
+    ps_ramanful = apply_plateau_correction(ps_ideal.copy(), lo_value_fB)
+    ps_ramanful = apply_turning_point_correction(
+        ps_ramanful, raman_integral_fB_hi)
+    return ps_ramanful
+
+
 # remark: this functions takes DGD in SI units, and outputs channel pair NLIN in normalized units
 def fit_nlin(cf,
              gvda: float,
@@ -228,65 +307,23 @@ def fit_nlin(cf,
              ipulse: int,
              m_lo_truncation: int = 3) -> callable:
     """Return a fitted NLIN curve for a channel pair with given GVDs and Raman profile."""
-
-    lda = 1/(cf.baud_rate**2 * gvda) if gvda != 0 else 1e30
-    ldb = 1/(cf.baud_rate**2 * gvdb) if gvdb != 0 else 1e30
-    ps_ideal = ideal_fit_coefficients(
-        0.0,
-        0.0,
+    ps = _fit_nlin_params(
+        cf,
+        gvda,
+        gvdb,
+        fB=fB,
+        raman_gvd_correction_min=raman_gvd_correction_min,
+        raman_gvd_correction_max=raman_gvd_correction_max,
         ipulse=ipulse,
-        fiber_length=float(cf.fiber_length),
-        baud_rate=float(cf.baud_rate),
-        n_samples_numeric_n=_get_n_samples_numeric_n(cf),
+        m_lo_truncation=m_lo_truncation,
     )
+    dgd_scale = float(cf.fiber_length) * float(cf.baud_rate)
 
-    if np.all(fB == 1.0):
-        lo_value_perfect = gvd_correction(cf,
-                                          # FIXME this is the sucker
-                                          gvda, gvdb, cf.fiber_length, ipulse=ipulse, m_lo_truncation=m_lo_truncation)
-        ps_ramanless = apply_plateau_correction(
-            ps_ideal.copy(), lo_value_perfect)
-        lg.info("You are using a flat fB, no Raman correction will be applied")
-        ps = apply_plateau_correction(ps_ideal.copy(), lo_value_perfect)
-        def nlin_basic(dgd):
-            return softplus(dgd * cf.fiber_length * cf.baud_rate, *ps)
-        nlin_basic.ps_params = ps
-        return nlin_basic
-
-    # correct in the LO regime (Raman + GVD)
-    lo_value_max = raman_gvd_correction_max(
-        cf.fiber_length/lda, cf.fiber_length/ldb)
-    lo_value_min = raman_gvd_correction_min(
-        cf.fiber_length/lda, cf.fiber_length/ldb)
-    r_lo_min, r_lo_max, _, _ = load_raman_integral_extremes(cf)
-
-    raman_integral_fB_lo = raman_integral(cf, "LO", fB)
-    raman_integral_fB_hi = raman_integral(cf, "HI", fB)
-    # special case of zero GVD
-    # if gvda == 0.0 and gvdb == 0.0:
-    #     # we compute the fB effect using
-    #     lo_value_fB = raman_integral_fB_lo
-    # else:
-    lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
-        (lo_value_max - lo_value_min) + lo_value_min
-    lg.trace(f"LO value: {lo_value_fB:.2e}")
-    ps_ramanful = apply_plateau_correction(ps_ideal.copy(), lo_value_fB)
-    ps_ramanful = apply_turning_point_correction(
-        ps_ramanful, raman_integral_fB_hi)
-
-    # applying the Raman value is not the same as multiplying ever
-    # build the linear composition to match the HI correction (in form of a simple Raman integral)
     def nlin_megafit(d):
-        d = d * cf.fiber_length * cf.baud_rate  # FIXME apply normalization..
-        DGD_MAX = LLW_MAX
-        DGD_MIN = LLW_MIN
-        xi = (d-DGD_MIN)/(DGD_MAX-DGD_MIN)
-        return softplus(d, *ps_ramanful)
-        return ((softplus(d, *ps_ramanless) * raman_integral_fB_hi))
-        return softplus(d, *ps_ramanful) * (1-xi) + softplus(d, *ps_ramanless) * xi * raman_integral_fB_hi
-        return softplus(d, *ps_ramanful)
-        return softplus(d, *ps_ramanless) * raman_integral_fB_lo
-    nlin_megafit.ps_params = ps_ramanful
+        d = d * dgd_scale
+        return softplus(d, *ps)
+
+    nlin_megafit.ps_params = ps
     return nlin_megafit
 
 """
@@ -350,7 +387,7 @@ def collision_coeffs_system(cf,
         return np.load(filename)
     else: # this is the very intensive part.
         lg.info(f"Computing collision coefficients from scratch")
-        _get_n_samples_numeric_n(cf)
+        n_samples_numeric_n = _get_n_samples_numeric_n(cf)
         T = 1 / cf.baud_rate
         L = cf.fiber_length
         x_norm = L / T
@@ -392,21 +429,22 @@ def collision_coeffs_system(cf,
         max_lld = _max_lld_from_beta2(cf, beta2)
         raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
             cf, ipulse=ipulse, max_lld=max_lld) # this could be intensive, but it is actually ok.
-        fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(cf)
+        fB, _, _, _, _ = load_fB(cf)
+        # Reuse across all pair fits: these are global for this run.
+        raman_extremes = load_raman_integral_extremes(cf)
+        ps_ideal = ideal_fit_coefficients(
+            0.0,
+            0.0,
+            ipulse=ipulse,
+            fiber_length=float(cf.fiber_length),
+            baud_rate=float(cf.baud_rate),
+            n_samples_numeric_n=n_samples_numeric_n,
+        )
 
         # precompute the Raman corrections from the numerical results of the integrals
         # precompute the GVD-dependent fitting parameters (perfect amplification)
 
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        # import os, numpy as np, itertools as it
-
-        # Precompute & save grids so workers don’t need your `fiber` object:
-        beta1 = np.empty((cf.n_modes, len(freqs)))
-        beta2 = np.empty_like(beta1)
-        for m in range(cf.n_modes):
-            for j, f in enumerate(freqs):
-                beta1[m, j] = fiber.group_delay.evaluate_beta1(m, f)
-                beta2[m, j] = fiber.group_delay.evaluate_beta2(m, f)
 
         beta1_path = "/tmp/beta1_grid.npy"
         beta2_path = "/tmp/beta2_grid.npy"
@@ -424,13 +462,13 @@ def collision_coeffs_system(cf,
             initargs=(beta1_path, beta2_path, fB_path,
                       cf.n_modes, len(freqs),
                       cf, ipulse, raman_gvd_correction_min, raman_gvd_correction_max,
-                      n_workers),
+                      n_workers, raman_extremes, ps_ideal),
         ) as ex:
             futures = [ex.submit(work_A, a) for a in A_tasks]
             for fut in as_completed(futures):
                 mA, nuA, block, elapsed = fut.result()
                 collision_coeffs[mA, nuA, :, :] = block
-                lg.info(
+                lg.trace(
                     f"Finished NLIN for A(m={mA},nu={nuA:>5}) in {elapsed:>6.2f} s")
 
         # --- saving
@@ -487,16 +525,14 @@ def total_nlin(cf,
     kappa2 = get_kappa2_matrix(cf, use_kappa, use_x_mode)
 
     n_modes, n_freqs, _, _ = collision_coeffs_si.shape
-    total_nlin = np.zeros((n_modes, n_freqs))
+    prefactor_matrix = np.zeros((n_modes, n_modes), dtype=float)
     for mA in range(n_modes):
-        for nuA in range(n_freqs):
-            for mB in range(n_modes):
-                for nuB in range(n_freqs):
-                    prefactor = nlin_prefactor(cf, mA, mB)
-                    total_nlin[mA, nuA] += collision_coeffs_si[mA,
-                                                               nuA, mB, nuB] * kappa2[mA, mB]  * prefactor 
-    total_nlin *= constant_prefactor
-    return total_nlin
+        for mB in range(n_modes):
+            prefactor_matrix[mA, mB] = nlin_prefactor(cf, mA, mB)
+    coupling = kappa2 * prefactor_matrix
+    # Contract over (mB, nuB): total_nlin[a, i] = sum_{b,j} coeff[a,i,b,j]*coupling[a,b]
+    total_nlin = np.einsum("aibj,ab->ai", collision_coeffs_si, coupling, optimize=True)
+    return total_nlin * constant_prefactor
 
 
 if __name__ == "__main__":

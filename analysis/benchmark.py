@@ -35,10 +35,13 @@ from loguru import logger as lg
 
 try:
     # Works when invoked as a module: `python -m analysis.benchmark`
-    from analysis.system_nlin import _compute_mmf_td_nlin_with_timing
+    from analysis.system_nlin import (
+        _compute_mmf_td_nlin_with_timing,
+        plot_case_study_noise,
+    )
 except ModuleNotFoundError:
     # Works when invoked as a script: `python analysis/benchmark.py`
-    from system_nlin import _compute_mmf_td_nlin_with_timing
+    from system_nlin import _compute_mmf_td_nlin_with_timing, plot_case_study_noise
 from pynlin.log_init import init_logging
 from pynlin.system import System
 
@@ -375,6 +378,24 @@ def _parse_args() -> argparse.Namespace:
             "Disable with --no-auto-prepare-fb."
         ),
     )
+    ap.add_argument(
+        "--plot-realistic",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Generate the realistic NLIN figure after benchmark execution. "
+            "Disable with --no-plot-realistic."
+        ),
+    )
+    ap.add_argument(
+        "--plot-name",
+        type=str,
+        default="realistic_benchmark",
+        help=(
+            "Suffix used by plot_case_study_noise when saving "
+            "media/nlin<name>.pdf."
+        ),
+    )
     return ap.parse_args()
 
 
@@ -407,6 +428,21 @@ def main() -> None:
         "stats": stats,
     }
     _write_json(args.json_out, summary_payload)
+
+    if bool(args.plot_realistic):
+        plot_name = str(args.plot_name)
+        lg.info(
+            "Generating realistic NLIN plot from benchmark flow as media/nlin{}.pdf",
+            plot_name,
+        )
+        plot_case_study_noise(
+            use_dBm_scale=True,
+            also_plot_smf=True,
+            also_plot_noninteracting=True,
+            name=plot_name,
+            report_timing=False,
+            recompute_collisions=False,
+        )
 
 
 if __name__ == "__main__":

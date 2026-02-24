@@ -79,7 +79,7 @@ def build_lookup_integral_table_with_raman_custom(cf,
                     if idb < ida:
                         add[ida, idb] = add[idb, ida]
                     else:
-                        lg.debug(
+                        lg.trace(
                             f"Point {ida*n_samples+idb+1}/{n_samples*n_samples}, spanning LLDA={cf.fiber_length/lda:.2e}, LLDB={cf.fiber_length/ldb:.2e}")
                         # this is also in normalized units
                         def I_specific(x): return interp(x/lda, x/ldb)
@@ -172,7 +172,7 @@ def build_lookup_integral_table_with_raman(cf,
                         add_max[ida, idb] = add_max[idb, ida]
                         add_min[ida, idb] = add_min[idb, ida]
                     else:
-                        lg.debug(
+                        lg.trace(
                             f"Point {ida*n_samples+idb+1}/{n_samples*n_samples}, spanning LLDA={cf.fiber_length/lda:.2e}, LLDB={cf.fiber_length/ldb:.2e}")
                         # this is also in normalized units
                         def I_specific(x): return interp(x/lda, x/ldb)
@@ -189,28 +189,30 @@ def build_lookup_integral_table_with_raman(cf,
             raman_correction_grid_max += add_max
             raman_correction_grid_min += add_min
 
-            plt.figure(figsize=(4, 4))
-            plt.imshow(raman_correction_grid_max, extent=(
-                lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-            plt.colorbar()
-            plt.title(
-                f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-            plt.xlabel("L/LDa")
-            plt.ylabel("L/LD b")
-            plt.savefig(
-                f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-            plt.close()
-            plt.figure(figsize=(4, 4))
-            plt.imshow(raman_correction_grid_min, extent=(
-                lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-            plt.colorbar()
-            plt.title(
-                f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-            plt.xlabel("L/LDa")
-            plt.ylabel("L/LD b")
-            plt.savefig(
-                f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-            plt.close()
+            save_debug_plots = os.environ.get("PYNLIN_SAVE_RAMAN_GRID_PLOTS", "0") == "1"
+            if save_debug_plots:
+                plt.figure(figsize=(4, 4))
+                plt.imshow(raman_correction_grid_max, extent=(
+                    lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+                plt.colorbar()
+                plt.title(
+                    f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+                plt.xlabel("L/LDa")
+                plt.ylabel("L/LD b")
+                plt.savefig(
+                    f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+                plt.close()
+                plt.figure(figsize=(4, 4))
+                plt.imshow(raman_correction_grid_min, extent=(
+                    lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+                plt.colorbar()
+                plt.title(
+                    f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+                plt.xlabel("L/LDa")
+                plt.ylabel("L/LD b")
+                plt.savefig(
+                    f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+                plt.close()
             # raman_correction_grid_max = np.zeros((n_samples, n_samples))
             # raman_correction_grid_min = np.zeros((n_samples, n_samples))
         np.save(filename, {
@@ -219,29 +221,30 @@ def build_lookup_integral_table_with_raman(cf,
         })
 
     # build the interpolator and return it
-    # checking
-    plt.figure(figsize=(4, 4))
-    plt.imshow(raman_correction_grid_max, extent=(
-        lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-    plt.colorbar()
-    plt.title(
-        f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-    plt.xlabel("L/LDa")
-    plt.ylabel("L/LD b")
-    plt.savefig(
-        f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-    plt.close()
-    plt.figure(figsize=(4, 4))
-    plt.imshow(raman_correction_grid_min, extent=(
-        lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
-    plt.colorbar()
-    plt.title(
-        f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
-    plt.xlabel("L/LDa")
-    plt.ylabel("L/LD b")
-    plt.savefig(
-        f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
-    plt.close()
+    save_debug_plots = os.environ.get("PYNLIN_SAVE_RAMAN_GRID_PLOTS", "0") == "1"
+    if save_debug_plots:
+        plt.figure(figsize=(4, 4))
+        plt.imshow(raman_correction_grid_max, extent=(
+            lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+        plt.colorbar()
+        plt.title(
+            f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+        plt.xlabel("L/LDa")
+        plt.ylabel("L/LD b")
+        plt.savefig(
+            f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+        plt.close()
+        plt.figure(figsize=(4, 4))
+        plt.imshow(raman_correction_grid_min, extent=(
+            lld[0], lld[-1], lld[0], lld[-1]), origin='lower')
+        plt.colorbar()
+        plt.title(
+            f"Raman correction grid max, m_lo={m_lo_truncation}, {cf.fiber_length/1e3:.1f} km")
+        plt.xlabel("L/LDa")
+        plt.ylabel("L/LD b")
+        plt.savefig(
+            f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+        plt.close()
 
     interp_func_max = RegularGridInterpolator(
         (lld, lld),
