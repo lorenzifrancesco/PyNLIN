@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import time
 from loguru import logger as lg
 from matplotlib import rc
 from matplotlib.ticker import ScalarFormatter
@@ -28,12 +29,122 @@ def plot_case_study_fits():
     """Placeholder for NLIN fitting visualization (not yet implemented)."""
     pass
 
+
+def _pct(part: float, total: float) -> float:
+    if total <= 0.0:
+        return 0.0
+    return 100.0 * part / total
+
+
+def _log_mmf_td_timing(timings: dict) -> None:
+    """Print a compact timing report for MMF TD evaluation.
+
+    Expected keys:
+    - precompute_correction_factors_s:
+      Wall-time of ``collision_coeffs_system`` call.
+    - noise_sum_interacting_s:
+      Wall-time of ``total_nlin(..., use_x_mode=True)``.
+    - noise_sum_noninteracting_s:
+      Wall-time of ``total_nlin(..., use_x_mode=False)``.
+    - end_to_end_*:
+      Aggregated sums used only for readability in logs.
+    """
+    pre = timings["precompute_correction_factors_s"]
+    sum_interacting = timings["noise_sum_interacting_s"]
+    sum_noninteracting = timings["noise_sum_noninteracting_s"]
+    end_to_end_interacting = timings["end_to_end_interacting_s"]
+    end_to_end_with_noninteracting = timings["end_to_end_with_noninteracting_s"]
+    recompute = timings["recompute_collisions"]
+    lg.info(
+        "[MMF TD timing] recompute_collisions={} | precompute_correction_factors={:.3f}s ({:.1f}%) | "
+        "noise_sum(interacting)={:.3f}s ({:.1f}%) | end_to_end(interacting)={:.3f}s",
+        recompute,
+        pre,
+        _pct(pre, end_to_end_interacting),
+        sum_interacting,
+        _pct(sum_interacting, end_to_end_interacting),
+        end_to_end_interacting,
+    )
+    lg.info(
+        "[MMF TD timing] extra noise_sum(noninteracting)={:.3f}s | "
+        "end_to_end(with noninteracting)={:.3f}s",
+        sum_noninteracting,
+        end_to_end_with_noninteracting,
+    )
+
+
+def _compute_mmf_td_nlin_with_timing(cf_mmf, ipulse: int, recompute_collisions: bool):
+    """Compute MMF TD NLIN and measure two end-to-end phases.
+
+    Phase 1 (precompute_correction_factors):
+    - One call to ``collision_coeffs_system``.
+    - Includes either cache-load or full recomputation depending on
+      ``recompute_collisions``.
+
+    Phase 2 (noise_sum_evaluation):
+    - ``total_nlin`` with cross-mode enabled (interacting case).
+    - ``total_nlin`` with cross-mode disabled (noninteracting case).
+
+    Note:
+    ``recompute_collisions=False`` usually means Phase 1 is dominated by
+    reading cached collision coefficients from disk.
+    """
+    # Phase 1: build/load TD collision coefficients (this is the "precompute"
+    # bucket from an analysis-script point of view).
+    t0 = time.perf_counter()
+    ccfs_mmf = collision_coeffs_system(
+        cf_mmf,
+        ipulse=ipulse,
+        recompute=recompute_collisions,
+    )
+    t_pre = time.perf_counter() - t0
+
+    # Phase 2a: evaluate TD noise sums with cross-mode coupling terms.
+    t0 = time.perf_counter()
+    nlin_mmf = total_nlin(
+        cf_mmf,
+        ccfs_mmf,
+        use_kappa=True,
+        use_x_mode=True,
+    )
+    t_sum_interacting = time.perf_counter() - t0
+
+    # Phase 2b: evaluate TD noise sums without cross-mode terms.
+    t0 = time.perf_counter()
+    nlin_mmf_noninteracting = total_nlin(
+        cf_mmf,
+        ccfs_mmf,
+        use_kappa=True,
+        use_x_mode=False,
+    )
+    t_sum_noninteracting = time.perf_counter() - t0
+
+    timings = {
+        "recompute_collisions": bool(recompute_collisions),
+        "precompute_correction_factors_s": t_pre,
+        "noise_sum_interacting_s": t_sum_interacting,
+        "noise_sum_noninteracting_s": t_sum_noninteracting,
+        "end_to_end_interacting_s": t_pre + t_sum_interacting,
+        "end_to_end_with_noninteracting_s": t_pre + t_sum_interacting + t_sum_noninteracting,
+    }
+    return ccfs_mmf, nlin_mmf, nlin_mmf_noninteracting, timings
+
+
 def plot_case_study_noise(
         use_dBm_scale=False,
         also_plot_smf=False,
         also_plot_noninteracting=True,
-        name="xxx"):
-    """Plot NLIN per channel for MMF (and optionally SMF) case studies."""
+        name="xxx",
+        report_timing=False,
+        recompute_collisions=False):
+    """Plot NLIN per channel for MMF (and optionally SMF) case studies.
+
+    Timing controls:
+    - report_timing=True
+      Logs MMF TD timing split (precompute vs noise-sum evaluation).
+    - recompute_collisions=True
+      Forces true TD recomputation in Phase 1 instead of loading cache.
+    """
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -61,24 +172,19 @@ def plot_case_study_noise(
     freqs_smf = smf_system.wdm.frequency_grid()
     freqs_mmf = mmf_system.wdm.frequency_grid()
 
-    ccfs_mmf = collision_coeffs_system(cf_mmf,
-                                       ipulse=1,
-                                       recompute=False)
+    # MMF path is wrapped so we can report explicit end-to-end timings.
+    ccfs_mmf, nlin_mmf, nlin_mmf_noninteracting, timings_mmf = _compute_mmf_td_nlin_with_timing(
+        cf_mmf,
+        ipulse=1,
+        recompute_collisions=recompute_collisions,
+    )
+    if report_timing:
+        _log_mmf_td_timing(timings_mmf)
     ccfs_smf = collision_coeffs_system(cf_smf,
                                        ipulse=1,
                                        recompute=False)
     lg.debug(
         f"A few collisions (should be of order 1e-1, 1e-2): {ccfs_mmf[0, 0, :, :5]}")
-    nlin_mmf = total_nlin(cf_mmf,
-                          ccfs_mmf,
-                          use_kappa=True,
-                          use_x_mode=True,
-                          )
-    nlin_mmf_noninteracting = total_nlin(cf_mmf,
-                                         ccfs_mmf,
-                                         use_kappa=True,
-                                         use_x_mode=False,
-                                         )
     nlin_smf = total_nlin(cf_smf,
                           ccfs_smf,
                           use_kappa=True,
@@ -158,8 +264,13 @@ def plot_case_study_noise_histogram(
         name="",
         n_bins=25,
         dBm_range=(-53, -40),
-        coeff_range=None):
-    """Visualize NLIN distributions across channels with optional cross-mode variants."""
+        coeff_range=None,
+        report_timing=False,
+        recompute_collisions=False):
+    """Visualize NLIN distributions across channels with optional cross-mode variants.
+
+    Timing controls are the same as ``plot_case_study_noise``.
+    """
     formatter = ScalarFormatter()
     formatter.set_scientific(True)
     formatter.set_powerlimits([0, 0])
@@ -193,22 +304,17 @@ def plot_case_study_noise_histogram(
     freqs_smf = smf_system.wdm.frequency_grid()
     freqs_mmf = mmf_system.wdm.frequency_grid()
 
-    # --- Compute collisions & NLIN exactly like the first function ---
-    ccfs_mmf = collision_coeffs_system(cf_mmf, ipulse=1, recompute=False)
+    # --- Compute MMF TD metrics through the timed wrapper ---
+    ccfs_mmf, nlin_mmf, nlin_mmf_non, timings_mmf = _compute_mmf_td_nlin_with_timing(
+        cf_mmf,
+        ipulse=1,
+        recompute_collisions=recompute_collisions,
+    )
+    if report_timing:
+        _log_mmf_td_timing(timings_mmf)
     ccfs_smf = collision_coeffs_system(cf_smf, ipulse=1, recompute=False)
 
-    # Interacting (with cross-mode terms)
-    nlin_mmf = total_nlin(
-        cf_mmf, ccfs_mmf,
-        use_kappa=True,
-        use_x_mode=True,
-    )
-    # Non-interacting (no cross-mode terms)
-    nlin_mmf_non = total_nlin(
-        cf_mmf, ccfs_mmf,
-        use_kappa=True,
-        use_x_mode=False,
-    )
+    # Interacting and non-interacting MMF already computed by timed wrapper.
     # SMF baseline (single-mode, no cross-mode)
     nlin_smf = total_nlin(
         cf_smf, ccfs_smf,
@@ -317,7 +423,9 @@ if __name__ == "__main__":
         use_dBm_scale=True,
         also_plot_smf=True,
         also_plot_noninteracting=True,  # FIXME check
-        name="realistic")
+        name="realistic",
+        report_timing=True,
+        recompute_collisions=False)
     exit()
     plot_case_study_noise_histogram(use_dBm_scale=True,
                                     also_plot_noninteracting=True,

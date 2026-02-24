@@ -101,7 +101,10 @@ def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
 
 
 def work_A(task_A):
-    """Compute the full NLIN block for a given (mA, nuA) against all (mB, nuB)."""
+    """Compute the full NLIN block for a given (mA, nuA) against all (mB, nuB).
+    
+    this strangely takes about 10s. Maybe it is the manual iteration on all the channels
+    """
     import os
     import time
 
@@ -134,16 +137,16 @@ def work_A(task_A):
                 n_freqs + (mB*n_freqs + nuB) + 1
 
             # pretty progress
-            try:
-                import logging
-                lg = logging.getLogger(__name__)
-                lg.info(
-                    f"[worker {pid:>6}/{nw:>2}] "
-                    f"Computing NLIN A(m={mA},nu={nuA:>5}) vs B(m={mB},nu={nuB:>5}) "
-                    f"({idx:>7}/{n_pairs:>7})"
-                )
-            except Exception:
-                pass
+            # try:
+            #     import logging
+            #     lg = logging.getLogger(__name__)
+            #     lg.info(
+            #         f"[worker {pid:>6}/{nw:>2}] "
+            #         f"Computing NLIN A(m={mA},nu={nuA:>5}) vs B(m={mB},nu={nuB:>5}) "
+            #         f"({idx:>7}/{n_pairs:>7})"
+            #     )
+            # except Exception:
+            #     pass
 
             gvdb = beta2[mB, nuB]
             dgd = abs(beta1_A - beta1[mB, nuB])
@@ -177,7 +180,7 @@ def gvd_correction(cf,
     for m_lo in range(m_lo_truncation+1):
         I_low_dataset = np.load(
             f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
-        interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
+        interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse) # FIXME oh god, we are doing this every time!
         # this is also in normalized units
         def I_specific(x): return interp(x/lda, x/ldb)
         lg.trace(
@@ -345,7 +348,7 @@ def collision_coeffs_system(cf,
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
-    else:
+    else: # this is the very intensive part.
         lg.info(f"Computing collision coefficients from scratch")
         _get_n_samples_numeric_n(cf)
         T = 1 / cf.baud_rate
@@ -388,7 +391,7 @@ def collision_coeffs_system(cf,
 
         max_lld = _max_lld_from_beta2(cf, beta2)
         raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
-            cf, ipulse=ipulse, max_lld=max_lld)
+            cf, ipulse=ipulse, max_lld=max_lld) # this could be intensive, but it is actually ok.
         fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(cf)
 
         # precompute the Raman corrections from the numerical results of the integrals
