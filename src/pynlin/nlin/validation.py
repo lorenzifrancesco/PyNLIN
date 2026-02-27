@@ -1,4 +1,6 @@
 import os
+import tomllib
+from types import SimpleNamespace
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -37,14 +39,42 @@ def adjust_luminosity(color, factor):
     return np.clip(rgb * factor, 0, 1)  # Scale and clip values
 
 
+def _load_cf_with_legacy_support(
+    cf_path: str = "./input/mmf.toml",
+    nc_path: str = "./input/numerical_config.toml",
+):
+    """Load run config, supporting both structured and flat legacy TOML."""
+    try:
+        cf = cfg.load_toml_to_struct(cf_path)
+    except Exception:
+        with open(cf_path, "rb") as f:
+            cf = SimpleNamespace(**tomllib.load(f))
+
+    # Some newer call sites expect these numeric fields on cf.
+    try:
+        nc = cfg.load_nc_toml_to_struct(nc_path)
+        if not hasattr(cf, "n_samples_numeric_n"):
+            setattr(cf, "n_samples_numeric_n", int(nc.n_samples_numeric_n))
+        if not hasattr(cf, "n_samples_numeric_g"):
+            setattr(cf, "n_samples_numeric_g", int(nc.n_samples_numeric_g))
+    except Exception:
+        pass
+    return cf
+
+
 def compute_numeric_nlin(gvda: float,
                          gvdb: float,
                          ipulse: int,
-                         recompute: bool = False,):
-    """Compute NLIN via numerical collision integrals across a DGD sweep."""
+                         recompute: bool = False,
+                         perfect_only: bool = False):
+    """Compute NLIN via numerical collision integrals across a DGD sweep.
+
+    If ``perfect_only`` is True, compute/save only the ``*_perfect_*`` dataset
+    and skip ``*_min_*`` / ``*_max_*`` datasets.
+    """
     cf_path = "./input/mmf.toml"
     nc_path = "./input/numerical_config.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
+    cf = _load_cf_with_legacy_support(cf_path, nc_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
 
     nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
@@ -72,8 +102,8 @@ def compute_numeric_nlin(gvda: float,
         np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
 
     partial_nlin = np.zeros(n_samples_numeric)
-    partial_nlin_min = np.zeros(n_samples_numeric)
-    partial_nlin_max = np.zeros(n_samples_numeric)
+    partial_nlin_min = np.zeros(n_samples_numeric) if not perfect_only else None
+    partial_nlin_max = np.zeros(n_samples_numeric) if not perfect_only else None
 
     if ipulse == 0:
         pulse = GaussianPulse(
@@ -85,42 +115,52 @@ def compute_numeric_nlin(gvda: float,
     # does the file already exist?
     filename = f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_perfect_{gvda}_{gvdb}.npy"
 
-    _, _, _, fB_min_func, fB_max_func = load_fB(cf)
+    if not perfect_only:
+        _, _, _, fB_min_func, fB_max_func = load_fB(cf)
     if not os.path.exists(filename) or recompute:
         for idx, dgd in enumerate(dgds_numeric):
             z, I, m = compute_all_collisions_time_integrals(
                 fiber, pulse, dgd, gvda, gvdb, 
                 use_multiprocessing=True, 
-                partial_collisions_margin=10)
+                partial_collisions_margin=5)
 
-            X0mm     = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
-            X0mm_max = X0mm_space_integral(z, I, amplification_function=fB_max_func)
-            X0mm_min = X0mm_space_integral(z, I, amplification_function=fB_min_func)
+            X0mm = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
+            values_to_check = [X0mm]
+            if not perfect_only:
+                X0mm_max = X0mm_space_integral(z, I, amplification_function=fB_max_func)
+                X0mm_min = X0mm_space_integral(z, I, amplification_function=fB_min_func)
+                values_to_check.extend([X0mm_max, X0mm_min])
 
-            for xx in [X0mm, X0mm_max, X0mm_min]:
+            for xx in values_to_check:
                 nonzero = np.real(xx) != 0
                 assert np.all(np.imag(xx[nonzero]) < 1e-6 * np.real(
                     xx[nonzero])), f"Imaginary part too large: {np.max(np.imag(xx[nonzero]) / np.real(xx[nonzero]))}"
 
             partial_nlin[idx] = np.sum(np.real(X0mm)**2)
-            partial_nlin_min[idx] = np.sum(np.real(X0mm_min)**2)
-            partial_nlin_max[idx] = np.sum(np.real(X0mm_max)**2)
+            if not perfect_only:
+                partial_nlin_min[idx] = np.sum(np.real(X0mm_min)**2)
+                partial_nlin_max[idx] = np.sum(np.real(X0mm_max)**2)
 
         if ipulse == 0:
             np.save(
                 f"results/partial_nlin_gaussian_perfect_{gvda}_{gvdb}.npy", partial_nlin)
-            np.save(
-                f"results/partial_nlin_gaussian_min_{gvda}_{gvdb}.npy", partial_nlin_min)
-            np.save(
-                f"results/partial_nlin_gaussian_max_{gvda}_{gvdb}.npy", partial_nlin_max)
+            if not perfect_only:
+                np.save(
+                    f"results/partial_nlin_gaussian_min_{gvda}_{gvdb}.npy", partial_nlin_min)
+                np.save(
+                    f"results/partial_nlin_gaussian_max_{gvda}_{gvdb}.npy", partial_nlin_max)
         else:
             np.save(
                 f"results/partial_nlin_nyquist_perfect_{gvda}_{gvdb}.npy", partial_nlin)
-            np.save(
-                f"results/partial_nlin_nyquist_min_{gvda}_{gvdb}.npy", partial_nlin_min)
-            np.save(
-                f"results/partial_nlin_nyquist_max_{gvda}_{gvdb}.npy", partial_nlin_max)
-        lg.info(f"Saved numeric results to {filename} and similar with _min and _max")
+            if not perfect_only:
+                np.save(
+                    f"results/partial_nlin_nyquist_min_{gvda}_{gvdb}.npy", partial_nlin_min)
+                np.save(
+                    f"results/partial_nlin_nyquist_max_{gvda}_{gvdb}.npy", partial_nlin_max)
+        if perfect_only:
+            lg.info(f"Saved numeric perfect results to {filename}")
+        else:
+            lg.info(f"Saved numeric results to {filename} and similar with _min and _max")
     return
 
 
@@ -128,7 +168,7 @@ def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
     """Return asymptotic NLIN expressions for large and small walk-off."""
     cf_path = "./input/mmf.toml"
     nc_path = "./input/numerical_config.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
+    cf = _load_cf_with_legacy_support(cf_path, nc_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
 
     n_samples_analytic = 500
@@ -160,7 +200,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     """Plot fitted and numeric NLIN vs walk-off for a single pulse family."""
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
+    cf = _load_cf_with_legacy_support(cf_path, nc_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
 
     x_norm = cf.fiber_length * cf.baud_rate
@@ -188,19 +228,29 @@ def simple_plot_threshold(gvda: float = 0.0,
         np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
     # assert (fB_mode == "perfect")
     
-    _, fB_min, fB_max, _, _ = load_fB(cf)
     if fB_mode == "perfect":
         fB = np.array([1.0]*100)  # dummy, not used since fB_mode is perfect
-    elif fB_mode == "max": 
+    else:
+        _, fB_min, fB_max, _, _ = load_fB(cf)
+
+    if fB_mode == "max":
         fB = fB_max
     elif fB_mode == "min":
         fB = fB_min
+    elif fB_mode == "perfect":
+        pass
     else:
         raise ValueError(f"fB_mode {fB_mode} not recognized")    
     
     # ----- call the computation functions -----
-    # -- numeric (compute_numeric computes all the fB_modes)
-    compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
+    # -- numeric
+    compute_numeric_nlin(
+        gvda=gvda,
+        gvdb=gvdb,
+        ipulse=ipulse,
+        recompute=recompute,
+        perfect_only=(fB_mode == "perfect"),
+    )
     nlin_numeric = np.load(
         f"results/partial_nlin_{pulse_shape}_{fB_mode}_{gvda}_{gvdb}.npy")
     lg.info(nlin_numeric)
@@ -239,7 +289,7 @@ def simple_plot_threshold(gvda: float = 0.0,
     # plt.ylim(ymin, 1.0)
     if fB_mode == "perfect":
         pass
-        plt.ylim([0.5e-3, 0.11])
+        plt.ylim([0.5e-3, 1.0])
     else:
         plt.ylim([0.7e-3, 0.1])
     plt.xlabel(r'$L/L_W$')
@@ -292,7 +342,7 @@ def plot_threshold(
 
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
+    cf = _load_cf_with_legacy_support(cf_path, nc_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
@@ -559,7 +609,7 @@ def plot_threshold_fb_extremes(
     # ---- config / normalization ---------------------------------------------
     cf_path = "./input/mmf.toml"
     nc_path = "./input/numerical_config.toml"
-    cf = cfg.load_toml_to_struct(cf_path)
+    cf = _load_cf_with_legacy_support(cf_path, nc_path)
     nc = cfg.load_nc_toml_to_struct(nc_path)
 
     x_norm = cf.fiber_length * cf.baud_rate
@@ -681,21 +731,23 @@ if __name__ == "__main__":
     simple_plot_threshold(
         gvda = 0.0e-27,
         gvdb = 0.0e-27,
-        fB_mode="max",
-        recompute=False,
+        fB_mode="perfect",
+        recompute=True,
         ipulse=1,
         m_lo_truncation=3)
+    exit()
+    
     simple_plot_threshold(
         gvda = 30.0e-27,
         gvdb = 0.0e-27,
-        fB_mode="min",
+        fB_mode="perfect",
         recompute=False,
         ipulse=1,
         m_lo_truncation=3)
     simple_plot_threshold(
         gvda = 30.0e-27,
         gvdb = 30.0e-27,
-        fB_mode="min",
+        fB_mode="perfect",
         recompute=False,
         ipulse=1,
         m_lo_truncation=3)

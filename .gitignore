@@ -18,7 +18,7 @@ __pycache__/
 *$py.class
 *.ipynb
 nlin.m
-
+.mplconfig/
 # C extensions
 *.so
 

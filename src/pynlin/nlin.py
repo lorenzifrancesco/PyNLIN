@@ -1,5 +1,6 @@
 import functools
 import math
+import os
 import time
 from itertools import product
 from typing import List, Tuple
@@ -9,7 +10,6 @@ import numpy as np
 import scipy.integrate
 import tqdm
 from loguru import logger as lg
-from numba import njit, prange
 from scipy.constants import nu2lambda
 from tqdm.contrib.concurrent import process_map
 
@@ -280,8 +280,9 @@ def compute_all_collisions_time_integrals(
     lg.debug("Computing the integrals for every m...")
     start = time.time()
     if use_multiprocessing:
+        n_workers = os.cpu_count() or 1
         integrals_list = process_map(
-            partial_function, m_list, z_axis_list, leave=False, chunksize=1, max_workers=14,
+            partial_function, m_list, z_axis_list, leave=False, chunksize=1, max_workers=n_workers,
             desc=f"Iterating over m values {len(m_list)} total, {partial_collisions_margin} margins on each size",
         )
     else:
@@ -376,17 +377,41 @@ def m_th_time_integral_general(
     gvda: float,
     gvdb: float,
 ) -> np.ndarray:
-    I_list = np.zeros_like(z_axis, dtype=np.complex64)
-    dt = pulse.T0/pulse.samples_per_symbol
-    for iz in prange(len(z_axis)):
-        delay = m / pulse.baud_rate + dgd * z_axis[iz]
-        g1 = apply_chromatic_dispersion(
-            gvda, pulse, z_axis[iz] , 0.0)
-        g2 = np.conj(g1)
-        g3 = apply_chromatic_dispersion(
-            gvdb, pulse, z_axis[iz], delay)
-        g4 = np.conj(g3)
-        I_list[iz] = scipy.integrate.trapezoid(g1 * g2 * g3 * g4, dx=dt)
+    z_axis = np.asarray(z_axis, dtype=float)
+    if z_axis.size == 0:
+        return np.array([], dtype=np.complex64)
+
+    # Precompute pulse spectrum and frequency grid once per call.
+    g, t = pulse.data()
+    dt = float(t[1] - t[0])
+    nsamples = int(len(g))
+    omega = np.fft.fftshift(2 * np.pi * np.fft.fftfreq(nsamples, d=dt))
+    omega2 = omega * omega
+    gf = np.fft.fftshift(np.fft.fft(g))
+
+    delay_axis = m / pulse.baud_rate + dgd * z_axis
+    I_list = np.empty(z_axis.size, dtype=np.complex64)
+
+    # Keep chunks small to avoid large temporary allocations per worker.
+    chunk_size = 8
+    for start in range(0, z_axis.size, chunk_size):
+        stop = min(start + chunk_size, z_axis.size)
+        z_chunk = z_axis[start:stop]
+        delay_chunk = delay_axis[start:stop]
+
+        phase_a = np.exp((-1j * gvda / 2.0) * np.outer(z_chunk, omega2))
+        phase_b = np.exp((-1j * gvdb / 2.0) * np.outer(z_chunk, omega2))
+        delay_phase = np.exp(-1j * np.outer(delay_chunk, omega))
+
+        gf_a = gf[None, :] * phase_a
+        gf_b = gf[None, :] * phase_b * delay_phase
+
+        g1 = np.fft.ifft(np.fft.fftshift(gf_a, axes=1), axis=1)
+        g3 = np.fft.ifft(np.fft.fftshift(gf_b, axes=1), axis=1)
+
+        integrand = (np.abs(g1) ** 2) * (np.abs(g3) ** 2)
+        I_list[start:stop] = scipy.integrate.trapezoid(integrand, dx=dt, axis=1)
+
     return I_list
 
 

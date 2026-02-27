@@ -14,7 +14,7 @@ def init_logging():
 
     logger.add(
         sys.stdout,
-        level="DEBUG",
+        level="INFO",
         colorize=True,
         format=fmt_console,
     )
