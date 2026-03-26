@@ -124,6 +124,7 @@ class SMFiberConfig(FiberConfig):
     attenuation_wavelengths: Optional[Sequence[float]] = None
     attenuation_values: Optional[Sequence[float]] = None
     force_constant_dispersion: bool = False
+    force_constant_aeff: bool = False
 
     if ConfigDict:
         model_config = ConfigDict(extra="ignore")
@@ -227,6 +228,7 @@ class SMFiber(Fiber):
         beta1_profile: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
         beta2_profile: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
         force_constant_dispersion: bool = False,
+        force_constant_aeff: bool = False,
     ):
         super().__init__("SM",
                          losses=losses,
@@ -247,6 +249,7 @@ class SMFiber(Fiber):
         self._beta2_profile = self._build_profile(beta2_profile)
         self._freq_profile = None
         self._force_constant_dispersion = bool(force_constant_dispersion)
+        self._force_constant_aeff = bool(force_constant_aeff)
 
         self.raman_efficiency = self.raman_coefficient / self.effective_area
 
@@ -264,6 +267,8 @@ class SMFiber(Fiber):
 
     def effective_area_at(self, wavelength: float) -> float:
         """Return effective area interpolated on wavelength if profile provided."""
+        if self._force_constant_aeff:
+            return self.effective_area
         if self._effective_area_profile is None:
             return self.effective_area
         wl, values = self._effective_area_profile
@@ -361,6 +366,8 @@ class SMFiber(Fiber):
                         float(config.center_frequency) if config.center_frequency is not None else float(np.mean(freq_profile))
                     )
                     beta1_profile = (fiber_data["wavelengths"], beta1_center + beta2 * (omega - omega_c))
+            if config.force_constant_aeff:
+                eff_profile = None
         else:
             beta2 = config.resolved_beta2(cls._DEFAULT_BETA2)
             eff_area = config.effective_area
@@ -369,6 +376,8 @@ class SMFiber(Fiber):
                 if config.effective_area_wavelengths and config.effective_area_values
                 else None
             )
+            if config.force_constant_aeff:
+                eff_profile = None
             att_profile = (
                 (config.attenuation_wavelengths, config.attenuation_values)
                 if config.attenuation_wavelengths and config.attenuation_values
@@ -392,6 +401,7 @@ class SMFiber(Fiber):
             beta1_profile=beta1_profile,
             beta2_profile=beta2_profile,
             force_constant_dispersion=config.force_constant_dispersion,
+            force_constant_aeff=config.force_constant_aeff,
         )
         if freq_profile is not None:
             fiber._freq_profile = np.array(freq_profile)

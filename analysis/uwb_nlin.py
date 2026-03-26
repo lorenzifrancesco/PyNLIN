@@ -72,7 +72,11 @@ def compute_raman_profiles(system: System,
     return
 
 
-def plot_power_profiles(system: System, profile_path: Path | str) -> None:
+def plot_power_profiles(
+    system: System,
+    profile_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> None:
     """Load a saved profile file and plot it with plot_profiles."""
     p_path = Path(profile_path)
     if not p_path.exists():
@@ -121,6 +125,7 @@ def plot_power_profiles(system: System, profile_path: Path | str) -> None:
         cf=system,
         wallpaper_mode=False,
         use_active_naming=False,
+        output_dir=output_dir,
     )
     lg.info("Saved profile plot via plot_profiles.")
 

@@ -1,0 +1,22 @@
+# Single-column publication defaults that work well for both IEEE and PRA.
+# Width is a compromise between IEEE (3.50 in) and APS/PRA (3.375 in).
+figure.figsize: 3.4, 2.3
+
+# Keep text readable after final journal scaling.
+font.family: serif
+font.size: 8
+axes.titlesize: 8
+axes.labelsize: 8
+xtick.labelsize: 7
+ytick.labelsize: 7
+legend.fontsize: 7
+
+# Light defaults for compact publication figures.
+lines.linewidth: 1.0
+axes.linewidth: 0.8
+axes.formatter.use_mathtext: True
+
+# Export figures without repeated per-script tweaks.
+savefig.dpi: 300
+savefig.bbox: tight
+savefig.pad_inches: 0.01

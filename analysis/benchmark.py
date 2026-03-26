@@ -1,32 +1,28 @@
 """Benchmark TD-NLIN runtime from analysis-level entry points.
 
-This script intentionally does not modify or instrument ``src/pynlin`` internals.
-It measures end-to-end call durations around already-defined analysis functions.
+This script reports:
+1. the legacy coarse timings used previously, and
+2. a more explicit S2/S3 split aligned with the algorithm description.
 
-Timed functionalities
-1. precompute_correction_factors_s:
-   Wall-time of ``collision_coeffs_system(...)`` as called by
-   ``analysis.system_nlin._compute_mmf_td_nlin_with_timing``.
-   This includes either:
-   - cache loading (when recompute=False), or
-   - full TD collision-coefficient recomputation (when recompute=True).
-2. noise_sum_interacting_s:
-   Wall-time of ``total_nlin(..., use_x_mode=True)``.
-3. noise_sum_noninteracting_s:
-   Wall-time of ``total_nlin(..., use_x_mode=False)``.
-4. end_to_end_interacting_s:
-   ``precompute_correction_factors_s + noise_sum_interacting_s``.
-5. end_to_end_with_noninteracting_s:
-   ``precompute_correction_factors_s + noise_sum_interacting_s + noise_sum_noninteracting_s``.
+Legacy/coarse buckets are retained for reference:
+- ``precompute_correction_factors_s`` wraps the full collision-coefficient path
+  (cache load or full recompute).
+- ``noise_sum_*`` wraps the final ``total_nlin(...)`` reductions.
+
+Detailed buckets expose the main reusable-precompute (S2) and pairwise-apply
+and reduction (S3) substeps.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import itertools as it
 import json
+import os
 import shutil
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -35,19 +31,27 @@ from loguru import logger as lg
 
 try:
     # Works when invoked as a module: `python -m analysis.benchmark`
-    from analysis.system_nlin import (
-        _compute_mmf_td_nlin_with_timing,
-        plot_case_study_noise,
-    )
+    from analysis.system_nlin import plot_case_study_noise
 except ModuleNotFoundError:
     # Works when invoked as a script: `python analysis/benchmark.py`
-    from system_nlin import _compute_mmf_td_nlin_with_timing, plot_case_study_noise
+    from system_nlin import plot_case_study_noise
+
+import pynlin.wdm
+from pynlin.fiber import MMFiber
+from pynlin.fiber_data.load_fiber_values import load_group_delay
 from pynlin.log_init import init_logging
+from pynlin.nlin import nlin_estimator as td_estimator
+from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients
+from pynlin.nlin.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
+from pynlin.nlin.nlin_estimation.raman_integrals import load_fB, load_raman_integral_extremes
+from pynlin.nlin.nlin_estimator import total_nlin
 from pynlin.system import System
 
 init_logging()
 
-TIMING_KEYS = [
+BENCHMARK_M_LO_TRUNCATION = 3
+
+LEGACY_TIMING_KEYS = [
     "precompute_correction_factors_s",
     "noise_sum_interacting_s",
     "noise_sum_noninteracting_s",
@@ -55,26 +59,123 @@ TIMING_KEYS = [
     "end_to_end_with_noninteracting_s",
 ]
 
-TIMING_DESCRIPTIONS = {
-    "precompute_correction_factors_s": (
-        "End-to-end time spent in collision-coefficient generation/loading "
-        "(collision_coeffs_system)."
-    ),
-    "noise_sum_interacting_s": (
-        "End-to-end time spent in total_nlin with cross-mode terms enabled "
-        "(use_x_mode=True)."
-    ),
-    "noise_sum_noninteracting_s": (
-        "End-to-end time spent in total_nlin with cross-mode terms disabled "
-        "(use_x_mode=False)."
-    ),
-    "end_to_end_interacting_s": (
-        "Combined time: precompute_correction_factors_s + noise_sum_interacting_s."
-    ),
-    "end_to_end_with_noninteracting_s": (
-        "Combined time: precompute_correction_factors_s + noise_sum_interacting_s "
-        "+ noise_sum_noninteracting_s."
-    ),
+DETAILED_TIMING_KEYS = [
+    "collision_coeffs_cache_load_s",
+    "s2_beta_dispersion_setup_s",
+    "s2_lookup_table_raman_gvd_s",
+    "s2_load_fB_profiles_s",
+    "s2_raman_integral_extremes_s",
+    "s2_ideal_fit_params_s",
+    "s2_worker_input_staging_s",
+    "s2_total_prepare_context_s",
+    "s3_pairwise_fit_eval_s",
+    "s3_collision_coeffs_save_s",
+    "s3_total_interacting_s",
+    "s3_total_with_noninteracting_s",
+]
+
+TIMING_KEYS = LEGACY_TIMING_KEYS + DETAILED_TIMING_KEYS
+
+TIMING_METADATA = {
+    "precompute_correction_factors_s": {
+        "label": "Legacy precompute",
+        "functions": "collision_coeffs_system",
+        "description": "End-to-end time spent in collision-coefficient generation/loading.",
+    },
+    "noise_sum_interacting_s": {
+        "label": "Legacy reduce (interacting)",
+        "functions": "total_nlin(use_x_mode=True)",
+        "description": "End-to-end time spent in total_nlin with cross-mode terms enabled.",
+    },
+    "noise_sum_noninteracting_s": {
+        "label": "Legacy reduce (noninteracting)",
+        "functions": "total_nlin(use_x_mode=False)",
+        "description": "End-to-end time spent in total_nlin with cross-mode terms disabled.",
+    },
+    "end_to_end_interacting_s": {
+        "label": "Legacy end-to-end (interacting)",
+        "functions": "collision_coeffs_system + total_nlin(use_x_mode=True)",
+        "description": "Combined time: precompute_correction_factors_s + noise_sum_interacting_s.",
+    },
+    "end_to_end_with_noninteracting_s": {
+        "label": "Legacy end-to-end (+ noninteracting)",
+        "functions": "collision_coeffs_system + total_nlin(True/False)",
+        "description": (
+            "Combined time: precompute_correction_factors_s + noise_sum_interacting_s "
+            "+ noise_sum_noninteracting_s."
+        ),
+    },
+    "collision_coeffs_cache_load_s": {
+        "label": "Cache load",
+        "functions": "np.load(collision_coefficients_*.npy)",
+        "description": (
+            "Time spent loading precomputed collision coefficients when recomputation is skipped."
+        ),
+    },
+    "s2_beta_dispersion_setup_s": {
+        "label": "S2 beta/dispersion setup",
+        "functions": "load_group_delay + WDM.frequency_grid + MMFiber.evaluate_beta1/beta2",
+        "description": "Build beta1/beta2 grids for all mode-channel combinations.",
+    },
+    "s2_lookup_table_raman_gvd_s": {
+        "label": "S2 Raman/GVD lookup",
+        "functions": f"build_lookup_integral_table_with_raman(m_lo_truncation={BENCHMARK_M_LO_TRUNCATION})",
+        "description": (
+            "Build or load the Raman-inclusive low-DGD lookup tables "
+            f"using m_lo = 0..{BENCHMARK_M_LO_TRUNCATION}."
+        ),
+    },
+    "s2_load_fB_profiles_s": {
+        "label": "S2 Raman profiles",
+        "functions": "load_fB",
+        "description": "Load normalized Raman power profiles fB(z).",
+    },
+    "s2_raman_integral_extremes_s": {
+        "label": "S2 Raman extremes",
+        "functions": "load_raman_integral_extremes",
+        "description": "Load LO/HI Raman integral extremes used for profile interpolation.",
+    },
+    "s2_ideal_fit_params_s": {
+        "label": "S2 ideal fit params",
+        "functions": "ideal_fit_coefficients",
+        "description": "Load and fit the ideal dispersionless baseline softplus parameters.",
+    },
+    "s2_worker_input_staging_s": {
+        "label": "S2 worker staging",
+        "functions": "np.save(beta1,beta2,fB) + itertools.product",
+        "description": "Stage shared arrays and task lists for the pairwise worker pool.",
+    },
+    "s2_total_prepare_context_s": {
+        "label": "S2 total",
+        "functions": "S2 subtotal",
+        "description": (
+            "Aggregate of reusable system-specific preparation before pairwise application."
+        ),
+    },
+    "s3_pairwise_fit_eval_s": {
+        "label": "S3 pairwise fit/apply",
+        "functions": "ProcessPoolExecutor(init=_init_worker, fn=work_A)",
+        "description": (
+            "Apply corrections per channel pair and build the collision-coefficient tensor."
+        ),
+    },
+    "s3_collision_coeffs_save_s": {
+        "label": "S3 cache save",
+        "functions": "np.save(collision_coeffs)",
+        "description": "Persist the collision-coefficient tensor for later cached reuse.",
+    },
+    "s3_total_interacting_s": {
+        "label": "S3 total (interacting)",
+        "functions": "work_A + np.save + total_nlin(use_x_mode=True)",
+        "description": "Pairwise corrected-fit evaluation plus interacting-mode reduction.",
+    },
+    "s3_total_with_noninteracting_s": {
+        "label": "S3 total (+ noninteracting)",
+        "functions": "work_A + np.save + total_nlin(True/False)",
+        "description": (
+            "Pairwise corrected-fit evaluation plus both interacting and noninteracting reductions."
+        ),
+    },
 }
 
 
@@ -161,6 +262,202 @@ def _drop_lookup_cache_files(ipulse: int) -> int:
     return removed
 
 
+def _collision_coeffs_filename(cf: System, ipulse: int) -> Path:
+    fiber_type = "smf" if cf.n_modes == 1 else "mmf"
+
+    def _hz_tag(value_hz: float) -> str:
+        return f"{value_hz/1e9:.3f}GHz".replace(".", "p")
+
+    br_hz = float(cf.baud_rate)
+    spacing_hz = getattr(cf, "channel_spacing", None)
+    n_ch = int(cf.n_channels)
+
+    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
+    filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
+    if spacing_hz is not None:
+        filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
+    return Path(f"{filename}.npy")
+
+
+def _empty_detailed_timing() -> dict[str, float]:
+    return {key: 0.0 for key in DETAILED_TIMING_KEYS}
+
+
+def _compute_mmf_td_nlin_with_detailed_timing(
+    cf_mmf: System,
+    ipulse: int,
+    recompute_collisions: bool,
+):
+    """Compute MMF TD NLIN with both coarse legacy and detailed S2/S3 timings."""
+    timings = _empty_detailed_timing()
+    collision_path = _collision_coeffs_filename(cf_mmf, ipulse)
+    cache_hit = collision_path.exists() and not recompute_collisions
+
+    t_pre_start = time.perf_counter()
+    if cache_hit:
+        t0 = time.perf_counter()
+        ccfs_mmf = np.load(collision_path)
+        timings["collision_coeffs_cache_load_s"] = time.perf_counter() - t0
+    else:
+        lg.info("Computing collision coefficients from scratch via detailed benchmark path.")
+        n_samples_numeric_n = td_estimator._get_n_samples_numeric_n(cf_mmf)
+
+        t0 = time.perf_counter()
+        oi_fit = np.load("results/oi_fit.npy")
+        beta1_params = load_group_delay()
+        wdm = pynlin.wdm.WDM(
+            spacing=cf_mmf.channel_spacing,
+            num_channels=cf_mmf.n_channels,
+            center_frequency=cf_mmf.center_frequency,
+        )
+        freqs = wdm.frequency_grid()
+        fiber = MMFiber(
+            effective_area=cf_mmf.effective_area,
+            overlap_integrals=oi_fit,
+            group_delay=beta1_params,
+            length=cf_mmf.fiber_length,
+        )
+        beta1 = np.zeros((cf_mmf.n_modes, len(freqs)))
+        beta2 = np.zeros((cf_mmf.n_modes, len(freqs)))
+        for i in range(cf_mmf.n_modes):
+            beta1[i, :] = fiber.group_delay.evaluate_beta1(i, freqs)
+            beta2[i, :] = fiber.group_delay.evaluate_beta2(i, freqs)
+        timings["s2_beta_dispersion_setup_s"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        max_lld = td_estimator._max_lld_from_beta2(cf_mmf, beta2)
+        raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
+            cf_mmf,
+            m_lo_truncation=BENCHMARK_M_LO_TRUNCATION,
+            ipulse=ipulse,
+            max_lld=max_lld,
+        )
+        timings["s2_lookup_table_raman_gvd_s"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        fB, _, _, _, _ = load_fB(cf_mmf)
+        timings["s2_load_fB_profiles_s"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        raman_extremes = load_raman_integral_extremes(cf_mmf)
+        timings["s2_raman_integral_extremes_s"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        ps_ideal = ideal_fit_coefficients(
+            0.0,
+            0.0,
+            ipulse=ipulse,
+            fiber_length=float(cf_mmf.fiber_length),
+            baud_rate=float(cf_mmf.baud_rate),
+            n_samples_numeric_n=n_samples_numeric_n,
+        )
+        timings["s2_ideal_fit_params_s"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        beta1_path = "/tmp/beta1_grid.npy"
+        beta2_path = "/tmp/beta2_grid.npy"
+        fB_path = "/tmp/fB.npy"
+        np.save(beta1_path, beta1)
+        np.save(beta2_path, beta2)
+        np.save(fB_path, fB)
+        a_tasks = list(it.product(range(cf_mmf.n_modes), range(len(freqs))))
+        n_workers = os.cpu_count() or 1
+        timings["s2_worker_input_staging_s"] = time.perf_counter() - t0
+
+        timings["s2_total_prepare_context_s"] = (
+            timings["s2_beta_dispersion_setup_s"]
+            + timings["s2_lookup_table_raman_gvd_s"]
+            + timings["s2_load_fB_profiles_s"]
+            + timings["s2_raman_integral_extremes_s"]
+            + timings["s2_ideal_fit_params_s"]
+            + timings["s2_worker_input_staging_s"]
+        )
+
+        collision_coeffs = np.zeros((cf_mmf.n_modes, len(freqs), cf_mmf.n_modes, len(freqs)))
+
+        t0 = time.perf_counter()
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            initializer=td_estimator._init_worker,
+            initargs=(
+                beta1_path,
+                beta2_path,
+                fB_path,
+                cf_mmf.n_modes,
+                len(freqs),
+                cf_mmf,
+                ipulse,
+                raman_gvd_correction_min,
+                raman_gvd_correction_max,
+                n_workers,
+                raman_extremes,
+                ps_ideal,
+            ),
+        ) as ex:
+            futures = [ex.submit(td_estimator.work_A, a) for a in a_tasks]
+            for fut in as_completed(futures):
+                mA, nuA, block, elapsed = fut.result()
+                collision_coeffs[mA, nuA, :, :] = block
+                lg.trace(
+                    "Finished NLIN for A(m={},nu={:>5}) in {:>6.2f} s",
+                    mA,
+                    nuA,
+                    elapsed,
+                )
+        timings["s3_pairwise_fit_eval_s"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        np.save(collision_path, collision_coeffs)
+        timings["s3_collision_coeffs_save_s"] = time.perf_counter() - t0
+        ccfs_mmf = collision_coeffs
+
+    t_pre = time.perf_counter() - t_pre_start
+
+    t0 = time.perf_counter()
+    nlin_mmf = total_nlin(
+        cf_mmf,
+        ccfs_mmf,
+        use_kappa=True,
+        use_x_mode=True,
+    )
+    t_sum_interacting = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    nlin_mmf_noninteracting = total_nlin(
+        cf_mmf,
+        ccfs_mmf,
+        use_kappa=True,
+        use_x_mode=False,
+    )
+    t_sum_noninteracting = time.perf_counter() - t0
+
+    timings["s3_total_interacting_s"] = (
+        timings["s3_pairwise_fit_eval_s"]
+        + timings["s3_collision_coeffs_save_s"]
+        + t_sum_interacting
+    )
+    timings["s3_total_with_noninteracting_s"] = (
+        timings["s3_pairwise_fit_eval_s"]
+        + timings["s3_collision_coeffs_save_s"]
+        + t_sum_interacting
+        + t_sum_noninteracting
+    )
+
+    timings.update(
+        {
+            "recompute_collisions": bool(recompute_collisions),
+            "collision_coeffs_cache_hit": bool(cache_hit),
+            "collision_coeffs_path": str(collision_path),
+            "precompute_correction_factors_s": t_pre,
+            "noise_sum_interacting_s": t_sum_interacting,
+            "noise_sum_noninteracting_s": t_sum_noninteracting,
+            "end_to_end_interacting_s": t_pre + t_sum_interacting,
+            "end_to_end_with_noninteracting_s": t_pre + t_sum_interacting + t_sum_noninteracting,
+        }
+    )
+    return ccfs_mmf, nlin_mmf, nlin_mmf_noninteracting, timings
+
+
 def run_td_benchmark(
     system_path: Path,
     runs: int,
@@ -213,14 +510,13 @@ def run_td_benchmark(
         )
 
         run_start = time.perf_counter()
-        _, nlin_interacting, nlin_noninteracting, timings = _compute_mmf_td_nlin_with_timing(
+        _, nlin_interacting, nlin_noninteracting, timings = _compute_mmf_td_nlin_with_detailed_timing(
             system,
             ipulse=ipulse,
             recompute_collisions=recompute,
         )
         run_total_wall_s = time.perf_counter() - run_start
 
-        # Keep a simple deterministic numeric signature for sanity checks.
         checksum = float(np.sum(nlin_interacting) + np.sum(nlin_noninteracting))
 
         row = {
@@ -238,13 +534,14 @@ def run_td_benchmark(
             measured_rows.append(row)
 
         lg.info(
-            "Run {} [{}] summary: precompute={:.3f}s, sum(interacting)={:.3f}s, "
-            "sum(noninteracting)={:.3f}s, total={:.3f}s",
+            "Run {} [{}] summary: precompute={:.3f}s, S2={:.3f}s, S3(pairwise)={:.3f}s, "
+            "sum(interacting)={:.3f}s, total={:.3f}s",
             idx + 1,
             phase,
             row["precompute_correction_factors_s"],
+            row["s2_total_prepare_context_s"],
+            row["s3_pairwise_fit_eval_s"],
             row["noise_sum_interacting_s"],
-            row["noise_sum_noninteracting_s"],
             row["end_to_end_with_noninteracting_s"],
         )
 
@@ -258,25 +555,25 @@ def run_td_benchmark(
 def _print_timing_definitions() -> None:
     print("Timed functionalities:")
     for key in TIMING_KEYS:
-        print(f"- {key}: {TIMING_DESCRIPTIONS[key]}")
+        meta = TIMING_METADATA[key]
+        print(
+            f"- {key}: {meta['label']} | {meta['functions']} | {meta['description']}"
+        )
 
 
-def _print_stats_table(stats: dict[str, dict[str, float]]) -> None:
-    display_rows = [
-        ("precompute_correction_factors_s", "Precompute correction factors"),
-        ("noise_sum_interacting_s", "Noise sums (interacting)"),
-        ("noise_sum_noninteracting_s", "Noise sums (noninteracting)"),
-        ("end_to_end_interacting_s", "End-to-end (interacting)"),
-        ("end_to_end_with_noninteracting_s", "End-to-end (+ noninteracting)"),
-        ("run_total_wall_s", "Total wall time (outer run)"),
-    ]
+def _print_stats_table(
+    stats: dict[str, dict[str, float]],
+    rows: list[tuple[str, str, str]],
+    title: str,
+) -> None:
+    metric_w = max(len("Metric"), max(len(label) for _, label, _ in rows))
+    func_w = max(len("Functions"), max(len(functions) for _, _, functions in rows))
+    num_w = 12
 
-    metric_w = max(len("Metric"), max(len(label) for _, label in display_rows))
-    num_w = 14
-
-    print("\nBenchmark statistics (measured runs only, seconds):")
+    print(f"\n{title} (measured runs only, seconds):")
     header = (
         f"{'Metric':<{metric_w}} "
+        f"{'Functions':<{func_w}} "
         f"{'Mean':>{num_w}} "
         f"{'Std':>{num_w}} "
         f"{'Min':>{num_w}} "
@@ -287,10 +584,11 @@ def _print_stats_table(stats: dict[str, dict[str, float]]) -> None:
     print(header)
     print(sep)
 
-    for key, label in display_rows:
+    for key, label, functions in rows:
         s = stats[key]
         print(
             f"{label:<{metric_w}} "
+            f"{functions:<{func_w}} "
             f"{s['mean_s']:>{num_w}.6f} "
             f"{s['std_s']:>{num_w}.6f} "
             f"{s['min_s']:>{num_w}.6f} "
@@ -414,7 +712,109 @@ def main() -> None:
         lookup_cache_mode=str(args.lookup_cache_mode),
     )
 
-    _print_stats_table(stats)
+    legacy_rows = [
+        (
+            "precompute_correction_factors_s",
+            TIMING_METADATA["precompute_correction_factors_s"]["label"],
+            TIMING_METADATA["precompute_correction_factors_s"]["functions"],
+        ),
+        (
+            "noise_sum_interacting_s",
+            TIMING_METADATA["noise_sum_interacting_s"]["label"],
+            TIMING_METADATA["noise_sum_interacting_s"]["functions"],
+        ),
+        (
+            "noise_sum_noninteracting_s",
+            TIMING_METADATA["noise_sum_noninteracting_s"]["label"],
+            TIMING_METADATA["noise_sum_noninteracting_s"]["functions"],
+        ),
+        (
+            "end_to_end_interacting_s",
+            TIMING_METADATA["end_to_end_interacting_s"]["label"],
+            TIMING_METADATA["end_to_end_interacting_s"]["functions"],
+        ),
+        (
+            "end_to_end_with_noninteracting_s",
+            TIMING_METADATA["end_to_end_with_noninteracting_s"]["label"],
+            TIMING_METADATA["end_to_end_with_noninteracting_s"]["functions"],
+        ),
+        ("run_total_wall_s", "Outer wall time", "benchmark.run_td_benchmark"),
+    ]
+    detailed_rows = [
+        (
+            "collision_coeffs_cache_load_s",
+            TIMING_METADATA["collision_coeffs_cache_load_s"]["label"],
+            TIMING_METADATA["collision_coeffs_cache_load_s"]["functions"],
+        ),
+        (
+            "s2_beta_dispersion_setup_s",
+            TIMING_METADATA["s2_beta_dispersion_setup_s"]["label"],
+            TIMING_METADATA["s2_beta_dispersion_setup_s"]["functions"],
+        ),
+        (
+            "s2_lookup_table_raman_gvd_s",
+            TIMING_METADATA["s2_lookup_table_raman_gvd_s"]["label"],
+            TIMING_METADATA["s2_lookup_table_raman_gvd_s"]["functions"],
+        ),
+        (
+            "s2_load_fB_profiles_s",
+            TIMING_METADATA["s2_load_fB_profiles_s"]["label"],
+            TIMING_METADATA["s2_load_fB_profiles_s"]["functions"],
+        ),
+        (
+            "s2_raman_integral_extremes_s",
+            TIMING_METADATA["s2_raman_integral_extremes_s"]["label"],
+            TIMING_METADATA["s2_raman_integral_extremes_s"]["functions"],
+        ),
+        (
+            "s2_ideal_fit_params_s",
+            TIMING_METADATA["s2_ideal_fit_params_s"]["label"],
+            TIMING_METADATA["s2_ideal_fit_params_s"]["functions"],
+        ),
+        (
+            "s2_worker_input_staging_s",
+            TIMING_METADATA["s2_worker_input_staging_s"]["label"],
+            TIMING_METADATA["s2_worker_input_staging_s"]["functions"],
+        ),
+        (
+            "s2_total_prepare_context_s",
+            TIMING_METADATA["s2_total_prepare_context_s"]["label"],
+            TIMING_METADATA["s2_total_prepare_context_s"]["functions"],
+        ),
+        (
+            "s3_pairwise_fit_eval_s",
+            TIMING_METADATA["s3_pairwise_fit_eval_s"]["label"],
+            TIMING_METADATA["s3_pairwise_fit_eval_s"]["functions"],
+        ),
+        (
+            "s3_collision_coeffs_save_s",
+            TIMING_METADATA["s3_collision_coeffs_save_s"]["label"],
+            TIMING_METADATA["s3_collision_coeffs_save_s"]["functions"],
+        ),
+        (
+            "noise_sum_interacting_s",
+            "S3 reduce (interacting)",
+            "total_nlin(use_x_mode=True)",
+        ),
+        (
+            "noise_sum_noninteracting_s",
+            "S3 reduce (noninteracting)",
+            "total_nlin(use_x_mode=False)",
+        ),
+        (
+            "s3_total_interacting_s",
+            TIMING_METADATA["s3_total_interacting_s"]["label"],
+            TIMING_METADATA["s3_total_interacting_s"]["functions"],
+        ),
+        (
+            "s3_total_with_noninteracting_s",
+            TIMING_METADATA["s3_total_with_noninteracting_s"]["label"],
+            TIMING_METADATA["s3_total_with_noninteracting_s"]["functions"],
+        ),
+    ]
+
+    _print_stats_table(stats, legacy_rows, "Legacy benchmark statistics")
+    _print_stats_table(stats, detailed_rows, "Detailed S2/S3 benchmark statistics")
     _write_csv(args.csv_out, rows)
 
     summary_payload = {
@@ -424,7 +824,7 @@ def main() -> None:
         "ipulse": int(args.ipulse),
         "collision_mode": str(args.collision_mode),
         "lookup_cache_mode": str(args.lookup_cache_mode),
-        "timing_definitions": TIMING_DESCRIPTIONS,
+        "timing_metadata": TIMING_METADATA,
         "stats": stats,
     }
     _write_json(args.json_out, summary_payload)

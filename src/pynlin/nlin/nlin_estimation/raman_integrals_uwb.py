@@ -96,7 +96,7 @@ def raman_integral(system: System,
         fB_min = float(np.nanmin(fB))
         fB_max = float(np.nanmax(fB))
         fB_mean = float(np.nanmean(fB))
-        lg.debug(
+        lg.trace(
             f"[raman_integral] regime={regime} fB shape={fB.shape} "
             f"min={fB_min:.3e} max={fB_max:.3e} mean={fB_mean:.3e}"
         )

@@ -64,6 +64,43 @@ def _flat_profiles_enabled(system) -> bool:
         return False
     return bool(nlin_section.get("flat_profiles") or nlin_section.get("flat_profile"))
 
+
+def _resolve_n_workers(reserve_cpus: int | None) -> int:
+    """Resolve worker count from reserve policy and optional environment override."""
+    total_cpus = os.cpu_count() or 1
+    workers_env = os.getenv("PYNLIN_NLIN_WORKERS")
+    if workers_env:
+        try:
+            workers = int(workers_env)
+        except ValueError:
+            lg.warning(f"Invalid PYNLIN_NLIN_WORKERS={workers_env!r}; ignoring override.")
+        else:
+            if workers > 0:
+                return min(workers, total_cpus)
+            lg.warning(f"PYNLIN_NLIN_WORKERS={workers} is not positive; ignoring override.")
+
+    if reserve_cpus is None:
+        reserve_env = os.getenv("PYNLIN_RESERVE_CPUS")
+        if reserve_env:
+            try:
+                reserve = int(reserve_env)
+            except ValueError:
+                lg.warning(f"Invalid PYNLIN_RESERVE_CPUS={reserve_env!r}; using default reserve=1.")
+                reserve = 1
+        else:
+            reserve = 1
+    else:
+        reserve = int(reserve_cpus)
+
+    reserve = max(reserve, 0)
+    if reserve >= total_cpus:
+        lg.warning(
+            f"reserve_cpus={reserve} leaves no free worker slots on this host ({total_cpus} CPUs); "
+            "using a single worker."
+        )
+        return 1
+    return max(total_cpus - reserve, 1)
+
 # --------------------
 # Kappa handling
 # --------------------
@@ -427,7 +464,7 @@ def _max_lld_from_beta2(system: System, beta2: np.ndarray) -> float | None:
 def collision_coeffs_system_uwb(system: System,
                                 ipulse: int = 1,
                                 recompute: bool = False,
-                                reserve_cpus: int = 3,
+                                reserve_cpus: int | None = None,
                                 profile_path: Path | str | None = None) -> np.ndarray:
     """Compute or load channel-pair collision coefficients (SMF or MMF)."""
     fiber_type = "smf" if system.n_modes == 1 else "mmf"
@@ -475,7 +512,10 @@ def collision_coeffs_system_uwb(system: System,
 
     from concurrent.futures import ProcessPoolExecutor, as_completed
     A_tasks = list(it.product(range(system.n_modes), range(len(freqs))))
-    n_workers = max((os.cpu_count() or 1) - reserve_cpus, 1)
+    n_workers = _resolve_n_workers(reserve_cpus)
+    lg.info(
+        f"UWB NLIN workers: {n_workers} (cpu_count={os.cpu_count() or 1}, reserve_cpus={reserve_cpus})"
+    )
 
     def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
                      system, ipulse, raman_min, raman_max, n_workers, raman_extremes):
@@ -617,7 +657,7 @@ __all__ = [
 def collision_coeffs_from_system(system,
                                  ipulse: int = 1,
                                  recompute: bool = False,
-                                 reserve_cpus: int = 18,
+                                 reserve_cpus: int | None = None,
                                  profile_path: Path | str | None = None) -> np.ndarray:
     """Modern helper that accepts a System and delegates to collision_coeffs_system_uwb."""
     return collision_coeffs_system_uwb(
@@ -634,7 +674,7 @@ def total_nlin_from_system(system,
                            use_kappa: bool = False,
                            use_x_mode: bool = False,
                            launch_powers_w: Optional[np.ndarray] = None,
-                           reserve_cpus: int = 3,
+                           reserve_cpus: int | None = None,
                            profile_path: Path | str | None = None,
                            cache_path: Path | str | None = None,
                            recompute: bool = False) -> np.ndarray:

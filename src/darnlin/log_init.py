@@ -1,12 +1,17 @@
-from loguru import logger
+import os
 import sys
 from pathlib import Path
 
+from loguru import logger
+
+
 def init_logging():
+    """Configure loguru with compact stdout output and fuller file logs."""
     script = Path(sys.argv[0]).stem or "interactive"
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
 
+    console_level = os.getenv("LOGURU_LEVEL", "DEBUG").upper()
     fmt_console = "{time:HH:mm:ss} | <level>{level:<8}</level> | {message}"
     fmt_file    = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {message}"
 
@@ -14,7 +19,7 @@ def init_logging():
 
     logger.add(
         sys.stdout,
-        level="DEBUG",
+        level=console_level,
         colorize=True,
         format=fmt_console,
     )

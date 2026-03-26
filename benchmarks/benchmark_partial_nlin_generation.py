@@ -71,6 +71,83 @@ def _stats(values: list[float]) -> dict[str, float]:
     }
 
 
+def _generation_count_for_runs(outfile: Path, total_runs: int, recompute: bool) -> int:
+    if total_runs <= 0:
+        return 0
+    if recompute:
+        return total_runs
+    return 0 if outfile.exists() else 1
+
+
+def _estimate_m_integral_counts(ipulse: int) -> dict:
+    from pynlin.collisions import get_m_values
+    from pynlin.pulses import GaussianPulse, NyquistPulse
+
+    with open("input/mmf.toml", "rb") as f:
+        cf = SimpleNamespace(**tomllib.load(f))
+    with open("input/numerical_config.toml", "rb") as f:
+        nc = SimpleNamespace(**tomllib.load(f))
+
+    nc.dgd1 = td_dgd1 = 0.01 / (cf.fiber_length * cf.baud_rate)
+    td_dgd2 = 100.0 / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = td_dgd2
+    nc.dgd2_g = td_dgd2
+
+    if ipulse == 0:
+        n_samples_numeric = int(nc.n_samples_numeric_g)
+        dgd2 = float(nc.dgd2_g)
+        pulse = GaussianPulse(
+            baud_rate=cf.baud_rate,
+            num_symbols=1e2,
+            samples_per_symbol=2**5,
+        )
+    else:
+        n_samples_numeric = int(nc.n_samples_numeric_n)
+        dgd2 = float(nc.dgd2_n)
+        pulse = NyquistPulse(
+            baud_rate=cf.baud_rate,
+            num_symbols=1e3,
+            samples_per_symbol=2**5,
+            rolloff=0.0,
+        )
+
+    collision_margin = int(getattr(cf, "collision_margin", 5))
+    dgds_numeric = np.logspace(np.log10(td_dgd1), np.log10(dgd2), n_samples_numeric)
+    fiber = SimpleNamespace(length=float(cf.fiber_length))
+
+    m_counts: list[int] = []
+    m_ranges: list[dict[str, int]] = []
+    for dgd in dgds_numeric:
+        m_values = np.asarray(
+            get_m_values(
+                fiber,
+                pulse,
+                collision_margin,
+                float(dgd),
+            )
+        )
+        m_counts.append(int(m_values.size))
+        m_ranges.append(
+            {
+                "m_min": int(m_values.min()),
+                "m_max": int(m_values.max()),
+            }
+        )
+
+    m_counts_arr = np.asarray(m_counts, dtype=int)
+    return {
+        "collision_margin": collision_margin,
+        "n_dgd_points": int(dgds_numeric.size),
+        "dgd_values_s": [float(x) for x in dgds_numeric],
+        "m_integrals_per_dgd": [int(x) for x in m_counts],
+        "m_ranges_per_dgd": m_ranges,
+        "total_m_integrals_per_generation": int(np.sum(m_counts_arr)),
+        "min_m_integrals_per_dgd": int(np.min(m_counts_arr)) if m_counts else 0,
+        "max_m_integrals_per_dgd": int(np.max(m_counts_arr)) if m_counts else 0,
+        "mean_m_integrals_per_dgd": float(np.mean(m_counts_arr)) if m_counts else float("nan"),
+    }
+
+
 def run_benchmark(
     ipulse: int,
     gvda: float,
@@ -90,9 +167,15 @@ def run_benchmark(
 
     pulse = "gaussian" if ipulse == 0 else "nyquist"
     outfile = Path(f"results/partial_nlin_{pulse}_perfect_{gvda}_{gvdb}.npy")
+    total_runs = warmup + repeats
+    m_integral_counts = _estimate_m_integral_counts(ipulse=ipulse)
+    executed_generations = _generation_count_for_runs(
+        outfile=outfile,
+        total_runs=total_runs,
+        recompute=recompute,
+    )
 
     measured: list[float] = []
-    total_runs = warmup + repeats
     for i in range(total_runs):
         t0 = time.perf_counter()
         compute_numeric_nlin(
@@ -125,6 +208,11 @@ def run_benchmark(
         "n_points": int(arr.size),
         "checksum_sum": float(np.sum(arr)),
         "checksum_l2": float(np.linalg.norm(arr)),
+        "m_integral_counts": m_integral_counts,
+        "executed_generations": int(executed_generations),
+        "total_m_integrals_executed": int(
+            executed_generations * m_integral_counts["total_m_integrals_per_generation"]
+        ),
     }
     return result
 

@@ -6,11 +6,10 @@ from typing import Tuple
 
 import numpy as np
 from loguru import logger as lg
-from scipy.integrate import quad, IntegrationWarning
 from scipy.interpolate import RegularGridInterpolator
 
 from pynlin.log_init import init_logging
-from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator, ensure_i_low_dataset
+from pynlin.nlin.collision import MAX_LLD, ensure_i_low_dataset
 from pynlin.nlin.nlin_estimation.raman_integrals_uwb import load_fB
 
 
@@ -52,8 +51,12 @@ def build_lookup_integral_table_with_raman(cf,
     """Generate interpolants for Raman-inclusive LO corrections at fB_min and fB_max."""
     _, _, _, fB_min, fB_max = load_fB(cf, profile_path=profile_path)
     use_trapezoid_only = _flat_profiles_enabled(cf)
+    z_samples = int(os.getenv("PYNLIN_RAMAN_LO_Z_SAMPLES", "2001"))
+    z_samples = max(z_samples, 33)
     if use_trapezoid_only:
-        lg.info("flat_profiles enabled; using trapezoid shortcut for Raman LO corrections.")
+        lg.info("flat_profiles enabled; using trapezoid integration for Raman LO corrections.")
+    else:
+        lg.info("Using sampled trapezoid integration for Raman LO corrections.")
     n_samples = 20
     fiber_length = cf.fiber_length
     lld_max = MAX_LLD if max_lld is None else max(float(max_lld), MAX_LLD)
@@ -73,6 +76,13 @@ def build_lookup_integral_table_with_raman(cf,
         raman_correction_grid_min = data['raman_correction_grid_min']
     else:
         lg.info(f"Computing Raman correction grid and saving to {filename}")
+        z_axis = np.linspace(0.0, fiber_length, z_samples, dtype=float)
+        # x/LD = x * (L/LD)/L so each column corresponds to one LLD sample.
+        x_over_ld = z_axis[:, None] / ld[None, :]
+        fB_min_axis = np.asarray(fB_min(z_axis), dtype=float).reshape(-1)
+        fB_max_axis = np.asarray(fB_max(z_axis), dtype=float).reshape(-1)
+        if not (np.all(np.isfinite(fB_min_axis)) and np.all(np.isfinite(fB_max_axis))):
+            raise ValueError("Non-finite fB_min/fB_max samples in Raman correction builder.")
         for m_lo in range(m_lo_truncation + 1):
             ensure_i_low_dataset(
                 m_lo=m_lo,
@@ -87,25 +97,12 @@ def build_lookup_integral_table_with_raman(cf,
             lg.info(f"Calculating m_lo={m_lo}")
             I_low_dataset = np.load(
                 f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
-            interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
-            def _safe_integrate(func, a: float, b: float, label: str) -> float:
-                import warnings
-
-                if use_trapezoid_only:
-                    x = np.linspace(a, b, 2001)
-                    y = np.vectorize(func)(x)
-                    return float(np.trapezoid(y, x))
-                with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter("always", IntegrationWarning)
-                    val, _err = quad(func, a, b, limit=200)
-                if any(issubclass(w.category, IntegrationWarning) for w in caught):
-                    lg.warning(
-                        f"IntegrationWarning in {label}; falling back to trapezoid on a coarse grid."
-                    )
-                    x = np.linspace(a, b, 2001)
-                    y = np.vectorize(func)(x)
-                    val = float(np.trapezoid(y, x))
-                return float(val)
+            interp = RegularGridInterpolator(
+                (I_low_dataset["lld_range"], I_low_dataset["lld_range"]),
+                I_low_dataset["I_low_values"],
+                bounds_error=False,
+                fill_value=None,
+            )
 
             for ida, lda in enumerate(ld):
                 for idb, ldb in enumerate(ld):
@@ -113,16 +110,10 @@ def build_lookup_integral_table_with_raman(cf,
                         add_max[ida, idb] = add_max[idb, ida]
                         add_min[ida, idb] = add_min[idb, ida]
                     else:
-                        def I_specific(x):
-                            return interp(x/lda, x/ldb)
-                        lg.trace(f"Maximum of fB_max: {fB_max(fiber_length):.2e}")
-                        lg.trace(f"Maximum of fB_min: {fB_min(fiber_length):.2e}")
-                        int_max = _safe_integrate(
-                            lambda x: I_specific(x) * fB_max(x), 0, fiber_length, "fB_max"
-                        )
-                        int_min = _safe_integrate(
-                            lambda x: I_specific(x) * fB_min(x), 0, fiber_length, "fB_min"
-                        )
+                        points = np.column_stack((x_over_ld[:, ida], x_over_ld[:, idb]))
+                        I_axis = np.asarray(interp(points), dtype=float).reshape(-1)
+                        int_max = float(np.trapezoid(I_axis * fB_max_axis, z_axis))
+                        int_min = float(np.trapezoid(I_axis * fB_min_axis, z_axis))
                         add_max[ida, idb] += (int_max / fiber_length) ** 2
                         add_min[ida, idb] += (int_min / fiber_length) ** 2
             if m_lo != 0:

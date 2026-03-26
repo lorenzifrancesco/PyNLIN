@@ -63,6 +63,11 @@ This section documents the equations currently executed by the Poggiolini workfl
 (``analysis/poggiolini/workflow.py``), which is also exposed by the compatibility
 entrypoint ``analysis/poggiolini_nlin.py``.
 
+The TD formulas below are implementation-exact for this repository. They do not
+map one-to-one onto a single closed-form derivation in ``input/poggiolini.pdf``.
+The explicit paper-equation references in these notes therefore concentrate on the
+PCFM section below, where the correspondence is direct and verifiable.
+
 Collision-coefficient path and units
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -207,6 +212,12 @@ Then
 3. PCFM/GN model (implementation-exact)
 ---------------------------------------
 
+Primary paper reference for the PCFM-specific equations in this section:
+P. Poggiolini, Y. Jiang, Y. Gao, and F. Forghieri,
+``Polynomial Closed Form Model for Ultra-Wideband Transmission Systems``,
+local copy: ``input/poggiolini.pdf``.
+Whenever a paper equation number is quoted below, it refers to that PDF.
+
 Runtime flow and power-profile handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -271,6 +282,9 @@ then normalized:
 
    p_i(z)=\frac{\widetilde{P}_i(z)}{\widetilde{P}_i(0)}.
 
+This normalized SPP is the implementation counterpart of the paper definition
+in Poggiolini et al., Eq. (33).
+
 The normalized profile is clipped to ``[0, MAX_SPP]`` with ``MAX_SPP=1e3``.
 
 Polynomial profile representation
@@ -283,6 +297,9 @@ For PCFM and GN-numeric, the profile is fit in normalized distance
 
    p_i(u)\approx \sum_{n=0}^{N} a_{i,n}u^n.
 
+This is the same polynomial SPP representation introduced in Poggiolini et al.,
+Eq. (49), with a normalized-distance variable in the implementation.
+
 The closed-form XCI helper term is
 
 .. math::
@@ -290,6 +307,8 @@ The closed-form XCI helper term is
    S_i = \sum_{n,k}\frac{a_{i,n}a_{i,k}}{n+k+1},
 
 implemented via coefficient convolution (``poly_sum``).
+This is the coefficient sum that appears in the XCI closed form of
+Poggiolini et al., Eq. (50).
 
 Dispersion model used in phase terms
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -319,6 +338,11 @@ The phase model is
 
 with :math:`C_\phi=4\pi^2` by default.
 
+The combination of the :math:`4\pi^2` phase factor, the effective-dispersion
+approximation above, and the per-island loss flattening mirrors the paper path
+from Eq. (29) to Eq. (38). The code also uses the same channel-flat loss
+approximation as Poggiolini et al., Eq. (30).
+
 SCI kernel:
 
 .. math::
@@ -343,6 +367,11 @@ XCI kernel:
    \right|^2
    df_2\,df_1.
 
+At the paper level, these per-island kernel constructions correspond to the
+combined SPP definition of Poggiolini et al., Eq. (36), and the generic kernel
+definition of Eq. (38). The implementation specializes those formulas to the
+SCI/XCI cases shown above.
+
 All integrals are evaluated numerically with trapezoidal integration on
 uniform grids. The ``direct`` GN path uses sampled :math:`p(z)` directly
 instead of polynomial fits.
@@ -361,6 +390,10 @@ Let
    \gamma_i = \frac{2\pi f_i}{c}\frac{n_2}{A_{\mathrm{eff},i}}, \qquad
    \gamma_{ij} = \frac{2\pi f_i}{c}\frac{2n_2}{A_{\mathrm{eff},i}+A_{\mathrm{eff},j}}.
 
+The XCI nonlinear coefficient :math:`\gamma_{ij}` matches Poggiolini et al.,
+Eq. (42). The SCI coefficient :math:`\gamma_i` is the single-channel Kerr
+coefficient of Eq. (19).
+
 Then for every CUT :math:`i`:
 
 .. math::
@@ -378,6 +411,11 @@ Then for every CUT :math:`i`:
    G_{\mathrm{NLI},i}
    = G_{\mathrm{SCI},i} + \sum_{j\neq i}G_{\mathrm{XCI},ij}.
 
+These expressions are the implementation counterparts of the paper-level PCFM
+SCI/XCI PSD structure in Poggiolini et al., Eqs. (47), (48), and (52). The code
+keeps the same prefactor structure, but see the note below on the endpoint
+factor :math:`p_i(L)`.
+
 Only interferers satisfying :math:`|\Delta f_{ij}| > B/2` are included.
 For PCFM closed-form XCI (when ``use_numeric_xci=False``):
 
@@ -388,8 +426,14 @@ For PCFM closed-form XCI (when ``use_numeric_xci=False``):
    \frac{L}{2\pi\max(|\beta_{2,\mathrm{eff}}|,10^{-30})}
    \ln\!\left(\frac{|\Delta f_{ij}|+B/2}{|\Delta f_{ij}|-B/2}\right)S_j.
 
+This is the code-level specialization of Poggiolini et al., Eq. (50), with the
+implementation guard ``max(|\beta_{2,\mathrm{eff}}|,10^{-30})`` added for numerical
+robustness.
+
 The endpoint factor :math:`p_i(L)` is computed but currently not applied
-in the final PSD expression (intentional, with FIXME note in code).
+in the final PSD expression. The paper formulas for XCI and SCI include the
+endpoint factor explicitly, see Poggiolini et al., Eqs. (47) and (52). The
+current implementation intentionally omits it, with a FIXME note in code.
 
 Per-polarization output correction (current implementation)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

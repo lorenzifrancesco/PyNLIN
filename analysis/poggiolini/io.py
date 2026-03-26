@@ -80,8 +80,14 @@ def _resolve_launch_powers(
         return launch_from_profile
 
     if launch_csv_path is not None:
-        lg.info(f"Using launch powers from {launch_csv_path}.")
-        return np.asarray(_load_launch_powers_csv(launch_csv_path, freqs), dtype=float).reshape(-1)
+        launch_csv = Path(launch_csv_path)
+        if launch_csv.exists():
+            lg.info(f"Using launch powers from {launch_csv}.")
+            return np.asarray(_load_launch_powers_csv(launch_csv, freqs), dtype=float).reshape(-1)
+        lg.warning(
+            f"Launch power CSV {launch_csv} not found; "
+            "falling back to band launch powers or system.launch_power."
+        )
 
     if hasattr(system.wdm, "band_specs") and system.wdm.band_specs:
         launch = np.zeros_like(freqs, dtype=float)

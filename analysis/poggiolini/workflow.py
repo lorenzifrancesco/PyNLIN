@@ -35,7 +35,7 @@ from .td import _qam_mu0, _td_modulation_components
 from analysis.uwb_nlin import _nlin_cache_path, compute_raman_profiles, plot_power_profiles
 
 MANAKOV_SCALE_POGGIOLINI = 16.0 / 9.0
-
+POGGIOLINI_MEDIA_DIR = Path("media") / "PCFM"
 
 def _apply_poggiolini_manakov_scaling(values: np.ndarray) -> np.ndarray:
     """Apply manual 16/9 Manakov scaling for Poggiolini TD comparisons."""
@@ -231,12 +231,12 @@ def run_poggiolini_workflow(
     )
 
     if do_plot:
-        plot_power_profiles(system, profile_path)
+        plot_power_profiles(system, profile_path, output_dir=POGGIOLINI_MEDIA_DIR)
         plot_poggiolini_diagnostics(
             system=system,
             profile_path=profile_path,
             launch_powers_w=launch_powers,
-            out_dir=Path("media"),
+            out_dir=POGGIOLINI_MEDIA_DIR,
         )
 
     launch_dbm = 10.0 * np.log10(np.maximum(launch_powers, 1e-18) / 1e-3)
@@ -458,7 +458,7 @@ def run_poggiolini_workflow(
             gsnr_td=gsnr_td,
             gsnr_pcfm=gsnr_pcfm,
             gsnr_gn=gsnr_gn,
-            out_path=Path("media") / "poggiolini_fig14c.pdf",
+            out_path=POGGIOLINI_MEDIA_DIR / "fig14c.pdf",
             gsnr_gn_direct=gsnr_gn_direct,
         )
         plot_poggiolini_nlin_power(
@@ -474,5 +474,5 @@ def run_poggiolini_workflow(
             nlin_gn_direct_xci_w=nlin_gn_direct_xci_ratio,
             gn_direct_is_ratio=True,
             gn_direct_xci_is_ratio=True,
-            out_path=Path("media") / "poggiolini_nlin_power.pdf",
+            out_path=POGGIOLINI_MEDIA_DIR / "nlin_power.pdf",
         )

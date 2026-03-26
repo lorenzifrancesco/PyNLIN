@@ -299,8 +299,8 @@ def plot_poggiolini_diagnostics(
     ax.set_ylabel(r"$P_\mathrm{launch}\;[\mathrm{dBm}]$")
     ax.grid(False)
     fig.tight_layout()
-    fig.savefig(out_dir / "poggiolini_launch_power.pdf", dpi=300)
-    lg.success(f"Saved launch power plot to {out_dir / 'poggiolini_launch_power.pdf'}")
+    fig.savefig(out_dir / "launch_power.pdf", dpi=300)
+    lg.success(f"Saved launch power plot to {out_dir / 'launch_power.pdf'}")
     plt.close(fig)
 
     sig_ch_z, z_axis = load_signal_profiles(profile_path, system)
@@ -318,8 +318,8 @@ def plot_poggiolini_diagnostics(
     ax.grid(False)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()
-    fig.savefig(out_dir / "poggiolini_profile_power.pdf", dpi=300)
-    lg.success(f"Saved profile power plot to {out_dir / 'poggiolini_profile_power.pdf'}")
+    fig.savefig(out_dir / "profile_power.pdf", dpi=300)
+    lg.success(f"Saved profile power plot to {out_dir / 'profile_power.pdf'}")
     plt.close(fig)
 
     spp = normalize_spp(sig_ch_z, z_axis)
@@ -380,8 +380,8 @@ def plot_poggiolini_diagnostics(
     ax.grid(False)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()
-    fig.savefig(out_dir / "poggiolini_spp_fit.pdf", dpi=300)
-    lg.success(f"Saved SPP fit plot to {out_dir / 'poggiolini_spp_fit.pdf'}")
+    fig.savefig(out_dir / "spp_fit.pdf", dpi=300)
+    lg.success(f"Saved SPP fit plot to {out_dir / 'spp_fit.pdf'}")
     plt.close(fig)
 
     p_l = np.array([np.polynomial.polynomial.polyval(1.0, coeff) for coeff in coeffs], dtype=float)
@@ -401,8 +401,8 @@ def plot_poggiolini_diagnostics(
     ax2.set_ylabel(r"$\\sum a_n a_k/(n+k+1)$", color="tab:orange")
     ax1.grid(False)
     fig.tight_layout()
-    fig.savefig(out_dir / "poggiolini_pcfm_terms.pdf", dpi=300)
-    lg.success(f"Saved PCFM terms plot to {out_dir / 'poggiolini_pcfm_terms.pdf'}")
+    fig.savefig(out_dir / "pcfm_terms.pdf", dpi=300)
+    lg.success(f"Saved PCFM terms plot to {out_dir / 'pcfm_terms.pdf'}")
     plt.close(fig)
 
     pump_specs = system.pump_specs or []
@@ -437,8 +437,8 @@ def plot_poggiolini_diagnostics(
     ax.grid(False)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()
-    fig.savefig(out_dir / "poggiolini_launch_spectrum.pdf", dpi=300)
-    lg.success(f"Saved launch spectrum plot to {out_dir / 'poggiolini_launch_spectrum.pdf'}")
+    fig.savefig(out_dir / "launch_spectrum.pdf", dpi=300)
+    lg.success(f"Saved launch spectrum plot to {out_dir / 'launch_spectrum.pdf'}")
     plt.close(fig)
 
     wl = 3e8 / freqs
@@ -453,6 +453,6 @@ def plot_poggiolini_diagnostics(
     ax2.set_ylabel(r"$A_{eff}\\;[\\mu m^2]$", color="tab:orange")
     ax1.grid(False)
     fig.tight_layout()
-    fig.savefig(out_dir / "poggiolini_fiber_params.pdf", dpi=300)
-    lg.success(f"Saved fiber parameters plot to {out_dir / 'poggiolini_fiber_params.pdf'}")
+    fig.savefig(out_dir / "fiber_params.pdf", dpi=300)
+    lg.success(f"Saved fiber parameters plot to {out_dir / 'fiber_params.pdf'}")
     plt.close(fig)

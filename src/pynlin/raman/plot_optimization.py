@@ -1,6 +1,7 @@
 import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib import pyplot as plt
+from pathlib import Path
 from scipy.constants import lambda2nu
 
 from loguru import logger as lg
@@ -24,7 +25,8 @@ def plot_profiles(signal_wavelengths,
                   wallpaper_mode=False,
                   single_out_mode = None,
                   use_active_naming: bool = True,
-                  plot_title: str | None = None):
+                  plot_title: str | None = None,
+                  output_dir: Path | str | None = None):
     """Plot signal, ASE, and pump power profiles and save flatness snapshots."""
     # Guard against zeros/NaNs to avoid -inf in dBm plots
     eps = 1e-18
@@ -104,7 +106,14 @@ def plot_profiles(signal_wavelengths,
     # plt.legend()
     plt.tight_layout()
     plt.grid(False)
-    name = get_next_filename("media/optimization/signal_ase_profile", "pdf", use_active_naming=use_active_naming)
+    base_dir = Path("media/optimization") if output_dir is None else Path(output_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    name = get_next_filename(
+        str(base_dir / "signal_ase_profile"),
+        "pdf",
+        use_active_naming=use_active_naming,
+    )
     plt.savefig(name, bbox_inches='tight', pad_inches=0.01)
     lg.info(f"Plot saved as {name}")
     plt.clf()
@@ -136,7 +145,11 @@ def plot_profiles(signal_wavelengths,
         plt.ylim(bottom=-70)
         # plt.legend()
         plt.tight_layout()
-        name = get_next_filename("media/optimization/pump_profile", "pdf", use_active_naming=use_active_naming)
+        name = get_next_filename(
+            str(base_dir / "pump_profile"),
+            "pdf",
+            use_active_naming=use_active_naming,
+        )
         plt.savefig(name)
         lg.info(f"Plot saved as {name}")
     #
@@ -157,7 +170,11 @@ def plot_profiles(signal_wavelengths,
     plt.xlabel(r"$\mathnormal \lambda$ [$\mu$ m]")
     plt.ylabel("On Off Gain [dB]")
     plt.tight_layout()
-    name = get_next_filename("media/optimization/flatness", "pdf", use_active_naming=use_active_naming)
+    name = get_next_filename(
+        str(base_dir / "flatness"),
+        "pdf",
+        use_active_naming=use_active_naming,
+    )
     plt.savefig(name)
     lg.info(f"Plot saved as {name}")
     return

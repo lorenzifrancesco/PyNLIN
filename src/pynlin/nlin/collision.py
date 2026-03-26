@@ -1,5 +1,7 @@
 """Collision-integral utilities and plotting helpers for NLIN workflows."""
 
+import contextlib
+
 from loguru import logger as lg
 
 from pynlin.log_init import init_logging
@@ -9,6 +11,7 @@ init_logging()
 import os
 import sys
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import ScalarFormatter
@@ -29,202 +32,234 @@ from pynlin.wdm import WDM
 formatter = ScalarFormatter()
 formatter.set_scientific(True)
 formatter.set_powerlimits([0, 0])
+formatter.set_useMathText(True)
 
 PULSE_NAMES = ["gaussian", "nyquist"]
 PULSE_LINE_STYLE = ["-", "--"]
-MAX_LLD = 2.3
+MAX_LLD = 2.5
+ILLUSTRATIVE_MAX_LLD = 2.5
+IEEE_ONE_COLUMN_WIDTH_IN = 88.9 / 25.4
+ILLUSTRATIVE_HEIGHT_IN = 3.9 / 2
         
 def get_space_integrals(m, z, I):
     """(wrapper) Compute spatial collision integral X0mm for a given time integral profile."""
     X0mm = pynlin.nlin.X0mm_space_integral(z, I, amplification_function=None)
     return X0mm
 
-def plot_illustrative(fiber, wdm, cf, recompute=False):
+def plot_illustrative(fiber, wdm, cf, recompute=False, ignore_matplotlibrc: bool = False):
     """Reproduce illustrative pulse-collision plots (Fig.1-style) for Gaussian/Nyquist pulses."""
     lg.debug("Plotting Fig.1 (pulse collisions)...")
     nyquist_pulse = NyquistPulse(
         baud_rate=cf.baud_rate,
         # beware of "aliasing" (i.e. when it is smaller than the maximum m we have repeated values)
-        num_symbols=220,
+        num_symbols=270,
         samples_per_symbol=2**5,
         rolloff=0.0,
     )
     gaussian_pulse = GaussianPulse(
         baud_rate=cf.baud_rate,
         # beware of "aliasing" (i.e. when it is smaller than the maximum m we have repeated values)
-        num_symbols=220,
+        num_symbols=270,
         samples_per_symbol=2**5,
     )
     ls = ["-", "-"]
-    for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
-        plt.figure(figsize=(4, 2.2))
-        m = [-10, -90]
-        m1 = -10
-        m2 = -90
-        dgd_hi = 100e-15
-        beta2a = 100e-27
-        beta2b = 50e-27 # BEWARE
-        if ipulse == 0:
-            complementary_function = beta2rms_complementary
+    plot_context = (
+        mpl.rc_context(rc=mpl.rcParamsDefault) if ignore_matplotlibrc else contextlib.nullcontext()
+    )
+    with plot_context:
+        for ipulse, pulse in enumerate([gaussian_pulse, nyquist_pulse]):
+            plt.figure(
+                figsize=(
+                    IEEE_ONE_COLUMN_WIDTH_IN,
+                    ILLUSTRATIVE_HEIGHT_IN,
+                )
+            )
+            m = [-10, -90]
+            m1 = -10
+            m2 = -90
+            dgd_hi = 100e-15
             beta2a = 100e-27
-            beta2b = 50e-27
-            beta2c = 132e-27
-            beta2c_check = beta2rms_complementary(beta2a, beta2b)
-            # assert beta2c_check == beta2c, f"Values do not match: {beta2c_check} vs {beta2c}"
-        else:
-            beta2a = 100e-27
-            beta2b = 50e-27
-            beta2c = 132e-27
-            beta2c_check = beta2avg_complementary(beta2a, beta2b)
-            # assert beta2c_check == beta2c, f"Values do not match: {beta2c_check} vs {beta2c}"
-            complementary_function = beta2avg_complementary # beta2rms_complementary
-            # xlabel = rf"$z/L_{{Dm}}$"
-        xlabel = rf"$z/L_{{D}}^{{\mathrm{{rms}}}}$"
-        # beta2bar = beta2rms(beta2a, beta2b)
-        assert pulse.baud_rate == cf.baud_rate
-        LDbar = 1/(pulse.baud_rate**2 * np.abs(beta2a))
-        LW = 1/(pulse.baud_rate * np.abs(dgd_hi))
-        lg.debug("-"*20, "ILLUSTRATIVE COLLISION PLOT", "-"*20)
-        lg.debug(f"LDbar = {LDbar:.2e} | L/LDbar = {fiber.length/LDbar:.2e}")
-        lg.debug(
-            f"low DGD parameters L/LD1: {-beta2a * pulse.baud_rate**2 * fiber.length:.2e}, L/LD2: {-beta2b * pulse.baud_rate**2 * fiber.length:.2e}")
-        lg.debug(
-            f"B2A = {beta2a:.2e} | B2B = {beta2b:.2e}  B2complement = {complementary_function(beta2a, beta2b)}|")
-        z = np.linspace(0, fiber.length, 400)
-        # we need to be with a fixed L/LD
-        assert (np.isclose(fiber.length, 2 * LDbar))
-
-        # 1. the two pulses
-        # cases are related to single collisions
-        # assume beta2a = beta2b
-        cases = [(dgd_hi, beta2a, beta2a, -10),
-                 (dgd_hi, beta2a, beta2a, -90),]
-        I_list = []
-        for dgd, beta2a, _, m in cases:
-            I = np.real(m_th_time_integral_general(m, z, pulse, dgd, beta2b, beta2c))
-            I_list.append(I)
-
-        # 2. the set of pulse peaks:
-        # cases are related to set of parameters, not to single collisions
-        # we utilize the beta2rms_complementary function to compute the beta2b value
-        cases_peaks = [(dgd_hi, beta2a, beta2a, m1),
-                       (dgd_hi, beta2b, beta2c, m2),]
-        # assert np.abs(beta2rms(beta2b, complementary_function(beta2a, beta2b))) == np.abs(
-            # beta2a), f"values: {beta2a}, {beta2rms(beta2b, complementary_function(beta2a, beta2b))}" # this only holds for the RMS case
-        zw = 1/(pulse.baud_rate * dgd_hi)
-        m_max = fiber.length / zw
-        # lg.debug(f"  > m_max: {m_max}")
-        m_axis = -np.array(range(int(round(m_max))))
-        m_axis = m_axis[::20]
-        peaks = np.zeros(2)[np.newaxis, :].repeat(len(m_axis), axis=0)
-        z_peaks = np.zeros(2)[np.newaxis, :].repeat(len(m_axis), axis=0)
-        #
-        if not os.path.exists("results/fig1_peaks.npy") or recompute:
-            # lg.debug("  Computing peaks...")
-            for im, m in enumerate(m_axis):
-                lg.debug(f"  m: {m:>10}")
-                for ic, (dgd, beta2a_example, beta2b_example, _) in enumerate(cases_peaks):
-                    # lg.debug(f"    case {ic}: dgd={dgd:.2e}, beta2a={beta2a_example:.2e}, beta2b={beta2b_example:.2e}")
-                    # lg.debug(f"L/LDA = {fiber.length * pulse.baud_rate**2 * np.abs(beta2a_example):.2e}, L/LDB = {fiber.length * pulse.baud_rate**2 * np.abs(beta2b_example):.2e}")
-                    I = np.real(m_th_time_integral_general(m, z, pulse, dgd, beta2a_example, beta2b_example))
-                    peaks[im, ic] = np.max(I)
-                    z_peaks[im, ic] = z[np.argmax(I)]
-            np.save("results/fig1_peaks.npy", (peaks, z_peaks))
-            # lg.debug("  Done computing and saving peaks.")
-        else:
-            # lg.debug("  Loading peaks...")
-            peaks, z_peaks = np.load("results/fig1_peaks.npy")
-            # lg.debug("  Done loading peaks.")
-
-        # 3. case of very low DGD (almost zero)
-        m_lo = 0
-        # gvda_alt = 0.0
-        # gvdb_alt = 0.0e-27
-        I_low = np.real(m_th_time_integral_general(m_lo, z,
-            pulse, 0.0, beta2a, beta2a))
-        I_low_2 = np.real(m_th_time_integral_general(m_lo, z,
-            pulse, 0.0, beta2b, beta2c))
-
-        # 4. Plotting
-        colors = ["grey", "blue"]
-        markers = ["x", "o"] # x with equal dispersion, dots with unequal
-        marker_sizes = [7, 3]
-        lw = 1.0
-        # plotting the peaks
-        for ip, (peak, z_peak) in enumerate(zip(peaks, z_peaks)):
-            for ic in range(len(cases_peaks)):
-                if ip == 0:
-                    plt.plot(z_peak[ic]/LDbar,
-                             peak[ic]/pulse.baud_rate,
-                             marker=markers[ic],
-                             markersize=marker_sizes[ic],
-                             label='case'+str(ic),
-                             color=colors[ic],
-                             linewidth=lw)
-                else:
-                    plt.plot(z_peak[ic]/LDbar,
-                             peak[ic]/pulse.baud_rate,
-                             markersize=marker_sizes[ic],
-                             marker=markers[ic],
-                             color=colors[ic],
-                             linewidth=lw)
-        # plotting the low DGD case
-        plt.plot(z/LDbar,
-                 I_low / pulse.baud_rate,
-                 label='low DGD',
-                 color="green",
-                 linewidth=lw,
-                 linestyle=ls[ipulse])
-        plt.plot(z/LDbar,
-                 I_low_2 / pulse.baud_rate,
-                 label='low DGD with GVD',
-                 color="orange",
-                 linewidth=lw,
-                 linestyle=ls[ipulse])
-        # plt.title(f"m={m_lo}")
-        for xi, yi, wi in zip(z[::100]/LDbar, I_low[::100]/pulse.baud_rate, I_low_2[::100] / pulse.baud_rate):
-            lg.debug(f"{xi:.2e}, {yi:.2e}, {wi:.2e}")
-        # plotting the pulses
-        for ii, I in enumerate(I_list):
-            if ii == 0:
-                plt.plot(z/LDbar,
-                         I / pulse.baud_rate,
-                         label=f'try',
-                         color="red",
-                         linewidth=lw,
-                         linestyle=ls[ipulse], )
+            beta2b = 50e-27 # BEWARE
+            if ipulse == 0:
+                complementary_function = beta2rms_complementary
+                beta2a = 100e-27
+                beta2b = 50e-27
+                beta2c = 132e-27
+                beta2c_check = beta2rms_complementary(beta2a, beta2b)
+                # assert beta2c_check == beta2c, f"Values do not match: {beta2c_check} vs {beta2c}"
             else:
-                plt.plot(z/LDbar,
-                         I / pulse.baud_rate,
-                         color="red",
-                         linewidth=lw,
-                         linestyle=ls[ipulse], )
-        # plt.legend()
-        # add (a) or (b) label
-        if ipulse == 0:
-            label = "(a)"
-        else:
-            label = "(b)"
+                beta2a = 100e-27
+                beta2b = 50e-27
+                beta2c = 132e-27
+                beta2c_check = beta2avg_complementary(beta2a, beta2b)
+                # assert beta2c_check == beta2c, f"Values do not match: {beta2c_check} vs {beta2c}"
+                complementary_function = beta2avg_complementary # beta2rms_complementary
+                # xlabel = rf"$z/L_{{Dm}}$"
+            xlabel = rf"$z/L_{{D}}^{{\mathrm{{rms}}}}$"
+            # beta2bar = beta2rms(beta2a, beta2b)
+            assert pulse.baud_rate == cf.baud_rate
+            LDbar = 1/(pulse.baud_rate**2 * np.abs(beta2a))
+            illustrative_length = ILLUSTRATIVE_MAX_LLD * LDbar
+            LW = 1/(pulse.baud_rate * np.abs(dgd_hi))
+            lg.debug("-"*20, "ILLUSTRATIVE COLLISION PLOT", "-"*20)
+            lg.debug(
+                f"LDbar = {LDbar:.2e} | illustrative L/LDbar = {illustrative_length/LDbar:.2e}"
+            )
+            lg.debug(
+                "low DGD parameters "
+                f"L/LD1: {-beta2a * pulse.baud_rate**2 * illustrative_length:.2e}, "
+                f"L/LD2: {-beta2b * pulse.baud_rate**2 * illustrative_length:.2e}"
+            )
+            lg.debug(
+                f"B2A = {beta2a:.2e} | B2B = {beta2b:.2e}  B2complement = {complementary_function(beta2a, beta2b)}|")
+            z = np.linspace(0, illustrative_length, 400)
 
-        plt.text(
-            0.98, 0.95, label,
-            transform=plt.gca().transAxes,
-            ha='right', va='top',
-            fontsize=12, fontweight='bold'
-        )
-        plt.xlabel(xlabel)
-        # plt.xlabel(r'$z / L_D^{\mathrm{rms}}$')
-        plt.ylabel(r'$I(z) \cdot T $')
-        plt.gca().yaxis.set_major_formatter(formatter)
-        plt.gca().xaxis.set_major_formatter(formatter)
-        plt.tight_layout()
-        # different pulses: 
-        plt.savefig(f"media/1-quovadis_{PULSE_NAMES[ipulse]}.pdf", dpi=300, bbox_inches="tight", pad_inches=0)
-        lg.debug("Done plotting Fig.1 media/1-quovadis_"+PULSE_NAMES[ipulse]+".pdf")
-        plt.clf()
+            # 1. the two pulses
+            # cases are related to single collisions
+            # assume beta2a = beta2b
+            cases = [(dgd_hi, beta2a, beta2a, -10),
+                     (dgd_hi, beta2a, beta2a, -90),]
+            I_list = []
+            for dgd, beta2a, _, m in cases:
+                I = np.real(m_th_time_integral_general(m, z, pulse, dgd, beta2b, beta2c))
+                I_list.append(I)
+
+            # 2. the set of pulse peaks:
+            # cases are related to set of parameters, not to single collisions
+            # we utilize the beta2rms_complementary function to compute the beta2b value
+            cases_peaks = [(dgd_hi, beta2a, beta2a, m1),
+                           (dgd_hi, beta2b, beta2c, m2),]
+            # assert np.abs(beta2rms(beta2b, complementary_function(beta2a, beta2b))) == np.abs(
+                # beta2a), f"values: {beta2a}, {beta2rms(beta2b, complementary_function(beta2a, beta2b))}" # this only holds for the RMS case
+            zw = 1/(pulse.baud_rate * dgd_hi)
+            m_max = illustrative_length / zw
+            # lg.debug(f"  > m_max: {m_max}")
+            m_axis = -np.array(range(int(round(m_max))))
+            m_axis = m_axis[::20]
+            peaks = np.zeros(2)[np.newaxis, :].repeat(len(m_axis), axis=0)
+            z_peaks = np.zeros(2)[np.newaxis, :].repeat(len(m_axis), axis=0)
+            #
+            peaks_path = (
+                f"results/fig1_peaks_{PULSE_NAMES[ipulse]}_lld{ILLUSTRATIVE_MAX_LLD:.1f}.npy"
+            )
+            if not os.path.exists(peaks_path) or recompute:
+                # lg.debug("  Computing peaks...")
+                for im, m in enumerate(m_axis):
+                    lg.debug(f"  m: {m:>10}")
+                    for ic, (dgd, beta2a_example, beta2b_example, _) in enumerate(cases_peaks):
+                        # lg.debug(f"    case {ic}: dgd={dgd:.2e}, beta2a={beta2a_example:.2e}, beta2b={beta2b_example:.2e}")
+                        # lg.debug(f"L/LDA = {fiber.length * pulse.baud_rate**2 * np.abs(beta2a_example):.2e}, L/LDB = {fiber.length * pulse.baud_rate**2 * np.abs(beta2b_example):.2e}")
+                        I = np.real(m_th_time_integral_general(m, z, pulse, dgd, beta2a_example, beta2b_example))
+                        peaks[im, ic] = np.max(I)
+                        z_peaks[im, ic] = z[np.argmax(I)]
+                np.save(peaks_path, (peaks, z_peaks))
+                # lg.debug("  Done computing and saving peaks.")
+            else:
+                # lg.debug("  Loading peaks...")
+                peaks, z_peaks = np.load(peaks_path)
+                # lg.debug("  Done loading peaks.")
+
+            # 3. case of very low DGD (almost zero)
+            m_lo = 0
+            # gvda_alt = 0.0
+            # gvdb_alt = 0.0e-27
+            I_low = np.real(m_th_time_integral_general(m_lo, z,
+                pulse, 0.0, beta2a, beta2a))
+            I_low_2 = np.real(m_th_time_integral_general(m_lo, z,
+                pulse, 0.0, beta2b, beta2c))
+
+            # 4. Plotting
+            colors = ["grey", "blue"]
+            markers = ["x", "o"] # x with equal dispersion, dots with unequal
+            marker_sizes = [7, 3]
+            lw = 1.0
+            # plotting the peaks
+            for ip, (peak, z_peak) in enumerate(zip(peaks, z_peaks)):
+                for ic in range(len(cases_peaks)):
+                    if ip == 0:
+                        plt.plot(z_peak[ic]/LDbar,
+                                 peak[ic]/pulse.baud_rate,
+                                 marker=markers[ic],
+                                 markersize=marker_sizes[ic],
+                                 label='case'+str(ic),
+                                 color=colors[ic],
+                                 linewidth=lw)
+                    else:
+                        plt.plot(z_peak[ic]/LDbar,
+                                 peak[ic]/pulse.baud_rate,
+                                 markersize=marker_sizes[ic],
+                                 marker=markers[ic],
+                                 color=colors[ic],
+                                 linewidth=lw)
+            # plotting the low DGD case
+            plt.plot(z/LDbar,
+                     I_low / pulse.baud_rate,
+                     label='low DGD',
+                     color="limegreen",
+                     linewidth=lw,
+                     linestyle=ls[ipulse])
+            plt.plot(z/LDbar,
+                     I_low_2 / pulse.baud_rate,
+                     label='low DGD with GVD',
+                     color="red",
+                     linewidth=lw,
+                     linestyle=ls[ipulse])
+            # plt.title(f"m={m_lo}")
+            for xi, yi, wi in zip(z[::100]/LDbar, I_low[::100]/pulse.baud_rate, I_low_2[::100] / pulse.baud_rate):
+                lg.debug(f"{xi:.2e}, {yi:.2e}, {wi:.2e}")
+            # plotting the pulses
+            for ii, I in enumerate(I_list):
+                if ii == 0:
+                    plt.plot(z/LDbar,
+                             I / pulse.baud_rate,
+                             label=f'try',
+                             color="blue",
+                             linewidth=lw,
+                             linestyle=ls[ipulse], )
+                else:
+                    plt.plot(z/LDbar,
+                             I / pulse.baud_rate,
+                             color="blue",
+                             linewidth=lw,
+                             linestyle=ls[ipulse], )
+            # plt.legend()
+            # add (a) or (b) label
+            if ipulse == 0:
+                label = "(a)"
+            else:
+                label = "(b)"
+
+            plt.text(
+                0.98, 0.95, label,
+                transform=plt.gca().transAxes,
+                ha='right', va='top',
+                fontsize=12
+            )
+            plt.xlabel(xlabel)
+            # plt.xlabel(r'$z / L_D^{\mathrm{rms}}$')
+            ax = plt.gca()
+            y_formatter = ScalarFormatter()
+            y_formatter.set_scientific(True)
+            y_formatter.set_powerlimits((-1, -1))
+            y_formatter.set_useMathText(True)
+            plt.ylabel(r'$I(z) \cdot T $')
+            ax.yaxis.set_major_formatter(y_formatter)
+            ax.xaxis.set_major_formatter(formatter)
+            plt.ylim(top=0.4305 if ipulse == 0 else 0.735)
+            plt.tight_layout(pad=0.7)
+            plt.subplots_adjust(top=0.82, right=0.88)
+            # different pulses:
+            plt.savefig(
+                f"media/1-quovadis_{PULSE_NAMES[ipulse]}.pdf",
+                dpi=300,
+                bbox_inches="tight",
+                pad_inches=0.04,
+            )
+            lg.debug("Done plotting Fig.1 media/1-quovadis_"+PULSE_NAMES[ipulse]+".pdf")
+            plt.clf()
 
 
-# range of the evaluation is hardcoded in the function to L/LDA=2
+# range of the evaluation is controlled by MAX_LLD
 def get_I_low(fiber, m_lo, recompute=False):
     """Precompute I_low tables over dispersion ranges for Gaussian and Nyquist pulses."""
     nyquist_pulse = NyquistPulse(
@@ -416,25 +451,27 @@ def plot_dispersion_analysis(fiber,
                                vmin=0, vmax = vmax)
         contour_lines = plt.contour(lld_range, lld_range, np.clip(
             I_low_values, a_min=-10, a_max=0.6), levels=5, colors="w")
-        plt.clabel(contour_lines, inline=True, fontsize=8)
+        plt.clabel(contour_lines, inline=True, fontsize=10)
         
         if with_system_data:
             plt.scatter(X, Y, marker=".", s = 0.011, color='white', alpha=0.15)
            
         # plt.xlabel(r'$|\beta_{2A}|LT^{-2}$')
         # plt.ylabel(r'$|\beta_{2B}|LT^{-2}$')
-        plt.xlabel(r'$z/L_{DA}$')
-        plt.ylabel(r'$z/L_{DB}$')
+        plt.xlabel(r'$z/L_{Dap}$', fontsize=10)
+        plt.ylabel(r'$z/L_{Dbq}$', fontsize=10)
         # plt.colorbar(label=r'$I_{0;AB}(\bar{L}_{D0}) \cdot T$')
         ax = plt.gca()
         ax.set_aspect('equal')
         ax.xaxis.set_major_formatter(formatter)
         ax.yaxis.set_major_formatter(formatter)
+        ax.tick_params(axis='x', labelsize=10)
+        ax.tick_params(axis='y', labelsize=10)
         ax = plt.gca()
-        ax.set_xlim(0, 2)
-        ax.set_ylim(0, 2)
-        ax.set_xticks(np.linspace(0, 2, 5))
-        ax.set_yticks(np.linspace(0, 2, 5))
+        ax.set_xlim(0, MAX_LLD)
+        ax.set_ylim(0, MAX_LLD)
+        ax.set_xticks(np.arange(0, MAX_LLD + 0.001, 0.5))
+        ax.set_yticks(np.arange(0, MAX_LLD + 0.001, 0.5))
         # plt.title(f"m = {m_lo}")
         plt.tight_layout()
         plt.savefig("media/differential_dispersion_" +
@@ -460,23 +497,36 @@ if __name__ == "__main__":
     cf = Config()
     wdm = WDM()
 
-    plot_illustrative(fiber, wdm, cf, recompute=True)
-    exit()
-    for m_lo in [0, 1, 2, 3, 4, 5]:
-        plot_dispersion_analysis(fiber, 
-                                 recompute=False,
-                                 m_lo=m_lo, 
-                                 with_system_data=False)
-    exit()
-    
-    for ipulse in [0, 1]:
-        I_low_dataset = np.load(f"results/I_low_{PULSE_NAMES[ipulse]}.npz", allow_pickle=False)
-        interp_func = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
-        lg.debug(interp_func((0.0, 0.0)))
-        lg.debug("type of interp_func:", type(interp_func))
-        lg.trace(
-            f"Testing the interpolating function for pulse:")
-        test_points = [(0, 0), (0, 2), (2, 0), (1, 1), (2, 2)]
-        for point in test_points:
-            lg.trace(f"Point {point}: Interpolated = {interp_func(point)}")
+    with mpl.rc_context(rc={
+        **mpl.rcParamsDefault,
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.size": 8,
+        "axes.labelsize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        # "font.serif": ["Computer Modern Roman", "CMU Serif", "Latin Modern Roman"],
+        # "mathtext.fontset": "cm",
+        "axes.formatter.use_mathtext": True,
+    }):
+        # plot_illustrative(fiber, wdm, cf, recompute=True, ignore_matplotlibrc=False)
+        # exit()
+        
+        for m_lo in [0, 1, 2, 3, 4, 5]:
+            plot_dispersion_analysis(fiber, 
+                                     recompute=True,
+                                     m_lo=m_lo, 
+                                     with_system_data=False)
+        exit()
+        
+        for ipulse in [0, 1]:
+            I_low_dataset = np.load(f"results/I_low_{PULSE_NAMES[ipulse]}.npz", allow_pickle=False)
+            interp_func = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
+            lg.debug(interp_func((0.0, 0.0)))
+            lg.debug("type of interp_func:", type(interp_func))
+            lg.trace(
+                f"Testing the interpolating function for pulse:")
+            test_points = [(0, 0), (0, 2), (2, 0), (1, 1), (2, 2)]
+            for point in test_points:
+                lg.trace(f"Point {point}: Interpolated = {interp_func(point)}")
             
