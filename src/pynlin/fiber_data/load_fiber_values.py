@@ -106,3 +106,9 @@ def load_rms_gvd():
     """Return RMS GVD matrix for the JLT OFC fiber example."""
     avg_gvd = np.array([-24.0, -24.0, -20.0, -2]) * 1e-27
     return np.sqrt((avg_gvd[:, None]**2 + avg_gvd[None, :]**2)/2)
+
+
+if __name__ == "__main__":
+    oi_fit = load_oi()
+    print("OI fit coefficients:")
+    print(oi_fit)

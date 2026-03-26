@@ -73,7 +73,12 @@ def _log_mmf_td_timing(timings: dict) -> None:
     )
 
 
-def _compute_mmf_td_nlin_with_timing(cf_mmf, ipulse: int, recompute_collisions: bool):
+def _compute_mmf_td_nlin_with_timing(
+    cf_mmf,
+    ipulse: int,
+    recompute_collisions: bool,
+    exclude_self_channel: bool = False,
+):
     """Compute MMF TD NLIN and measure two end-to-end phases.
 
     Phase 1 (precompute_correction_factors):
@@ -106,6 +111,7 @@ def _compute_mmf_td_nlin_with_timing(cf_mmf, ipulse: int, recompute_collisions: 
         ccfs_mmf,
         use_kappa=True,
         use_x_mode=True,
+        exclude_self_channel=exclude_self_channel,
     )
     t_sum_interacting = time.perf_counter() - t0
 
@@ -116,6 +122,7 @@ def _compute_mmf_td_nlin_with_timing(cf_mmf, ipulse: int, recompute_collisions: 
         ccfs_mmf,
         use_kappa=True,
         use_x_mode=False,
+        exclude_self_channel=exclude_self_channel,
     )
     t_sum_noninteracting = time.perf_counter() - t0
 
@@ -136,7 +143,8 @@ def plot_case_study_noise(
         also_plot_noninteracting=True,
         name="xxx",
         report_timing=False,
-        recompute_collisions=False):
+    recompute_collisions=False,
+    exclude_self_channel=False):
     """Plot NLIN per channel for MMF (and optionally SMF) case studies.
 
     Timing controls:
@@ -177,6 +185,7 @@ def plot_case_study_noise(
         cf_mmf,
         ipulse=1,
         recompute_collisions=recompute_collisions,
+        exclude_self_channel=exclude_self_channel,
     )
     if report_timing:
         _log_mmf_td_timing(timings_mmf)
@@ -189,6 +198,7 @@ def plot_case_study_noise(
                           ccfs_smf,
                           use_kappa=True,
                           use_x_mode=False,
+                          exclude_self_channel=exclude_self_channel,
                           )
     lg.debug(
         f"A few NLIN coeffs MMF (should be of order ... W): {nlin_mmf[0, :5]} W, {watt2dBm(nlin_mmf[0, :5])} dBm")
@@ -266,7 +276,8 @@ def plot_case_study_noise_histogram(
         dBm_range=(-53, -40),
         coeff_range=None,
         report_timing=False,
-        recompute_collisions=False):
+    recompute_collisions=False,
+    exclude_self_channel=False):
     """Visualize NLIN distributions across channels with optional cross-mode variants.
 
     Timing controls are the same as ``plot_case_study_noise``.
@@ -309,6 +320,7 @@ def plot_case_study_noise_histogram(
         cf_mmf,
         ipulse=1,
         recompute_collisions=recompute_collisions,
+        exclude_self_channel=exclude_self_channel,
     )
     if report_timing:
         _log_mmf_td_timing(timings_mmf)
@@ -320,6 +332,7 @@ def plot_case_study_noise_histogram(
         cf_smf, ccfs_smf,
         use_kappa=True,
         use_x_mode=False,
+        exclude_self_channel=exclude_self_channel,
     )
 
     lg.debug(
@@ -425,7 +438,8 @@ if __name__ == "__main__":
         also_plot_noninteracting=True,  # FIXME check
         name="realistic",
         report_timing=True,
-        recompute_collisions=False)
+        recompute_collisions=False,
+        exclude_self_channel=True)
     exit()
     plot_case_study_noise_histogram(use_dBm_scale=True,
                                     also_plot_noninteracting=True,

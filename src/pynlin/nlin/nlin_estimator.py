@@ -502,14 +502,38 @@ def total_nlin(cf,
                collision_coeffs: np.ndarray,
                use_kappa: bool = False,
                use_x_mode: bool = False,
+               exclude_self_channel: bool = True,
                ) -> np.ndarray:
-    """Convert collision coefficients to NLIN power per channel."""
+    """Convert collision coefficients to NLIN power per channel.
+
+    Parameters
+    ----------
+    exclude_self_channel:
+        If ``True``, removes terms with ``nuB == nuA`` from the channel summation
+        before aggregation. This is useful to inspect an XCI-like contribution
+        without the self-channel (SCI-like) term.
+    """
 
     x_norm = cf.fiber_length * cf.baud_rate
     y_norm = 1/(cf.fiber_length * cf.baud_rate)**2
     lg.info(
         f"Normalization units: x_norm = {x_norm:.2e} s, y_norm = {y_norm:.2e} s^2/m^2")
     collision_coeffs_si = collision_coeffs / y_norm  # bring back to SI units
+
+    if exclude_self_channel:
+        lg.warning(
+            "\n"
+            "====================================================================\n"
+            " WARNING: LEGACY TD SELF-CHANNEL EXCLUSION ENABLED                \n"
+            " - total_nlin() is running with exclude_self_channel=True          \n"
+            " - Terms with nuB == nuA are removed from the TD summation         \n"
+            " - Output is NOT full TD NLIN; it is an XCI-like diagnostic metric \n"
+            "===================================================================="
+        )
+        n_modes, n_freqs, _, _ = collision_coeffs_si.shape
+        diag_idx = np.arange(n_freqs)
+        collision_coeffs_si = np.array(collision_coeffs_si, copy=True)
+        collision_coeffs_si[:, diag_idx, :, diag_idx] = 0.0
 
     P_in = dBm2watt(cf.launch_power)
     omega_0 = 2 * np.pi * cf.center_frequency

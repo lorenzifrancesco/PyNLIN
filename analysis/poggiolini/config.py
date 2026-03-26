@@ -43,6 +43,7 @@ def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
         "profile_path": "results/poggiolini_power_profiles.npy",
         "launch_csv_path": None,
         "pcfm_numeric_xci": False,
+        "td_exclude_self_channel": True,
         "include_lumped_losses": False,
         "power_profiles_mode": "recompute",
         "td_mode": "cached",
@@ -90,6 +91,7 @@ def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
             )
         for key in (
             "pcfm_numeric_xci",
+            "td_exclude_self_channel",
             "include_lumped_losses",
             "power_profiles_mode",
             "td_mode",

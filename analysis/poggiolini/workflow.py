@@ -83,6 +83,7 @@ def run_poggiolini_workflow(
     gn_mode: str | None = None,
     gn_direct_mode: str | None = None,
     pcfm_numeric_xci: bool | None = None,
+    td_exclude_self_channel: bool | None = None,
     include_lumped_losses: bool | None = None,
     plot_mode: str | None = None,
 ) -> None:
@@ -147,6 +148,11 @@ def run_poggiolini_workflow(
         bool(runtime_cfg["pcfm_numeric_xci"])
         if pcfm_numeric_xci is None
         else bool(pcfm_numeric_xci)
+    )
+    td_exclude_self_channel = (
+        bool(runtime_cfg["td_exclude_self_channel"])
+        if td_exclude_self_channel is None
+        else bool(td_exclude_self_channel)
     )
     include_lumped_losses = (
         bool(runtime_cfg["include_lumped_losses"])
@@ -274,11 +280,12 @@ def run_poggiolini_workflow(
         use_kappa=False,
         use_x_mode=True,
         launch_powers_w=launch_powers,
+        exclude_self_channel=td_exclude_self_channel,
         cache_path=_nlin_cache_path(
             profile_path,
             use_kappa=False,
             use_x_mode=True,
-            extra_tag=f"disp{dispersion_tag}",
+            extra_tag=f"disp{dispersion_tag}_{'xci' if td_exclude_self_channel else 'all'}",
         ),
         recompute=recompute_td,
     )
@@ -291,6 +298,7 @@ def run_poggiolini_workflow(
         launch_powers,
         use_kappa=False,
         use_x_mode=True,
+        exclude_self_channel=td_exclude_self_channel,
     )
     const_pref = _apply_poggiolini_manakov_scaling(const_pref)
 

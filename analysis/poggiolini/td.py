@@ -31,6 +31,7 @@ def _td_modulation_components(
     launch_powers_w: np.ndarray | None,
     use_kappa: bool = True,
     use_x_mode: bool = True,
+    exclude_self_channel: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (constant_prefactor, sum_a, sum_b) for TD modulation scaling."""
     length = float(system.fiber_length)
@@ -81,7 +82,11 @@ def _td_modulation_components(
             for mode_b in range(n_modes):
                 a_coeff, b_coeff = _td_prefactor_coeffs(mode_a, mode_b, n_modes)
                 weight = kappa2[mode_a, mode_b]
-                coeff_sum = float(np.sum(collision_coeffs_si[mode_a, nu_a, mode_b, :]))
+                coeffs_b = collision_coeffs_si[mode_a, nu_a, mode_b, :]
+                if exclude_self_channel:
+                    coeff_sum = float(np.sum(coeffs_b) - coeffs_b[nu_a])
+                else:
+                    coeff_sum = float(np.sum(coeffs_b))
                 sum_a[mode_a, nu_a] += weight * coeff_sum * a_coeff
                 sum_b[mode_a, nu_a] += weight * coeff_sum * b_coeff
     return constant_prefactor, sum_a, sum_b

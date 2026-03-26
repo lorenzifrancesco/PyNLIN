@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from loguru import logger as lg
+from scipy.constants import c
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -12,6 +13,7 @@ from pynlin.constellation_stats import gaussian_mu0
 from pynlin.nlin.nlin_estimator_uwb import collision_coeffs_system_uwb, total_nlin_uwb
 from pynlin.nlin.pcfm_gn import PcfmConfig
 from pynlin.system import System
+from pynlin.wdm import IrregularWDM, RegularWDM
 
 from analysis.poggiolini.io import _resolve_launch_powers, _write_flat_profile
 from analysis.poggiolini.models import _load_or_compute_pcfm
@@ -43,12 +45,41 @@ def _center_channel(system: System) -> tuple[int, str]:
     return center_idx, band_label
 
 
-def _fit_exponent(lengths_m: np.ndarray, values_w: np.ndarray) -> float:
-    mask = np.isfinite(lengths_m) & np.isfinite(values_w) & (lengths_m > 0.0) & (values_w > 0.0)
+def _fit_exponent(x_values: np.ndarray, values_w: np.ndarray) -> float:
+    mask = np.isfinite(x_values) & np.isfinite(values_w) & (x_values > 0.0) & (values_w > 0.0)
     if int(np.count_nonzero(mask)) < 2:
         return float("nan")
-    coeffs = np.polyfit(np.log(lengths_m[mask]), np.log(values_w[mask]), 1)
+    coeffs = np.polyfit(np.log(x_values[mask]), np.log(values_w[mask]), 1)
     return float(coeffs[0])
+
+
+def _rebuild_wdm_with_spacing(system: System, spacing_hz: float) -> None:
+    spacing_hz = float(spacing_hz)
+    wdm = system.wdm
+    if isinstance(wdm, RegularWDM):
+        system.wdm = RegularWDM(
+            spacing=spacing_hz,
+            num_channels=wdm.num_channels,
+            center_frequency=wdm.central_frequency,
+        )
+        return
+    if isinstance(wdm, IrregularWDM):
+        band_specs = {
+            name: {
+                "n_channels": spec.n_channels,
+                "launch_power_dbm": spec.launch_power_dbm,
+                "start_nm": spec.start_nm,
+                "modulation": spec.modulation,
+            }
+            for name, spec in wdm.band_specs.items()
+        }
+        system.wdm = IrregularWDM.from_bands_mapping(
+            band_specs,
+            wdm_data={"spacing": spacing_hz},
+            root_data=None,
+        )
+        return
+    raise TypeError(f"Unsupported WDM type for spacing sweep: {type(wdm)!r}")
 
 
 def _scaling_series(rows: list[dict]) -> dict[str, np.ndarray]:
@@ -58,25 +89,64 @@ def _scaling_series(rows: list[dict]) -> dict[str, np.ndarray]:
         "PCFM total": np.array([row["pcfm_channel_w"] for row in rows], dtype=float),
         "PCFM SCI": np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float),
         "PCFM XCI": np.array([row["pcfm_xci_channel_w"] for row in rows], dtype=float),
+        "Analytic limit": np.array([row["analytic_limit_channel_w"] for row in rows], dtype=float),
     }
+
+
+def _center_channel_analytic_limit(system: System, launch_channel_w: float, channel_idx: int) -> float:
+    """Simple limiting-case estimate:
+
+    noise = P^3 T^2 gamma^2 * (L / (2*pi*T*beta2*df))
+    """
+    freqs = system.wdm.frequency_grid()
+    f_cut = float(freqs[channel_idx])
+
+    spacing_hz = getattr(system.wdm, "spacing", None)
+    if spacing_hz is None:
+        diffs = np.diff(np.asarray(freqs, dtype=float))
+        if diffs.size == 0:
+            raise ValueError("Cannot infer channel spacing for analytic limit.")
+        spacing_hz = float(np.median(np.abs(diffs)))
+    spacing_hz = max(float(abs(spacing_hz)), 1e-30)
+
+    fiber = system.fiber
+    wavelength_m = c / f_cut
+    if hasattr(fiber, "effective_area_at"):
+        aeff = float(fiber.effective_area_at(wavelength_m))
+    else:
+        aeff = float(getattr(fiber, "effective_area"))
+
+    if hasattr(fiber, "beta2_at"):
+        beta2 = float(fiber.beta2_at(wavelength_m))
+    else:
+        beta2 = float(getattr(fiber, "beta2"))
+
+    n2 = 2.6e-20
+    gamma = n2 * (2.0 * np.pi * f_cut) / (aeff * c)
+    pulse_time = 1.0 / float(system.pulse.baud_rate)
+    fiber_length = float(system.fiber_length)
+
+    denom = 2.0 * np.pi * pulse_time * max(abs(beta2), 1e-30) * spacing_hz
+    analytic = (launch_channel_w ** 3) * (pulse_time ** 2) * (gamma ** 2) * (fiber_length / denom)
+    return float(analytic)
 
 
 def _save_figure(fig: plt.Figure, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(out_path, dpi=260)
-    if out_path.suffix.lower() == ".png":
-        fig.savefig(out_path.with_suffix(".pdf"))
+    # if out_path.suffix.lower() == ".png":
+        # fig.savefig(out_path.with_suffix(".pdf"))
 
 
 def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int, channel_freq_thz: float) -> None:
-    lengths_km = np.array([row["length_km"] for row in rows], dtype=float)
+    spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
     series = _scaling_series(rows)
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
-    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
+    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
-            lengths_km,
+            spacing_ghz,
             values,
             marker="o",
             markersize=3,
@@ -84,23 +154,24 @@ def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int, channel_fr
             markeredgewidth=0.9,
             linewidth=1.0,
             color=color,
-            label=f"{label} (p={_fit_exponent(lengths_km * 1e3, values):.3f})",
+            label=f"{label} (p={_fit_exponent(spacing_ghz * 1e9, values):.3f})",
         )
-        
-    ### put a linear scaling function compatible with the initial lenght data point of PCFM XCI
-    initial_length_km = lengths_km[0]
-    initial_value_w = series["PCFM XCI"][0]
-    linear_values = initial_value_w * (lengths_km / initial_length_km)
+
+    ref_spacing = spacing_ghz[0] * 1e9
+    ref_value = series["PCFM XCI"][0] if series["PCFM XCI"].size else 1.0
+    scaling_spacing = np.array([ref_spacing, spacing_ghz[-1] * 1e9], dtype=float)
+    scaling_values = ref_value * (scaling_spacing / ref_spacing) ** (-1.0)
     ax.plot(
-        lengths_km,
-        linear_values,
+        scaling_spacing / 1e9,
+        scaling_values,
         linestyle="--",
         color="gray",
-        label="Linear scaling (p=1.000)",
+        label="inverse linear scaling reference",
     )
+
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("Fiber length [km]")
+    ax.set_xlabel("Channel spacing [GHz]")
     ax.set_ylabel("Center-channel NLI power [W]")
     ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
     ax.grid(True, which="both", alpha=0.25)
@@ -109,11 +180,41 @@ def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int, channel_fr
     plt.close(fig)
 
 
+def _plot_normalized_scaling(
+    rows: list[dict], out_path: Path, channel_idx: int, channel_freq_thz: float
+) -> None:
+    spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
+    series = _scaling_series(rows)
+    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
+    for (label, values), color in zip(series.items(), colors):
+        ref = float(values[0]) if values.size else 1.0
+        normalized = values / ref if ref > 0.0 else values
+        ax.plot(
+            spacing_ghz,
+            normalized,
+            marker="o",
+            markersize=3,
+            markerfacecolor="none",
+            markeredgewidth=0.9,
+            linewidth=1.0,
+            color=color,
+            label=label,
+        )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Channel spacing [GHz]")
+    ax.set_ylabel("Normalized center-channel NLI power")
+    ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
+    ax.grid(True, which="both", alpha=0.25)
+    ax.legend(fontsize=7)
+    _save_figure(fig, out_path)
+    plt.close(fig)
 
 
-def run_length_sweep(
+def run_spacing_sweep(
     cfg_path: Path,
-    lengths_km: list[float],
+    spacing_ghz_values: list[float],
     out_dir: Path,
     launch_dbm: float | None,
     pcfm_numeric_xci: bool,
@@ -126,17 +227,16 @@ def run_length_sweep(
 
     base_system = System.from_toml(cfg_path)
     center_idx, band_label = _center_channel(base_system)
-    freqs = base_system.wdm.frequency_grid()
-    channel_freq_thz = float(freqs[center_idx] * 1e-12)
-    lg.info(
-        "Selected center channel idx={} in band={} at {:.6f} THz.".format(
-            center_idx, band_label, channel_freq_thz
-        )
-    )
+    lg.info("Selected center channel idx={} in band={}.".format(center_idx, band_label))
 
-    for length_km in lengths_km:
+    for spacing_ghz in spacing_ghz_values:
         system = System.from_toml(cfg_path)
-        system.fiber.length = float(length_km) * 1e3
+        spacing_hz = float(spacing_ghz) * 1e9
+        _rebuild_wdm_with_spacing(system, spacing_hz)
+
+        freqs = system.wdm.frequency_grid()
+        channel_freq_thz = float(freqs[center_idx] * 1e-12)
+
         if launch_dbm is not None:
             launch_w = 10 ** ((float(launch_dbm) - 30.0) / 10.0)
             launch_vec = np.full(system.n_channels, launch_w, dtype=float)
@@ -148,8 +248,8 @@ def run_length_sweep(
                 use_profile=False,
             )
 
-        profile_tag = f"L{_safe_tag(length_km)}km"
-        profile_path = out_dir / f"flat_profile_{profile_tag}.npy"
+        spacing_tag = f"S{_safe_tag(spacing_ghz)}GHz"
+        profile_path = out_dir / f"flat_profile_{spacing_tag}.npy"
         _write_flat_profile(profile_path, system, launch_powers_w=launch_vec)
 
         ccfs = collision_coeffs_system_uwb(
@@ -158,7 +258,7 @@ def run_length_sweep(
             recompute=recompute_td,
             profile_path=profile_path,
         )
-        td_tag = f"{profile_tag}_{'xci' if exclude_self_channel else 'all'}"
+        td_tag = f"{spacing_tag}_{'xci' if exclude_self_channel else 'all'}"
         td_cache = _nlin_cache_path(
             profile_path=profile_path,
             use_kappa=False,
@@ -197,7 +297,7 @@ def run_length_sweep(
             use_numeric_sci=True,
             use_numeric_xci=bool(pcfm_numeric_xci),
         )
-        pcfm_path = out_dir / f"pcfm_{profile_tag}.npy"
+        pcfm_path = out_dir / f"pcfm_{spacing_tag}.npy"
         pcfm_total, pcfm_sci, pcfm_xci = _load_or_compute_pcfm(
             system=system,
             profile_path=profile_path,
@@ -213,7 +313,7 @@ def run_length_sweep(
         pcfm_xci = np.asarray(pcfm_xci, dtype=float).reshape(-1)
 
         row = {
-            "length_km": float(length_km),
+            "channel_spacing_ghz": float(spacing_ghz),
             "channel_idx": int(center_idx),
             "band_label": band_label,
             "channel_freq_thz": channel_freq_thz,
@@ -223,36 +323,41 @@ def run_length_sweep(
             "pcfm_channel_w": float(pcfm_total[center_idx]),
             "pcfm_sci_channel_w": float(pcfm_sci[center_idx]),
             "pcfm_xci_channel_w": float(pcfm_xci[center_idx]),
+            "analytic_limit_channel_w": _center_channel_analytic_limit(
+                system, float(launch_vec[center_idx]), center_idx
+            ),
         }
         rows.append(row)
         lg.info(
-            "L={:.1f} km -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
-            "PCFM_SCI={:.3e} W, PCFM_XCI={:.3e} W".format(
-                row["length_km"],
+            "S={:.2f} GHz -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
+            "PCFM_SCI={:.3e} W, PCFM_XCI={:.3e} W, Analytic={:.3e} W".format(
+                row["channel_spacing_ghz"],
                 row["td_channel_w"],
                 row["td_gaussian_channel_w"],
                 row["pcfm_channel_w"],
                 row["pcfm_sci_channel_w"],
                 row["pcfm_xci_channel_w"],
+                row["analytic_limit_channel_w"],
             )
         )
 
-    rows.sort(key=lambda item: item["length_km"])
-    lengths_m = np.array([row["length_km"] * 1e3 for row in rows], dtype=float)
+    rows.sort(key=lambda item: item["channel_spacing_ghz"])
+    spacing_hz = np.array([row["channel_spacing_ghz"] * 1e9 for row in rows], dtype=float)
     for key in (
         "td_channel_w",
         "td_gaussian_channel_w",
         "pcfm_channel_w",
         "pcfm_sci_channel_w",
         "pcfm_xci_channel_w",
+        "analytic_limit_channel_w",
     ):
-        exponent = _fit_exponent(lengths_m, np.array([row[key] for row in rows], dtype=float))
+        exponent = _fit_exponent(spacing_hz, np.array([row[key] for row in rows], dtype=float))
         for row in rows:
             row[f"{key}_scaling_exp"] = exponent
 
-    csv_path = out_dir / "center_channel_length_scaling.csv"
+    csv_path = out_dir / "center_channel_spacing_scaling.csv"
     header = [
-        "length_km",
+        "channel_spacing_ghz",
         "channel_idx",
         "band_label",
         "channel_freq_thz",
@@ -262,35 +367,38 @@ def run_length_sweep(
         "pcfm_channel_w",
         "pcfm_sci_channel_w",
         "pcfm_xci_channel_w",
+        "analytic_limit_channel_w",
         "td_channel_w_scaling_exp",
         "td_gaussian_channel_w_scaling_exp",
         "pcfm_channel_w_scaling_exp",
         "pcfm_sci_channel_w_scaling_exp",
         "pcfm_xci_channel_w_scaling_exp",
+        "analytic_limit_channel_w_scaling_exp",
     ]
     data = np.column_stack([[row[name] for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
-    plot_path = Path("media") / "PCFM" / "center_channel_length_scaling.png"
+    plot_path = Path("media") / "PCFM" / "center_channel_spacing_scaling.png"
     _plot_scaling(rows, plot_path, center_idx, channel_freq_thz)
 
     summary_lines = [
         f"Center channel idx={center_idx}, band={band_label}, freq={channel_freq_thz:.6f} THz",
         f"TD mode: {'exclude self-channel (nuB==nuA)' if exclude_self_channel else 'include all channels'}",
-        f"TD 64-QAM exponent: {_fit_exponent(lengths_m, np.array([row['td_channel_w'] for row in rows], dtype=float)):.6f}",
-        f"TD Gaussian exponent: {_fit_exponent(lengths_m, np.array([row['td_gaussian_channel_w'] for row in rows], dtype=float)):.6f}",
-        f"PCFM total exponent: {_fit_exponent(lengths_m, np.array([row['pcfm_channel_w'] for row in rows], dtype=float)):.6f}",
-        f"PCFM SCI exponent: {_fit_exponent(lengths_m, np.array([row['pcfm_sci_channel_w'] for row in rows], dtype=float)):.6f}",
-        f"PCFM XCI exponent: {_fit_exponent(lengths_m, np.array([row['pcfm_xci_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"TD 64-QAM exponent: {_fit_exponent(spacing_hz, np.array([row['td_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"TD Gaussian exponent: {_fit_exponent(spacing_hz, np.array([row['td_gaussian_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"PCFM total exponent: {_fit_exponent(spacing_hz, np.array([row['pcfm_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"PCFM SCI exponent: {_fit_exponent(spacing_hz, np.array([row['pcfm_sci_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"PCFM XCI exponent: {_fit_exponent(spacing_hz, np.array([row['pcfm_xci_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"Analytic limit exponent: {_fit_exponent(spacing_hz, np.array([row['analytic_limit_channel_w'] for row in rows], dtype=float)):.6f}",
     ]
-    summary_path = out_dir / "center_channel_length_scaling_summary.txt"
+    summary_path = out_dir / "center_channel_spacing_scaling_summary.txt"
     summary_path.write_text("\n".join(summary_lines) + "\n")
     return csv_path, summary_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sweep fiber length and inspect center-channel TD/PCFM scaling."
+        description="Sweep channel spacing and inspect center-channel TD/PCFM scaling."
     )
     parser.add_argument(
         "--config",
@@ -299,10 +407,10 @@ def main() -> None:
         help="Path to system TOML.",
     )
     parser.add_argument(
-        "--lengths-km",
+        "--spacing-ghz",
         type=str,
-        default="10,25,50,100,200,400",
-        help="Comma-separated fiber lengths in km.",
+        default="50, 100, 500",
+        help="Comma-separated channel spacing values in GHz.",
     )
     parser.add_argument(
         "--launch-dbm",
@@ -328,20 +436,19 @@ def main() -> None:
     parser.add_argument(
         "--exclude-self-channel",
         action="store_true",
-        default=True,
         help="Exclude nuB==nuA contribution from TD aggregation (SCI-like term).",
     )
     parser.add_argument(
         "--out-dir",
         type=str,
-        default="results/debug/poggiolini_length_scaling",
+        default="results/debug/poggiolini_channel_spacing_scaling",
         help="Output directory for generated profiles, caches, and reports.",
     )
     args = parser.parse_args()
 
-    csv_path, summary_path = run_length_sweep(
+    csv_path, summary_path = run_spacing_sweep(
         cfg_path=Path(args.config),
-        lengths_km=_parse_float_list(args.lengths_km),
+        spacing_ghz_values=_parse_float_list(args.spacing_ghz),
         out_dir=Path(args.out_dir),
         launch_dbm=args.launch_dbm,
         pcfm_numeric_xci=bool(args.pcfm_numeric_xci),
@@ -351,9 +458,6 @@ def main() -> None:
     )
     lg.success(f"Saved scaling CSV to {csv_path}")
     lg.success(f"Saved scaling summary to {summary_path}")
-    # call the plotting functions
-    # _plot_scaling(rows, plot_path, center_idx, channel_freq_thz)
-    # _plot_normalized_scaling(rows, normalized_plot_path, center_idx, channel_freq
 
 
 if __name__ == "__main__":

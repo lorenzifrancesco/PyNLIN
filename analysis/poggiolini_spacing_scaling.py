@@ -179,6 +179,7 @@ def run_spacing_sweep(
     pcfm_numeric_xci: bool,
     recompute_td: bool,
     recompute_pcfm: bool,
+    exclude_self_channel: bool = False,
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
@@ -221,11 +222,12 @@ def run_spacing_sweep(
             recompute=recompute_td,
             profile_path=profile_path,
         )
+        td_tag = f"{spacing_tag}_{'xci' if exclude_self_channel else 'all'}"
         td_cache = _nlin_cache_path(
             profile_path=profile_path,
             use_kappa=False,
             use_x_mode=True,
-            extra_tag=spacing_tag,
+            extra_tag=td_tag,
         )
         nlin_td = total_nlin_uwb(
             system,
@@ -233,6 +235,7 @@ def run_spacing_sweep(
             use_kappa=False,
             use_x_mode=True,
             launch_powers_w=launch_vec,
+            exclude_self_channel=exclude_self_channel,
             cache_path=td_cache,
             recompute=recompute_td,
         )
@@ -244,6 +247,7 @@ def run_spacing_sweep(
             launch_vec,
             use_kappa=False,
             use_x_mode=True,
+            exclude_self_channel=exclude_self_channel,
         )
         const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_POGGIOLINI)
         td_gaussian_vec = np.asarray(
@@ -341,6 +345,7 @@ def run_spacing_sweep(
 
     summary_lines = [
         f"Center channel idx={center_idx}, band={band_label}",
+        f"TD mode: {'exclude self-channel (nuB==nuA)' if exclude_self_channel else 'include all channels'}",
         "Channel frequency range: {:.6f}-{:.6f} THz".format(
             float(np.min([row["channel_freq_thz"] for row in rows])),
             float(np.max([row["channel_freq_thz"] for row in rows])),
@@ -402,6 +407,11 @@ def main() -> None:
         help="Recompute PCFM caches.",
     )
     parser.add_argument(
+        "--exclude-self-channel",
+        action="store_true",
+        help="Exclude nuB==nuA contribution from TD aggregation (SCI-like term).",
+    )
+    parser.add_argument(
         "--out-dir",
         type=str,
         default="results/debug/poggiolini_spacing_scaling",
@@ -417,6 +427,7 @@ def main() -> None:
         pcfm_numeric_xci=bool(args.pcfm_numeric_xci),
         recompute_td=bool(args.recompute_td),
         recompute_pcfm=bool(args.recompute_pcfm),
+        exclude_self_channel=bool(args.exclude_self_channel),
     )
     lg.success(f"Saved scaling CSV to {csv_path}")
     lg.success(f"Saved scaling summary to {summary_path}")

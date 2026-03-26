@@ -670,6 +670,7 @@ def compute_pcfm_nlin(
     freqs = system.wdm.frequency_grid()
     n_channels = freqs.size
     B_ch = float(system.pulse.baud_rate)
+    # lg.warning("Bch = {:.3e} Hz from system pulse baud_rate; ensure this matches profile generation.".format(B_ch))
     L = float(system.fiber_length)
 
     signal_power_ch_z, z = load_signal_profiles(profile_path, system)
@@ -730,7 +731,7 @@ def compute_pcfm_nlin(
             k_sci = compute_sci_numeric(
                 coeffs[i], L, beta2_sci, B_ch, cfg.n_f, cfg.n_z, cfg.phase_coeff
             )
-        # FIXME: temporary experiment: omit p(L) scaling in PCFM NLI PSD.
+        # omit p(L) scaling in PCFM NLI PSD.
         g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
@@ -742,6 +743,8 @@ def compute_pcfm_nlin(
             if delta_abs <= B_ch / 2.0:
                 continue
             gamma_xci = 2.0 * np.pi * freqs[i] / c * (2.0 * N2_SIO2 / (aeff[i] + aeff[j]))
+            # # FIXME
+            # gamma_xci = 1
             beta2_xci = _beta2_eff(freqs[i], freqs[j], beta_coeffs) if beta_coeffs else beta2[j]
             if cfg.use_numeric_xci:
                 k_xci = compute_xci_numeric(
@@ -749,10 +752,13 @@ def compute_pcfm_nlin(
                     cfg.n_f, cfg.n_z, cfg.phase_coeff
                 )
             else:
-                log_term = np.log((delta_abs + B_ch / 2.0) / (delta_abs - B_ch / 2.0))
+                log_term = np.abs(np.log((delta_abs + B_ch / 2.0) / (delta_abs - B_ch / 2.0)))
                 beta2_eff = max(abs(beta2_xci), MIN_BETA2)
                 k_xci = (L / (2.0 * np.pi * beta2_eff)) * log_term * poly_sums[j]
-            # FIXME: temporary experiment: omit p(L) scaling in PCFM NLI PSD.
+                # # FIXME
+                # k_xci = log_term
+                # lg.warning("in K_XCI, log: {:.1e} and baud: {:.1e}, Delta f: {:.1e}, Beta2eff: {:.1e}. ".format(log_term, B_ch, delta_f, beta2_eff))
+            # omit p(L) scaling in PCFM NLI PSD.
             g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
             g_xci_sum += g_xci
 
@@ -769,7 +775,7 @@ def compute_pcfm_nlin(
             )
 
     nlin_psd = g_sci_psd + g_xci_psd
-    nlin_power = _to_per_polarization_power(nlin_psd * B_ch)
+    nlin_power = _to_per_polarization_power(nlin_psd * B_ch) # FIXME check the scale / per channel per polarization
     if return_components:
         return (
             nlin_power,

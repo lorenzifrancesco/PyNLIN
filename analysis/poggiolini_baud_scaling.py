@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from loguru import logger as lg
+from scipy.constants import c
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -20,7 +21,6 @@ from analysis.poggiolini.workflow import MANAKOV_SCALE_POGGIOLINI
 from analysis.uwb_nlin import _nlin_cache_path
 
 plt.rcParams["text.usetex"] = False
-
 
 def _parse_float_list(values: str) -> list[float]:
     return [float(x.strip()) for x in values.split(",") if x.strip()]
@@ -65,7 +65,46 @@ def _scaling_series(rows: list[dict]) -> dict[str, np.ndarray]:
         "PCFM total": np.array([row["pcfm_channel_w"] for row in rows], dtype=float),
         "PCFM SCI": np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float),
         "PCFM XCI": np.array([row["pcfm_xci_channel_w"] for row in rows], dtype=float),
+        "Analytic limit": np.array([row["analytic_limit_channel_w"] for row in rows], dtype=float),
     }
+
+
+def _center_channel_analytic_limit(system: System, launch_channel_w: float, channel_idx: int) -> float:
+    """Simple limiting-case estimate:
+
+    noise = P^3 T^2 gamma^2 * (L / (2*pi*T*beta2*df))
+    """
+    freqs = system.wdm.frequency_grid()
+    f_cut = float(freqs[channel_idx])
+
+    spacing_hz = getattr(system.wdm, "spacing", None)
+    if spacing_hz is None:
+        diffs = np.diff(np.asarray(freqs, dtype=float))
+        if diffs.size == 0:
+            raise ValueError("Cannot infer channel spacing for analytic limit.")
+        spacing_hz = float(np.median(np.abs(diffs)))
+    spacing_hz = max(float(abs(spacing_hz)), 1e-30)
+
+    fiber = system.fiber
+    wavelength_m = c / f_cut
+    if hasattr(fiber, "effective_area_at"):
+        aeff = float(fiber.effective_area_at(wavelength_m))
+    else:
+        aeff = float(getattr(fiber, "effective_area"))
+
+    if hasattr(fiber, "beta2_at"):
+        beta2 = float(fiber.beta2_at(wavelength_m))
+    else:
+        beta2 = float(getattr(fiber, "beta2"))
+
+    n2 = 2.6e-20
+    gamma = n2 * (2.0 * np.pi * f_cut) / (aeff * c)
+    pulse_time = 1.0 / float(system.pulse.baud_rate)
+    fiber_length = float(system.fiber_length)
+
+    denom = 2.0 * np.pi * pulse_time * max(abs(beta2), 1e-30) * spacing_hz
+    analytic = (launch_channel_w ** 3) * (pulse_time ** 2) * (gamma ** 2) * (fiber_length / denom)
+    return float(analytic)
 
 
 def _save_figure(fig: plt.Figure, out_path: Path) -> None:
@@ -80,7 +119,7 @@ def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int, channel_fr
     baud_gbaud = np.array([row["baud_rate_gbaud"] for row in rows], dtype=float)
     series = _scaling_series(rows)
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
-    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
+    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
             baud_gbaud,
@@ -93,6 +132,20 @@ def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int, channel_fr
             color=color,
             label=f"{label} (p={_fit_exponent(baud_gbaud * 1e9, values):.3f})",
         )
+    # plot also the scaling function for reference: linear relation in baud rate, normalized to the first point of PCFM XCI
+    ref_baud = baud_gbaud[0] * 1e9
+    ref_value = series["PCFM XCI"][0] if series["PCFM XCI"].size else 1.0
+    scaling_baud = np.array([ref_baud
+                            , baud_gbaud[-1] * 1e9], dtype=float)
+    scaling_values = ref_value * (scaling_baud / ref_baud)**(-1.0)  # inverse linear scaling as a reference
+    ax.plot(
+        scaling_baud / 1e9,
+        scaling_values,
+        linestyle="--",
+        color="gray",
+        label="linear scaling reference",
+    )
+        
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("Baud rate [GBaud]")
@@ -110,7 +163,7 @@ def _plot_normalized_scaling(
     baud_gbaud = np.array([row["baud_rate_gbaud"] for row in rows], dtype=float)
     series = _scaling_series(rows)
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
-    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
+    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
     for (label, values), color in zip(series.items(), colors):
         ref = float(values[0]) if values.size else 1.0
         normalized = values / ref if ref > 0.0 else values
@@ -144,6 +197,7 @@ def run_baud_sweep(
     pcfm_numeric_xci: bool,
     recompute_td: bool,
     recompute_pcfm: bool,
+    exclude_self_channel: bool = False,
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
@@ -183,11 +237,12 @@ def run_baud_sweep(
             recompute=recompute_td,
             profile_path=profile_path,
         )
+        td_tag = f"{baud_tag}_{'xci' if exclude_self_channel else 'all'}"
         td_cache = _nlin_cache_path(
             profile_path=profile_path,
             use_kappa=False,
             use_x_mode=True,
-            extra_tag=baud_tag,
+            extra_tag=td_tag,
         )
         nlin_td = total_nlin_uwb(
             system,
@@ -195,6 +250,7 @@ def run_baud_sweep(
             use_kappa=False,
             use_x_mode=True,
             launch_powers_w=launch_vec,
+            exclude_self_channel=exclude_self_channel,
             cache_path=td_cache,
             recompute=recompute_td,
         )
@@ -206,6 +262,7 @@ def run_baud_sweep(
             launch_vec,
             use_kappa=False,
             use_x_mode=True,
+            exclude_self_channel=exclude_self_channel,
         )
         const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_POGGIOLINI)
         td_gaussian_vec = np.asarray(
@@ -245,19 +302,24 @@ def run_baud_sweep(
             "pcfm_channel_w": float(pcfm_total[center_idx]),
             "pcfm_sci_channel_w": float(pcfm_sci[center_idx]),
             "pcfm_xci_channel_w": float(pcfm_xci[center_idx]),
+            "analytic_limit_channel_w": _center_channel_analytic_limit(
+                system, float(launch_vec[center_idx]), center_idx
+            ),
         }
         rows.append(row)
         lg.info(
             "R={:.1f} GBd -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
-            "PCFM_SCI={:.3e} W, PCFM_XCI={:.3e} W".format(
+            "PCFM_SCI={:.3e} W, PCFM_XCI={:.3e} W, Analytic={:.3e} W".format(
                 row["baud_rate_gbaud"],
                 row["td_channel_w"],
                 row["td_gaussian_channel_w"],
                 row["pcfm_channel_w"],
                 row["pcfm_sci_channel_w"],
                 row["pcfm_xci_channel_w"],
+                row["analytic_limit_channel_w"],
             )
         )
+        
 
     rows.sort(key=lambda item: item["baud_rate_gbaud"])
     baud_rates_hz = np.array([row["baud_rate_gbaud"] * 1e9 for row in rows], dtype=float)
@@ -267,6 +329,7 @@ def run_baud_sweep(
         "pcfm_channel_w",
         "pcfm_sci_channel_w",
         "pcfm_xci_channel_w",
+        "analytic_limit_channel_w",
     ):
         exponent = _fit_exponent(baud_rates_hz, np.array([row[key] for row in rows], dtype=float))
         for row in rows:
@@ -284,27 +347,29 @@ def run_baud_sweep(
         "pcfm_channel_w",
         "pcfm_sci_channel_w",
         "pcfm_xci_channel_w",
+        "analytic_limit_channel_w",
         "td_channel_w_scaling_exp",
         "td_gaussian_channel_w_scaling_exp",
         "pcfm_channel_w_scaling_exp",
         "pcfm_sci_channel_w_scaling_exp",
         "pcfm_xci_channel_w_scaling_exp",
+        "analytic_limit_channel_w_scaling_exp",
     ]
     data = np.column_stack([[row[name] for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
     plot_path = Path("media") / "PCFM" / "center_channel_baud_scaling.png"
     _plot_scaling(rows, plot_path, center_idx, channel_freq_thz)
-    normalized_plot_path = Path("media") / "PCFM" / "center_channel_baud_scaling_normalized.png"
-    _plot_normalized_scaling(rows, normalized_plot_path, center_idx, channel_freq_thz)
 
     summary_lines = [
         f"Center channel idx={center_idx}, band={band_label}, freq={channel_freq_thz:.6f} THz",
+        f"TD mode: {'exclude self-channel (nuB==nuA)' if exclude_self_channel else 'include all channels'}",
         f"TD 64-QAM exponent: {_fit_exponent(baud_rates_hz, np.array([row['td_channel_w'] for row in rows], dtype=float)):.6f}",
         f"TD Gaussian exponent: {_fit_exponent(baud_rates_hz, np.array([row['td_gaussian_channel_w'] for row in rows], dtype=float)):.6f}",
         f"PCFM total exponent: {_fit_exponent(baud_rates_hz, np.array([row['pcfm_channel_w'] for row in rows], dtype=float)):.6f}",
         f"PCFM SCI exponent: {_fit_exponent(baud_rates_hz, np.array([row['pcfm_sci_channel_w'] for row in rows], dtype=float)):.6f}",
         f"PCFM XCI exponent: {_fit_exponent(baud_rates_hz, np.array([row['pcfm_xci_channel_w'] for row in rows], dtype=float)):.6f}",
+        f"Analytic limit exponent: {_fit_exponent(baud_rates_hz, np.array([row['analytic_limit_channel_w'] for row in rows], dtype=float)):.6f}",
     ]
     summary_path = out_dir / "center_channel_baud_scaling_summary.txt"
     summary_path.write_text("\n".join(summary_lines) + "\n")
@@ -324,7 +389,7 @@ def main() -> None:
     parser.add_argument(
         "--baud-rates-gbaud",
         type=str,
-        default="12.5,25,50,75,100,110",
+        default="10, 50, 100",
         help="Comma-separated baud rates in GBaud.",
     )
     parser.add_argument(
@@ -349,6 +414,12 @@ def main() -> None:
         help="Recompute PCFM caches.",
     )
     parser.add_argument(
+        "--exclude-self-channel",
+        action="store_true",
+        default=True,
+        help="Exclude nuB==nuA contribution from TD aggregation (SCI-like term).",
+    )
+    parser.add_argument(
         "--out-dir",
         type=str,
         default="results/debug/poggiolini_baud_scaling",
@@ -364,6 +435,7 @@ def main() -> None:
         pcfm_numeric_xci=bool(args.pcfm_numeric_xci),
         recompute_td=bool(args.recompute_td),
         recompute_pcfm=bool(args.recompute_pcfm),
+        exclude_self_channel=bool(args.exclude_self_channel),
     )
     lg.success(f"Saved scaling CSV to {csv_path}")
     lg.success(f"Saved scaling summary to {summary_path}")

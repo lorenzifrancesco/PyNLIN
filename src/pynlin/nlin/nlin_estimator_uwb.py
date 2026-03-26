@@ -337,6 +337,7 @@ def total_nlin_uwb(system: System,
                    use_kappa: bool = False,
                    use_x_mode: bool = False,
                    launch_powers_w: Optional[np.ndarray] = None,
+                   exclude_self_channel: bool = True,
                    cache_path: Path | str | None = None,
                    recompute: bool = False) -> np.ndarray:
     """Convert collision coefficients to NLIN power per channel with optional caching."""
@@ -365,6 +366,16 @@ def total_nlin_uwb(system: System,
     y_norm = 1/(L * br)**2
     lg.info(f"Normalization units: x_norm = {x_norm:.2e} s, y_norm = {y_norm:.2e} s^2/m^2")
     collision_coeffs_si = collision_coeffs / y_norm
+    if exclude_self_channel:
+        lg.warning(
+            "\n"
+            "====================================================================\n"
+            " WARNING: UWB TD SELF-CHANNEL EXCLUSION ENABLED                   \n"
+            " - total_nlin_uwb() is running with exclude_self_channel=True      \n"
+            " - Terms with nuB == nuA are removed from the TD summation         \n"
+            " - Output is NOT full TD NLIN; it is an XCI-like diagnostic metric \n"
+            "===================================================================="
+        )
 
     n_modes, n_freqs, _, _ = collision_coeffs_si.shape
     if launch_powers_w is None:
@@ -408,6 +419,8 @@ def total_nlin_uwb(system: System,
         for nuA in range(n_freqs):
             for mB in range(n_modes):
                 for nuB in range(n_freqs):
+                    if exclude_self_channel and nuB == nuA:
+                        continue
                     prefactor = nlin_prefactor(system, mA, mB)
                     total_nlin[mA, nuA] += collision_coeffs_si[mA, nuA, mB, nuB] * kappa2[mA, mB] * prefactor
     total_nlin *= constant_prefactor
