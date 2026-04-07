@@ -12,6 +12,7 @@ from scipy.interpolate import interp1d
 import pynlin.io_utils as cfg
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
+from pynlin.nlin.cache_names import s1_ref_nlin_curve_path
 from pynlin.nlin.nlin_estimator import LLW_MAX, LLW_MIN, fit_nlin
 from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients
 from pynlin.nlin.nlin_estimation.lo_correction import (
@@ -19,6 +20,7 @@ from pynlin.nlin.nlin_estimation.lo_correction import (
     build_lookup_integral_table_with_raman,
     build_lookup_integral_table_with_raman_custom,
 )
+from pynlin.nlin.reference_curves import load_s1_ref_dataset, save_s1_ref_nlin_curve
 from pynlin.nlin.nlin_estimation.raman_integrals import load_fB, raman_integral
 from pynlin.collisions import get_collision_location, get_m_values
 from pynlin.fiber import *
@@ -62,6 +64,16 @@ def _load_cf_with_legacy_support(
     return cf
 
 
+def _load_s1_ref_curve(pulse_shape: str, mode: str, gvda: float, gvdb: float) -> np.ndarray:
+    dataset = load_s1_ref_dataset(
+        pulse_shape=pulse_shape,
+        mode=mode,
+        gvda=gvda,
+        gvdb=gvdb,
+    )
+    return np.asarray(dataset["raw_nlin_curve"], dtype=float)
+
+
 def compute_numeric_nlin(gvda: float,
                          gvdb: float,
                          ipulse: int,
@@ -100,6 +112,7 @@ def compute_numeric_nlin(gvda: float,
 
     dgds_numeric = np.logspace(
         np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
+    llw_numeric = dgds_numeric * cf.fiber_length * cf.baud_rate
 
     partial_nlin = np.zeros(n_samples_numeric)
     partial_nlin_min = np.zeros(n_samples_numeric) if not perfect_only else None
@@ -113,7 +126,8 @@ def compute_numeric_nlin(gvda: float,
             baud_rate=cf.baud_rate, num_symbols=1e3, samples_per_symbol=2**5, rolloff=0.0)
 
     # does the file already exist?
-    filename = f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_perfect_{gvda}_{gvdb}.npy"
+    pulse_shape = "gaussian" if ipulse == 0 else "nyquist"
+    filename = s1_ref_nlin_curve_path(pulse_shape=pulse_shape, mode="perfect", gvda=gvda, gvdb=gvdb)
 
     if not perfect_only:
         _, _, _, fB_min_func, fB_max_func = load_fB(cf)
@@ -142,21 +156,81 @@ def compute_numeric_nlin(gvda: float,
                 partial_nlin_max[idx] = np.sum(np.real(X0mm_max)**2)
 
         if ipulse == 0:
-            np.save(
-                f"results/partial_nlin_gaussian_perfect_{gvda}_{gvdb}.npy", partial_nlin)
+            save_s1_ref_nlin_curve(
+                s1_ref_nlin_curve_path(pulse_shape="gaussian", mode="perfect", gvda=gvda, gvdb=gvdb),
+                llw_grid=llw_numeric,
+                raw_nlin_curve=partial_nlin,
+                fiber_length=cf.fiber_length,
+                baud_rate=cf.baud_rate,
+                pulse_shape="gaussian",
+                mode="perfect",
+                gvda=gvda,
+                gvdb=gvdb,
+                n_samples_numeric=n_samples_numeric,
+            )
             if not perfect_only:
-                np.save(
-                    f"results/partial_nlin_gaussian_min_{gvda}_{gvdb}.npy", partial_nlin_min)
-                np.save(
-                    f"results/partial_nlin_gaussian_max_{gvda}_{gvdb}.npy", partial_nlin_max)
+                save_s1_ref_nlin_curve(
+                    s1_ref_nlin_curve_path(pulse_shape="gaussian", mode="min", gvda=gvda, gvdb=gvdb),
+                    llw_grid=llw_numeric,
+                    raw_nlin_curve=partial_nlin_min,
+                    fiber_length=cf.fiber_length,
+                    baud_rate=cf.baud_rate,
+                    pulse_shape="gaussian",
+                    mode="min",
+                    gvda=gvda,
+                    gvdb=gvdb,
+                    n_samples_numeric=n_samples_numeric,
+                )
+                save_s1_ref_nlin_curve(
+                    s1_ref_nlin_curve_path(pulse_shape="gaussian", mode="max", gvda=gvda, gvdb=gvdb),
+                    llw_grid=llw_numeric,
+                    raw_nlin_curve=partial_nlin_max,
+                    fiber_length=cf.fiber_length,
+                    baud_rate=cf.baud_rate,
+                    pulse_shape="gaussian",
+                    mode="max",
+                    gvda=gvda,
+                    gvdb=gvdb,
+                    n_samples_numeric=n_samples_numeric,
+                )
         else:
-            np.save(
-                f"results/partial_nlin_nyquist_perfect_{gvda}_{gvdb}.npy", partial_nlin)
+            save_s1_ref_nlin_curve(
+                s1_ref_nlin_curve_path(pulse_shape="nyquist", mode="perfect", gvda=gvda, gvdb=gvdb),
+                llw_grid=llw_numeric,
+                raw_nlin_curve=partial_nlin,
+                fiber_length=cf.fiber_length,
+                baud_rate=cf.baud_rate,
+                pulse_shape="nyquist",
+                mode="perfect",
+                gvda=gvda,
+                gvdb=gvdb,
+                n_samples_numeric=n_samples_numeric,
+            )
             if not perfect_only:
-                np.save(
-                    f"results/partial_nlin_nyquist_min_{gvda}_{gvdb}.npy", partial_nlin_min)
-                np.save(
-                    f"results/partial_nlin_nyquist_max_{gvda}_{gvdb}.npy", partial_nlin_max)
+                save_s1_ref_nlin_curve(
+                    s1_ref_nlin_curve_path(pulse_shape="nyquist", mode="min", gvda=gvda, gvdb=gvdb),
+                    llw_grid=llw_numeric,
+                    raw_nlin_curve=partial_nlin_min,
+                    fiber_length=cf.fiber_length,
+                    baud_rate=cf.baud_rate,
+                    pulse_shape="nyquist",
+                    mode="min",
+                    gvda=gvda,
+                    gvdb=gvdb,
+                    n_samples_numeric=n_samples_numeric,
+                )
+                save_s1_ref_nlin_curve(
+                    s1_ref_nlin_curve_path(pulse_shape="nyquist", mode="max", gvda=gvda, gvdb=gvdb),
+                    llw_grid=llw_numeric,
+                    raw_nlin_curve=partial_nlin_max,
+                    fiber_length=cf.fiber_length,
+                    baud_rate=cf.baud_rate,
+                    pulse_shape="nyquist",
+                    mode="max",
+                    gvda=gvda,
+                    gvdb=gvdb,
+                    n_samples_numeric=n_samples_numeric,
+                )
         if perfect_only:
             lg.info(f"Saved numeric perfect results to {filename}")
         else:
@@ -251,8 +325,7 @@ def simple_plot_threshold(gvda: float = 0.0,
         recompute=recompute,
         perfect_only=(fB_mode == "perfect"),
     )
-    nlin_numeric = np.load(
-        f"results/partial_nlin_{pulse_shape}_{fB_mode}_{gvda}_{gvdb}.npy")
+    nlin_numeric = _load_s1_ref_curve(pulse_shape, fB_mode, gvda, gvdb)
     lg.info(nlin_numeric)
     lg.info(nlin_numeric * y_norm)
     
@@ -391,14 +464,10 @@ def plot_threshold(
         # ----- call the computation functions -----
         # -- numeric (compute_numeric computes all the fB_modes)
         compute_numeric_nlin(gvda=gvda, gvdb=gvdb, ipulse=ipulse, recompute=recompute)
-        nlin_numeric_bare = np.load(
-            f"results/partial_nlin_{pulse_shape}_perfect_0.0_0.0.npy")
-        nlin_numeric_gvd = np.load(
-            f"results/partial_nlin_{pulse_shape}_perfect_{gvda}_{gvdb}.npy")
-        nlin_numeric_gvd_raman = np.load(
-            f"results/partial_nlin_{pulse_shape}_{fB_mode}_{gvda}_{gvdb}.npy")
-        nlin_numeric_raman = np.load(
-            f"results/partial_nlin_{pulse_shape}_{fB_mode}_0.0_0.0.npy")
+        nlin_numeric_bare = _load_s1_ref_curve(pulse_shape, "perfect", 0.0, 0.0)
+        nlin_numeric_gvd = _load_s1_ref_curve(pulse_shape, "perfect", gvda, gvdb)
+        nlin_numeric_gvd_raman = _load_s1_ref_curve(pulse_shape, fB_mode, gvda, gvdb)
+        nlin_numeric_raman = _load_s1_ref_curve(pulse_shape, fB_mode, 0.0, 0.0)
         # lg.info(nlin_numeric)
         # lg.info(nlin_numeric * y_norm)
         
@@ -665,8 +734,9 @@ def plot_threshold_fb_extremes(
         compute_numeric_nlin(gvda=0.0, gvdb=0.0, ipulse=ipulse,   recompute=recompute)
 
         # load numeric series
-        nlin_numeric_max = np.load(f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_max_{gvda}_{gvdb}.npy")
-        nlin_numeric_min = np.load(f"results/partial_nlin_{'gaussian' if ipulse == 0 else 'nyquist'}_min_{gvda}_{gvdb}.npy")
+        pulse_shape = "gaussian" if ipulse == 0 else "nyquist"
+        nlin_numeric_max = _load_s1_ref_curve(pulse_shape, "max", gvda, gvdb)
+        nlin_numeric_min = _load_s1_ref_curve(pulse_shape, "min", gvda, gvdb)
         if ipulse == 0: # not really super nice, but that's the way we do it
             raman_corr_min = raman_corr_min_g
             raman_corr_max = raman_corr_max_g

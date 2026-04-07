@@ -11,6 +11,7 @@ from pynlin.nlin.nlin_estimator_uwb import (
     collision_coeffs_system_uwb,
     total_nlin_uwb,
 )
+from pynlin.nlin.cache_names import s3_chan_nlin_td_path
 from pynlin.raman.power_profiles import simulate_power_profiles
 from pynlin.raman.plot_optimization import plot_profiles
 from pynlin.system import System
@@ -353,13 +354,12 @@ def _nlin_cache_path(
 ) -> Path:
     """Return a cache path for total NLIN arrays."""
     tag = Path(profile_path).stem if profile_path is not None else "default"
-    suffix = ""
-    if extra_tag:
-        safe_tag = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in str(extra_tag))
-        safe_tag = safe_tag.strip("_")
-        if safe_tag:
-            suffix = f"_{safe_tag}"
-    return Path("results") / f"total_nlin_{tag}{suffix}_k{int(use_kappa)}_x{int(use_x_mode)}.npy"
+    return s3_chan_nlin_td_path(
+        tag=tag,
+        use_kappa=use_kappa,
+        use_x_mode=use_x_mode,
+        extra_tag=extra_tag,
+    )
 
 
 def plot_case_study_noise(
@@ -811,9 +811,9 @@ def plot_case_study_noise_histogram(
 
 
 if __name__ == "__main__":
-    if os.getenv("POGGIOLINI_WORKFLOW") == "1":
-        from analysis.poggiolini_nlin import run_poggiolini_workflow
-        run_poggiolini_workflow()
+    if os.getenv("PCFM_WORKFLOW") == "1":
+        from analysis.pcfm_nlin import run_pcfm_workflow
+        run_pcfm_workflow()
         raise SystemExit(0)
     # First, compute and save Raman/ISRS power profiles using provided pumps
     cfg_path = Path("./input/uwb_struct.toml")

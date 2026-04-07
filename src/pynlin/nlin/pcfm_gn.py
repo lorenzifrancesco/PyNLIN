@@ -2,7 +2,7 @@
 PCFM/GN NLIN estimation for SMF systems (SCI+XCI, no MCI).
 
 This module is intended to be used by analysis/uwb_nlin.py for the
-Poggiolini-style case studies, leveraging existing System/Fiber/WDM
+PCFM-style case studies, leveraging existing System/Fiber/WDM
 infrastructure and Raman power profile files.
 """
 
@@ -637,7 +637,7 @@ def compute_pcfm_nlin(
 ) -> np.ndarray:
     """Compute per-channel PCFM NLIN power (SCI + XCI, MCI disabled).
 
-    This is the Poggiolini-style semi-analytical workflow using polynomial fits
+    This is the PCFM-style semi-analytical workflow using polynomial fits
     of Raman power profiles and optional numerical/closed-form XCI kernels.
 
     Parameters
@@ -698,7 +698,7 @@ def compute_pcfm_nlin(
             np.any(launch_powers_w <= 0) or np.any(launch_powers_w > MAX_POWER_W)):
         raise ValueError("Launch powers are unreasonable for PCFM.")
 
-    g_ch = launch_powers_w / B_ch
+    g_ch = launch_powers_w / B_ch  * 2 ## FIXME just a rescaling due to power per polarization -> power per channel (x2 multiplication)
 
     g_sci_psd = np.zeros((1, n_channels), dtype=float)
     g_xci_psd = np.zeros((1, n_channels), dtype=float)
@@ -743,8 +743,6 @@ def compute_pcfm_nlin(
             if delta_abs <= B_ch / 2.0:
                 continue
             gamma_xci = 2.0 * np.pi * freqs[i] / c * (2.0 * N2_SIO2 / (aeff[i] + aeff[j]))
-            # # FIXME
-            # gamma_xci = 1
             beta2_xci = _beta2_eff(freqs[i], freqs[j], beta_coeffs) if beta_coeffs else beta2[j]
             if cfg.use_numeric_xci:
                 k_xci = compute_xci_numeric(
@@ -755,11 +753,10 @@ def compute_pcfm_nlin(
                 log_term = np.abs(np.log((delta_abs + B_ch / 2.0) / (delta_abs - B_ch / 2.0)))
                 beta2_eff = max(abs(beta2_xci), MIN_BETA2)
                 k_xci = (L / (2.0 * np.pi * beta2_eff)) * log_term * poly_sums[j]
-                # # FIXME
-                # k_xci = log_term
                 # lg.warning("in K_XCI, log: {:.1e} and baud: {:.1e}, Delta f: {:.1e}, Beta2eff: {:.1e}. ".format(log_term, B_ch, delta_f, beta2_eff))
             # omit p(L) scaling in PCFM NLI PSD.
-            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
+            # 
+            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci / 2.0 ## FIXME just a rescaling due to power per channel -> power per polarization (/2 division of the final result)
             g_xci_sum += g_xci
 
         g_sci_psd[0, i] = g_sci

@@ -1,6 +1,8 @@
 """Collision-integral utilities and plotting helpers for NLIN workflows."""
 
 import contextlib
+import tempfile
+import zipfile
 
 from loguru import logger as lg
 
@@ -26,6 +28,9 @@ from pynlin.fiber_data.beta_utils import (
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_oi
 from pynlin.fiber import MMFiber
 from pynlin.nlin import m_th_time_integral_general
+from pynlin.nlin.cache_names import (
+    s2a_lo_timeint_path,
+)
 from pynlin.pulses import GaussianPulse, NyquistPulse
 from pynlin.wdm import WDM
 
@@ -294,7 +299,7 @@ def get_I_low(fiber, m_lo, recompute=False):
             return I_low[-1]
 
         # Compute and/or load I_low
-        save_path = f"results/I_low_{PULSE_NAMES[ipulse]}_m{m_lo}.npz"
+        save_path = s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo)
         if recompute or not os.path.exists(save_path):
             I_low_values = np.array([
                 [compute_I_low(pulse,  z, beta2a, beta2b)
@@ -329,12 +334,15 @@ def ensure_i_low_dataset(m_lo: int,
     if ipulse not in (0, 1):
         raise ValueError(f"Unsupported ipulse={ipulse}. Expected 0 (gaussian) or 1 (nyquist).")
 
-    save_path = f"results/I_low_{PULSE_NAMES[ipulse]}_m{m_lo}.npz"
+    save_path = s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo)
     if os.path.exists(save_path) and not recompute:
-        dataset = np.load(save_path, allow_pickle=False)
-        lld_range = dataset["lld_range"]
-        if float(lld_range[-1]) >= max_lld:
-            return save_path
+        try:
+            with np.load(save_path, allow_pickle=False) as dataset:
+                lld_range = dataset["lld_range"]
+                if float(lld_range[-1]) >= max_lld:
+                    return save_path
+        except (OSError, ValueError, zipfile.BadZipFile, EOFError) as exc:
+            lg.warning(f"Discarding unreadable I_low cache {save_path}: {exc}")
 
     lg.info(
         f"Computing I_low table for m_lo={m_lo}, pulse={PULSE_NAMES[ipulse]}, "
@@ -372,12 +380,24 @@ def ensure_i_low_dataset(m_lo: int,
     ], dtype=float) / baud_rate
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    np.savez(
-        save_path,
-        I_low_values=I_low_values,
-        lld_range=np.asarray(lld_range),
-        z=np.asarray(z),
-    )
+    with tempfile.NamedTemporaryFile(
+        dir=os.path.dirname(save_path),
+        prefix=os.path.basename(save_path) + ".tmp.",
+        suffix=".npz",
+        delete=False,
+    ) as tmp:
+        tmp_path = tmp.name
+    try:
+        np.savez(
+            tmp_path,
+            I_low_values=I_low_values,
+            lld_range=np.asarray(lld_range),
+            z=np.asarray(z),
+        )
+        os.replace(tmp_path, save_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
     return save_path
 
 
@@ -520,7 +540,7 @@ if __name__ == "__main__":
         exit()
         
         for ipulse in [0, 1]:
-            I_low_dataset = np.load(f"results/I_low_{PULSE_NAMES[ipulse]}.npz", allow_pickle=False)
+            I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=0), allow_pickle=False)
             interp_func = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
             lg.debug(interp_func((0.0, 0.0)))
             lg.debug("type of interp_func:", type(interp_func))

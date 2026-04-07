@@ -5,6 +5,7 @@ per-channel launch power overrides, while keeping the original code unchanged.
 
 import itertools as it
 import hashlib
+import multiprocessing as mp
 import os
 from pathlib import Path
 from typing import Tuple, Optional
@@ -20,6 +21,13 @@ from pynlin.system import System
 from pynlin.fiber import MMFiber
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
+from pynlin.nlin.cache_names import (
+    s2_beta1_grid_path,
+    s2_beta2_grid_path,
+    s2_fB_grid_path,
+    s2a_lo_timeint_path,
+    s3_pair_nlin_kernel_path,
+)
 from pynlin.nlin.collision import build_I_low_interpolator, ensure_i_low_dataset
 from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus, LLW_MIN, LLW_MAX
 from pynlin.nlin.nlin_estimation.lo_correction_uwb import build_lookup_integral_table_with_raman
@@ -43,7 +51,7 @@ def _flat_profiles_enabled(system) -> bool:
     raw = getattr(system, "raw_config", None)
     if not isinstance(raw, dict):
         return False
-    pog = raw.get("poggiolini")
+    pog = raw.get("pcfm")
     if isinstance(pog, dict):
         run = pog.get("run")
         if isinstance(run, dict):
@@ -227,8 +235,7 @@ def gvd_correction(system: System,
             max_lld=lld_max,
             recompute=False,
         )
-        I_low_dataset = np.load(
-            f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
+        I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
         interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
 
         def I_specific(x):
@@ -482,9 +489,6 @@ def collision_coeffs_system_uwb(system: System,
     """Compute or load channel-pair collision coefficients (SMF or MMF)."""
     fiber_type = "smf" if system.n_modes == 1 else "mmf"
     profile_tag = Path(profile_path).stem if profile_path is not None else None
-    def _hz_tag(value_hz: float) -> str:
-        return f"{value_hz/1e9:.3f}GHz".replace(".", "p")
-
     br_hz = _get_baud_rate(system)
     spacing_hz = getattr(system.wdm, "spacing", None)
     freqs = system.wdm.frequency_grid()
@@ -497,28 +501,44 @@ def collision_coeffs_system_uwb(system: System,
     ).view(np.uint8)
     disp_tag = hashlib.sha1(disp_signature).hexdigest()[:12]
 
-    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
-    if profile_tag:
-        filename = f"{filename}_{profile_tag}"
-    filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
-    if spacing_hz is not None:
-        filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
-    filename = f"{filename}_disp{disp_tag}"
-    filename = f"{filename}.npy"
+    filename = s3_pair_nlin_kernel_path(
+        ipulse=ipulse,
+        fiber_type=fiber_type,
+        br_hz=br_hz,
+        n_ch=n_ch,
+        spacing_hz=spacing_hz,
+        profile_tag=profile_tag,
+        disp_tag=disp_tag,
+    )
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
 
     lg.info("Computing collision coefficients from scratch")
-    _get_n_samples_numeric_n(system)
+    n_samples_numeric_n = _get_n_samples_numeric_n(system)
     max_lld = _max_lld_from_beta2(system, beta2)
-    raman_gvd_correction_max, raman_gvd_correction_min = build_lookup_integral_table_with_raman(
-        system, ipulse=ipulse, profile_path=profile_path, max_lld=max_lld)
+    # Prebuild shared lookup tables once in the parent process to avoid
+    # concurrent worker writes to the same cached npz/npy files.
+    build_lookup_integral_table_with_raman(
+        system,
+        ipulse=ipulse,
+        recompute=recompute,
+        profile_path=profile_path,
+        max_lld=max_lld,
+    )
+    ideal_fit_coefficients(
+        0.0,
+        0.0,
+        ipulse=ipulse,
+        fiber_length=_get_fiber_length(system),
+        baud_rate=_get_baud_rate(system),
+        n_samples_numeric_n=n_samples_numeric_n,
+    )
     fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(system, profile_path=profile_path)
 
-    beta1_path = "/tmp/beta1_grid.npy"
-    beta2_path = "/tmp/beta2_grid.npy"
-    fB_path = "/tmp/fB.npy"
+    beta1_path = str(s2_beta1_grid_path())
+    beta2_path = str(s2_beta2_grid_path())
+    fB_path = str(s2_fB_grid_path())
     np.save(beta1_path, beta1)
     np.save(beta2_path, beta2)
     np.save(fB_path, fB)
@@ -530,26 +550,6 @@ def collision_coeffs_system_uwb(system: System,
         f"UWB NLIN workers: {n_workers} (cpu_count={os.cpu_count() or 1}, reserve_cpus={reserve_cpus})"
     )
 
-    def _init_worker(beta1_path, beta2_path, fB_path, n_modes, n_freqs,
-                     system, ipulse, raman_min, raman_max, n_workers, raman_extremes):
-        import os
-        import numpy as np
-        os.environ.setdefault("OMP_NUM_THREADS", "1")
-        os.environ.setdefault("MKL_NUM_THREADS", "1")
-        os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-        _G["beta1"] = np.load(beta1_path, mmap_mode="r")
-        _G["beta2"] = np.load(beta2_path, mmap_mode="r")
-        _G["fB"] = np.load(fB_path, mmap_mode="r")
-        _G["n_modes"] = n_modes
-        _G["n_freqs"] = n_freqs
-        _G["n_pairs"] = (n_modes * n_freqs) ** 2
-        _G["cf"] = system
-        _G["ipulse"] = ipulse
-        _G["raman_min"] = raman_min
-        _G["raman_max"] = raman_max
-        _G["n_workers"] = n_workers
-        _G["raman_extremes"] = raman_extremes
-
     # FIXME taking only the first 100 frequs for benchmarking
     # freqs = freqs[:100]
     raman_extremes = load_raman_integral_extremes(system, profile_path=profile_path)
@@ -558,14 +558,28 @@ def collision_coeffs_system_uwb(system: System,
         from tqdm import tqdm
     except Exception:
         tqdm = None
-    with ProcessPoolExecutor(
-        max_workers=n_workers,
-        initializer=_init_worker,
-        initargs=(beta1_path, beta2_path, fB_path,
-                  system.n_modes, len(freqs),
-                  system, ipulse, raman_gvd_correction_min, raman_gvd_correction_max,
-                  n_workers, raman_extremes),
-    ) as ex:
+    executor_kwargs = {
+        "max_workers": n_workers,
+        "initializer": _init_collision_worker,
+        "initargs": (
+            beta1_path,
+            beta2_path,
+            fB_path,
+            system.n_modes,
+            len(freqs),
+            system,
+            ipulse,
+            profile_path,
+            max_lld,
+            False,
+            n_workers,
+            raman_extremes,
+        ),
+    }
+    if os.name == "posix":
+        executor_kwargs["mp_context"] = mp.get_context("fork")
+
+    with ProcessPoolExecutor(**executor_kwargs) as ex:
         futures = [ex.submit(_work_A, a) for a in A_tasks]
         progress = tqdm(total=len(futures), desc="TD channels", unit="ch") if tqdm else None
         for fut in as_completed(futures):
@@ -590,6 +604,45 @@ _G = {
     "n_workers": None,
     "raman_extremes": None,
 }
+
+
+def _init_collision_worker(
+    beta1_path,
+    beta2_path,
+    fB_path,
+    n_modes,
+    n_freqs,
+    system,
+    ipulse,
+    profile_path,
+    max_lld,
+    recompute_lookup_tables,
+    n_workers,
+    raman_extremes,
+):
+    """Populate worker globals for ProcessPool collision-coefficient jobs."""
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    _G["beta1"] = np.load(beta1_path, mmap_mode="r")
+    _G["beta2"] = np.load(beta2_path, mmap_mode="r")
+    _G["fB"] = np.load(fB_path, mmap_mode="r")
+    _G["n_modes"] = n_modes
+    _G["n_freqs"] = n_freqs
+    _G["n_pairs"] = (n_modes * n_freqs) ** 2
+    _G["cf"] = system
+    _G["ipulse"] = ipulse
+    raman_max, raman_min = build_lookup_integral_table_with_raman(
+        system,
+        ipulse=ipulse,
+        recompute=bool(recompute_lookup_tables),
+        profile_path=profile_path,
+        max_lld=max_lld,
+    )
+    _G["raman_min"] = raman_min
+    _G["raman_max"] = raman_max
+    _G["n_workers"] = n_workers
+    _G["raman_extremes"] = raman_extremes
 
 
 def _work_A(task_A):

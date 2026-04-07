@@ -40,6 +40,10 @@ import pynlin.wdm
 from pynlin.fiber import MMFiber
 from pynlin.fiber_data.load_fiber_values import load_group_delay
 from pynlin.log_init import init_logging
+from pynlin.nlin.cache_names import (
+    s2b_lo_extrema_path,
+    s3_pair_nlin_kernel_path,
+)
 from pynlin.nlin import nlin_estimator as td_estimator
 from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients
 from pynlin.nlin.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
@@ -107,7 +111,7 @@ TIMING_METADATA = {
     },
     "collision_coeffs_cache_load_s": {
         "label": "Cache load",
-        "functions": "np.load(collision_coefficients_*.npy)",
+        "functions": "np.load(s3_pair_nlin_kernel_*.npy)",
         "description": (
             "Time spent loading precomputed collision coefficients when recomputation is skipped."
         ),
@@ -254,7 +258,12 @@ def _lookup_drop_for_iteration(mode: str, idx_zero_based: int) -> bool:
 def _drop_lookup_cache_files(ipulse: int) -> int:
     pulse_name = "gaussian" if int(ipulse) == 0 else "nyquist"
     results_dir = Path("results")
-    pattern = f"raman_correction_grid_{pulse_name}_*.npy"
+    pattern = s2b_lo_extrema_path(
+        pulse_shape=pulse_name,
+        m_lo_truncation=BENCHMARK_M_LO_TRUNCATION,
+        fiber_length=0.0,
+        lld_max=0.0,
+    ).name.replace("mtrunc3_L0.0km_lldmax0.00.npz", "*.npz")
     removed = 0
     for path in results_dir.glob(pattern):
         path.unlink(missing_ok=True)
@@ -264,19 +273,13 @@ def _drop_lookup_cache_files(ipulse: int) -> int:
 
 def _collision_coeffs_filename(cf: System, ipulse: int) -> Path:
     fiber_type = "smf" if cf.n_modes == 1 else "mmf"
-
-    def _hz_tag(value_hz: float) -> str:
-        return f"{value_hz/1e9:.3f}GHz".replace(".", "p")
-
-    br_hz = float(cf.baud_rate)
-    spacing_hz = getattr(cf, "channel_spacing", None)
-    n_ch = int(cf.n_channels)
-
-    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
-    filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
-    if spacing_hz is not None:
-        filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
-    return Path(f"{filename}.npy")
+    return s3_pair_nlin_kernel_path(
+        ipulse=ipulse,
+        fiber_type=fiber_type,
+        br_hz=float(cf.baud_rate),
+        n_ch=int(cf.n_channels),
+        spacing_hz=getattr(cf, "channel_spacing", None),
+    )
 
 
 def _empty_detailed_timing() -> dict[str, float]:
@@ -647,7 +650,7 @@ def _parse_args() -> argparse.Namespace:
         choices=["keep", "drop_first", "drop_each"],
         help=(
             "How to handle Raman/GVD lookup-table cache files "
-            "(results/raman_correction_grid_<pulse>_*.npy): "
+            "(results/s2b_lo_extrema_<pulse>_*.npz): "
             "keep (never delete), drop_first (delete before first iteration), "
             "drop_each (delete before every iteration). "
             "When deletion is requested, effective collision recompute is forced "

@@ -277,7 +277,7 @@ def run_dar_workflow(cfg_path: Path | str = Path("input/dar_struct.toml"),
     )
     nlin_td_flat = np.asarray(nlin_td, dtype=float).reshape(-1)
     _save_nlin_csv(
-        Path("results") / f"total_nlin_{Path(profile_path).stem}_dar_td.csv",
+        Path("results") / f"s3_chan_nlin_td_{Path(profile_path).stem}_dar.csv",
         freqs,
         nlin_td_flat,
         signal_power,

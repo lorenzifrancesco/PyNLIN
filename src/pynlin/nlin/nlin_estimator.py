@@ -14,6 +14,13 @@ import pynlin
 from pynlin.constellation_stats import qam_mu0
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
+from pynlin.nlin.cache_names import (
+    s2_beta1_grid_path,
+    s2_beta2_grid_path,
+    s2_fB_grid_path,
+    s2a_lo_timeint_path,
+    s3_pair_nlin_kernel_path,
+)
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator
 from pynlin.nlin.nlin_estimation.raman_integrals import load_fB
 from pynlin.fiber import MMFiber
@@ -198,8 +205,7 @@ def gvd_correction(cf,
     ldb = 1/(cf.baud_rate**2 * gvdb) if gvdb != 0 else 1e30
     lo_value = 0.0
     for m_lo in range(m_lo_truncation+1):
-        I_low_dataset = np.load(
-            f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
+        I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
         interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse) # FIXME oh god, we are doing this every time!
         # this is also in normalized units
         def I_specific(x): return interp(x/lda, x/ldb)
@@ -370,18 +376,17 @@ def collision_coeffs_system(cf,
     else:
         fiber_type = "mmf"
 
-    def _hz_tag(value_hz: float) -> str:
-        return f"{value_hz/1e9:.3f}GHz".replace(".", "p")
-
     br_hz = float(cf.baud_rate)
     spacing_hz = getattr(cf, "channel_spacing", None)
     n_ch = int(cf.n_channels)
 
-    filename = f"results/collision_coefficients_ipulse{ipulse}_{fiber_type}"
-    filename = f"{filename}_br{_hz_tag(br_hz)}_n{n_ch}"
-    if spacing_hz is not None:
-        filename = f"{filename}_sp{_hz_tag(float(spacing_hz))}"
-    filename = f"{filename}.npy"
+    filename = s3_pair_nlin_kernel_path(
+        ipulse=ipulse,
+        fiber_type=fiber_type,
+        br_hz=br_hz,
+        n_ch=n_ch,
+        spacing_hz=spacing_hz,
+    )
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed collision coefficients from {filename} of shape {np.load(filename).shape}")
         return np.load(filename)
@@ -446,9 +451,9 @@ def collision_coeffs_system(cf,
 
         from concurrent.futures import ProcessPoolExecutor, as_completed
 
-        beta1_path = "/tmp/beta1_grid.npy"
-        beta2_path = "/tmp/beta2_grid.npy"
-        fB_path = "/tmp/fB.npy"
+        beta1_path = str(s2_beta1_grid_path())
+        beta2_path = str(s2_beta2_grid_path())
+        fB_path = str(s2_fB_grid_path())
         np.save(beta1_path, beta1)
         np.save(beta2_path, beta2)
         np.save(fB_path,    fB)  # shape (K, n_modes, n_freqs)

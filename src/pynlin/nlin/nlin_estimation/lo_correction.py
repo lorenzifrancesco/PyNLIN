@@ -12,6 +12,10 @@ from scipy.interpolate import RegularGridInterpolator
 from pynlin.constellation_stats import qam_mu0
 from pynlin.log_init import init_logging
 from pynlin.nlin.collision import MAX_LLD, build_I_low_interpolator, ensure_i_low_dataset
+from pynlin.nlin.cache_names import (
+    s2a_lo_timeint_path,
+    s2b_lo_extrema_path,
+)
 
 init_logging()
 from mpl_toolkits.axes_grid1.inset_locator import (
@@ -51,12 +55,17 @@ def build_lookup_integral_table_with_raman_custom(cf,
     lg.debug(
         f"Useful range of L/LD from LO time integral data: {lld[0]:.2e} to {lld[-1]:.2e}")
     raman_correction_grid = np.zeros((n_samples, n_samples))
-    filename = f"results/raman_correction_grid_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}_customfB{index}.npy"
-
+    filename = s2b_lo_extrema_path(
+        ipulse=ipulse,
+        m_lo_truncation=m_lo_truncation,
+        fiber_length=fiber_length,
+        lld_max=lld[-1],
+        custom_fB_index=index,
+    )
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed Raman correction grid from {filename}")
-        data = np.load(filename, allow_pickle=True).item()
-        raman_correction_grid = data['raman_correction_grid']
+        with np.load(filename, allow_pickle=False) as data:
+            raman_correction_grid = data["s2b_lo_corr_custom"]
     else:
         lg.info(f"Computing Raman correction grid and saving to {filename}")
         for m_lo in range(m_lo_truncation+1):
@@ -70,8 +79,7 @@ def build_lookup_integral_table_with_raman_custom(cf,
             )
             add = np.zeros((n_samples, n_samples))
             lg.info(f"Calculating m_lo={m_lo}")
-            I_low_dataset = np.load(
-                f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
+            I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
             interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
             for ida, lda in enumerate(ld):
                 for idb, ldb in enumerate(ld):
@@ -91,9 +99,7 @@ def build_lookup_integral_table_with_raman_custom(cf,
             if m_lo != 0:
                 add *= 2
             raman_correction_grid += add
-        np.save(filename, {
-            'raman_correction_grid': raman_correction_grid,
-        })
+        np.savez(filename, s2b_lo_corr_custom=raman_correction_grid)
 
     inter_func = RegularGridInterpolator(
         (lld, lld),
@@ -141,13 +147,17 @@ def build_lookup_integral_table_with_raman(cf,
     # plot max and min fB
     # exit()
     # save to file with exhaustive namefile information
-    filename = f"results/raman_correction_grid_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.npy"
-
+    filename = s2b_lo_extrema_path(
+        ipulse=ipulse,
+        m_lo_truncation=m_lo_truncation,
+        fiber_length=fiber_length,
+        lld_max=lld[-1],
+    )
     if os.path.exists(filename) and not recompute:
         lg.info(f"Loading precomputed Raman correction grid from {filename}")
-        data = np.load(filename, allow_pickle=True).item()
-        raman_correction_grid_max = data['raman_correction_grid_max']
-        raman_correction_grid_min = data['raman_correction_grid_min']
+        with np.load(filename, allow_pickle=False) as data:
+            raman_correction_grid_max = data["s2b_lo_corr_max"]
+            raman_correction_grid_min = data["s2b_lo_corr_min"]
     else:
         lg.info(f"Computing Raman correction grid and saving to {filename}")
         for m_lo in range(m_lo_truncation+1):
@@ -162,8 +172,7 @@ def build_lookup_integral_table_with_raman(cf,
             add_min = np.zeros((n_samples, n_samples))
             add_max = np.zeros((n_samples, n_samples))
             lg.info(f"Calculating m_lo={m_lo}")
-            I_low_dataset = np.load(
-                f"results/I_low_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo}.npz")
+            I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
             interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
             for ida, lda in enumerate(ld):
                 for idb, ldb in enumerate(ld):
@@ -200,7 +209,7 @@ def build_lookup_integral_table_with_raman(cf,
                 plt.xlabel("L/LDa")
                 plt.ylabel("L/LD b")
                 plt.savefig(
-                    f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+                    f"results/s2b_lo_extrema_max_{'gaussian' if ipulse == 0 else 'nyquist'}_mtrunc{m_lo_truncation}_L{fiber_length/1e3:.1f}km_lldmax{lld[-1]:.2f}.png", dpi=300)
                 plt.close()
                 plt.figure(figsize=(4, 4))
                 plt.imshow(raman_correction_grid_min, extent=(
@@ -211,14 +220,15 @@ def build_lookup_integral_table_with_raman(cf,
                 plt.xlabel("L/LDa")
                 plt.ylabel("L/LD b")
                 plt.savefig(
-                    f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+                    f"media/debug/s2b_lo_extrema_min_{'gaussian' if ipulse == 0 else 'nyquist'}_mtrunc{m_lo_truncation}_L{fiber_length/1e3:.1f}km_lldmax{lld[-1]:.2f}.png", dpi=300)
                 plt.close()
             # raman_correction_grid_max = np.zeros((n_samples, n_samples))
             # raman_correction_grid_min = np.zeros((n_samples, n_samples))
-        np.save(filename, {
-            'raman_correction_grid_max': raman_correction_grid_max,
-            'raman_correction_grid_min': raman_correction_grid_min,
-        })
+        np.savez(
+            filename,
+            s2b_lo_corr_max=raman_correction_grid_max,
+            s2b_lo_corr_min=raman_correction_grid_min,
+        )
 
     # build the interpolator and return it
     save_debug_plots = os.environ.get("PYNLIN_SAVE_RAMAN_GRID_PLOTS", "0") == "1"
@@ -232,7 +242,7 @@ def build_lookup_integral_table_with_raman(cf,
         plt.xlabel("L/LDa")
         plt.ylabel("L/LD b")
         plt.savefig(
-            f"results/raman_correction_grid_max_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+            f"results/s2b_lo_extrema_max_{'gaussian' if ipulse == 0 else 'nyquist'}_mtrunc{m_lo_truncation}_L{fiber_length/1e3:.1f}km_lldmax{lld[-1]:.2f}.png", dpi=300)
         plt.close()
         plt.figure(figsize=(4, 4))
         plt.imshow(raman_correction_grid_min, extent=(
@@ -243,7 +253,7 @@ def build_lookup_integral_table_with_raman(cf,
         plt.xlabel("L/LDa")
         plt.ylabel("L/LD b")
         plt.savefig(
-            f"media/debug/raman_correction_grid_min_{'gaussian' if ipulse == 0 else 'nyquist'}_m{m_lo_truncation}_n{n_samples}_L{fiber_length/1e3:.1f}km_lld{lld[-1]:.2f}.png", dpi=300)
+            f"media/debug/s2b_lo_extrema_min_{'gaussian' if ipulse == 0 else 'nyquist'}_mtrunc{m_lo_truncation}_L{fiber_length/1e3:.1f}km_lldmax{lld[-1]:.2f}.png", dpi=300)
         plt.close()
 
     interp_func_max = RegularGridInterpolator(
