@@ -56,6 +56,15 @@ extensions = [
     "sphinx_autodoc_typehints",
 ]
 
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
+
+myst_enable_extensions = [
+    "dollarmath",
+]
+
 # Prefer local MathJax if available (useful for offline builds), otherwise fall back to CDN.
 mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
 _mathjax_local = os.path.join(os.path.dirname(__file__), "_static", "mathjax", "es5", "tex-mml-chtml.js")
