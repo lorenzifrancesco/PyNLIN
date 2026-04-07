@@ -7,6 +7,7 @@ INSTRUCTIONS.md
 /input
 /output
 /docs/build
+/docs/_build
 /docs/log
 /logs 
 scalene*
