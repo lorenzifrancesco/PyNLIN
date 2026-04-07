@@ -25,6 +25,38 @@ from .utils import NumericalConfig, _toml_load, lambda2nu, nu2lambda
 from .wdm import Amplification, BaseWDM, wdm_from_toml
 
 
+def _interp_with_linear_extrapolation(
+    x_query: np.ndarray,
+    x_data: np.ndarray,
+    y_data: np.ndarray,
+) -> np.ndarray:
+    """Interpolate 1D data and linearly extrapolate beyond both endpoints."""
+    x = np.asarray(x_data, dtype=float).reshape(-1)
+    y = np.asarray(y_data, dtype=float).reshape(-1)
+    q = np.asarray(x_query, dtype=float).reshape(-1)
+    if x.size != y.size:
+        raise ValueError(f"x/y size mismatch: {x.size} != {y.size}")
+    if x.size < 2:
+        raise ValueError("Need at least two samples for interpolation/extrapolation.")
+
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    out = np.interp(q, x, y)
+
+    left = q < x[0]
+    if np.any(left):
+        slope = (y[1] - y[0]) / (x[1] - x[0])
+        out[left] = y[0] + slope * (q[left] - x[0])
+
+    right = q > x[-1]
+    if np.any(right):
+        slope = (y[-1] - y[-2]) / (x[-1] - x[-2])
+        out[right] = y[-1] + slope * (q[right] - x[-1])
+
+    return out
+
+
 def _build_fiber(system_path: Path, data: Mapping) -> Fiber:
     fiber_data = _extract_fiber_section(data)
     if not isinstance(fiber_data, Mapping):
@@ -202,7 +234,14 @@ class System:
         # a constant beta2 and CSV anchor beta1.
         if getattr(self.fiber, "_beta1_profile", None) is not None:
             wl_prof, b1_prof = self.fiber._beta1_profile
-            beta1 = np.interp(wavelengths, wl_prof, b1_prof)[None, :]
+            if force_constant and getattr(self.fiber, "_freq_profile", None) is not None:
+                beta1 = _interp_with_linear_extrapolation(
+                    freqs,
+                    np.asarray(self.fiber._freq_profile, dtype=float),
+                    np.asarray(b1_prof, dtype=float),
+                )[None, :]
+            else:
+                beta1 = np.interp(wavelengths, wl_prof, b1_prof)[None, :]
         # Keep beta2 profile disabled when constant dispersion is requested.
         if not force_constant and getattr(self.fiber, "_beta2_profile", None) is not None:
             wl_prof, b2_prof = self.fiber._beta2_profile
