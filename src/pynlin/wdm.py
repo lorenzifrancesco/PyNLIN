@@ -56,6 +56,60 @@ def _pick(key, *sections):
     return None
 
 
+def _is_single_band_config(data: Mapping | object) -> bool:
+    return isinstance(data, Mapping) and "n_channels" in data and "start_nm" in data
+
+
+def _infer_band_name(start_nm: float | None, existing_names: set[str]) -> str:
+    if start_nm is not None:
+        if 1460.0 <= float(start_nm) < 1530.0:
+            preferred = "S"
+        elif 1530.0 <= float(start_nm) < 1565.0:
+            preferred = "C"
+        elif 1565.0 <= float(start_nm) < 1625.0:
+            preferred = "L"
+        else:
+            preferred = "band"
+    else:
+        preferred = "band"
+
+    if preferred not in existing_names:
+        return preferred
+
+    counter = 2
+    while True:
+        candidate = f"{preferred}_{counter}"
+        if candidate not in existing_names:
+            return candidate
+        counter += 1
+
+
+def _extract_irregular_bands_data(wdm_data: Mapping | object) -> Optional[Dict[str, dict]]:
+    if not isinstance(wdm_data, Mapping):
+        return None
+
+    merged: Dict[str, dict] = {}
+
+    bands_section = wdm_data.get("bands")
+    if isinstance(bands_section, Mapping):
+        for name, cfg in bands_section.items():
+            if isinstance(cfg, Mapping):
+                merged[str(name)] = dict(cfg)
+
+    band_section = wdm_data.get("band")
+    if _is_single_band_config(band_section):
+        band_name = band_section.get("name")
+        if not isinstance(band_name, str) or not band_name.strip():
+            band_name = _infer_band_name(band_section.get("start_nm"), set(merged))
+        merged[str(band_name)] = dict(band_section)
+    elif isinstance(band_section, Mapping):
+        for name, cfg in band_section.items():
+            if isinstance(cfg, Mapping):
+                merged[str(name)] = dict(cfg)
+
+    return merged or None
+
+
 class WDMConfig(BaseModel):
     spacing: float
     num_channels: int
@@ -327,12 +381,7 @@ class IrregularWDM(BaseWDM):
     def from_toml(cls, filepath: Path | str) -> "IrregularWDM":
         data = _toml_load(Path(filepath))
         wdm_data = _extract_wdm_section(data)
-        bands_data = None
-        if isinstance(wdm_data, Mapping):
-            for key in ("bands", "band"):
-                if key in wdm_data and isinstance(wdm_data[key], Mapping):
-                    bands_data = wdm_data[key]
-                    break
+        bands_data = _extract_irregular_bands_data(wdm_data)
         if bands_data is None:
             raise ValueError("No bands section found for IrregularWDM.")
         return cls.from_bands_mapping(bands_data, wdm_data, root_data=data)
@@ -415,12 +464,7 @@ def wdm_from_toml(filepath: Path | str) -> BaseWDM:
     data = _toml_load(Path(filepath))
     wdm_data = _extract_wdm_section(data)
 
-    bands_data = None
-    if isinstance(wdm_data, Mapping):
-        for key in ("bands", "band"):
-            if key in wdm_data and isinstance(wdm_data[key], Mapping):
-                bands_data = wdm_data[key]
-                break
+    bands_data = _extract_irregular_bands_data(wdm_data)
     if bands_data:
         return IrregularWDM.from_bands_mapping(bands_data, wdm_data, root_data=data)
 
