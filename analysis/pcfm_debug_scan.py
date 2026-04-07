@@ -16,16 +16,18 @@ from pynlin.system import System
 from pynlin.utils import dBm2watt
 
 try:
-    from analysis.poggiolini.io import _resolve_signal_power, _write_flat_profile
-    from analysis.poggiolini.models import _load_or_compute_pcfm
-    from analysis.poggiolini.td import _td_modulation_components
-    from analysis.poggiolini.workflow import MANAKOV_SCALE_POGGIOLINI
+    from analysis.pcfm.config import _load_pcfm_runtime_config
+    from analysis.pcfm.io import _resolve_signal_power, _write_flat_profile
+    from analysis.pcfm.models import _load_or_compute_pcfm
+    from analysis.pcfm.td import _td_modulation_components
+    from analysis.pcfm.workflow import MANAKOV_SCALE_PCFM
     from analysis.uwb_nlin import _nlin_cache_path
 except ModuleNotFoundError:
-    from poggiolini.io import _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
-    from poggiolini.models import _load_or_compute_pcfm  # type: ignore[no-redef]
-    from poggiolini.td import _td_modulation_components  # type: ignore[no-redef]
-    from poggiolini.workflow import MANAKOV_SCALE_POGGIOLINI  # type: ignore[no-redef]
+    from pcfm.config import _load_pcfm_runtime_config  # type: ignore[no-redef]
+    from pcfm.io import _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
+    from pcfm.models import _load_or_compute_pcfm  # type: ignore[no-redef]
+    from pcfm.td import _td_modulation_components  # type: ignore[no-redef]
+    from pcfm.workflow import MANAKOV_SCALE_PCFM  # type: ignore[no-redef]
     from uwb_nlin import _nlin_cache_path  # type: ignore[no-redef]
 
 
@@ -111,22 +113,26 @@ def _dispersion_tag(system: System, freqs: np.ndarray) -> str:
 
 def _scan_grids(
     rows: list[dict], beta2_values: list[float], power_dbm_values: list[float]
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     b_map = {v: i for i, v in enumerate(beta2_values)}
     p_map = {v: i for i, v in enumerate(power_dbm_values)}
     shape = (len(beta2_values), len(power_dbm_values))
     td_db = np.full(shape, np.nan, dtype=float)
     td_gaussian_db = np.full(shape, np.nan, dtype=float)
     pcfm_db = np.full(shape, np.nan, dtype=float)
+    pcfm_xci_db = np.full(shape, np.nan, dtype=float)
     diff_db = np.full(shape, np.nan, dtype=float)
+    diff_xci_db = np.full(shape, np.nan, dtype=float)
     for row in rows:
         i = b_map[row["beta2_s2_per_m"]]
         j = p_map[row["launch_dbm"]]
         td_db[i, j] = row["eta_td_db"]
         td_gaussian_db[i, j] = row["eta_td_gaussian_db"]
         pcfm_db[i, j] = row["eta_pcfm_db"]
+        pcfm_xci_db[i, j] = row["eta_pcfm_xci_db"]
         diff_db[i, j] = row["delta_db"]
-    return td_db, td_gaussian_db, pcfm_db, diff_db
+        diff_xci_db[i, j] = row["eta_td_db"] - row["eta_pcfm_xci_db"]
+    return td_db, td_gaussian_db, pcfm_db, pcfm_xci_db, diff_db, diff_xci_db
 
 
 def _plot_heatmaps(
@@ -135,8 +141,13 @@ def _plot_heatmaps(
     power_dbm_values: list[float],
     out_path: Path,
     channel_label: str,
+    plot_pcfm_total_and_sci: bool,
 ) -> None:
-    td_db, _, pcfm_db, diff_db = _scan_grids(rows, beta2_values, power_dbm_values)
+    td_db, _, pcfm_db, pcfm_xci_db, diff_db, diff_xci_db = _scan_grids(
+        rows,
+        beta2_values,
+        power_dbm_values,
+    )
     extent = [
         float(min(power_dbm_values)),
         float(max(power_dbm_values)),
@@ -145,10 +156,16 @@ def _plot_heatmaps(
     ]
 
     fig, axes = plt.subplots(1, 3, figsize=(9.4, 2.9), constrained_layout=True)
+    pcfm_plot_db = pcfm_db if plot_pcfm_total_and_sci else pcfm_xci_db
+    diff_plot_db = diff_db if plot_pcfm_total_and_sci else diff_xci_db
+    pcfm_label = "PCFM" if plot_pcfm_total_and_sci else "PCFM XCI"
     plots = [
         (td_db, f"{channel_label}: TD $10\\log_{{10}}(P_{{NLI}}/P_{{sig}})$ [dB]"),
-        (pcfm_db, f"{channel_label}: PCFM $10\\log_{{10}}(P_{{NLI}}/P_{{sig}})$ [dB]"),
-        (diff_db, f"{channel_label}: TD - PCFM [dB]"),
+        (
+            pcfm_plot_db,
+            f"{channel_label}: {pcfm_label} $10\\log_{{10}}(P_{{NLI}}/P_{{sig}})$ [dB]",
+        ),
+        (diff_plot_db, f"{channel_label}: TD - {pcfm_label} [dB]"),
     ]
     for ax, (z, title) in zip(axes, plots):
         im = ax.imshow(
@@ -174,8 +191,15 @@ def _plot_linecuts(
     power_dbm_values: list[float],
     out_path: Path,
     channel_label: str,
+    plot_pcfm_total_and_sci: bool,
 ) -> None:
-    td_db, td_gaussian_db, pcfm_db, _ = _scan_grids(rows, beta2_values, power_dbm_values)
+    td_db, td_gaussian_db, pcfm_db, pcfm_xci_db, _, _ = _scan_grids(
+        rows,
+        beta2_values,
+        power_dbm_values,
+    )
+    pcfm_plot_db = pcfm_db if plot_pcfm_total_and_sci else pcfm_xci_db
+    pcfm_label = "PCFM" if plot_pcfm_total_and_sci else "PCFM XCI"
     fig, axes = plt.subplots(1, 2, figsize=(10.2, 3.4), constrained_layout=True)
     ax_p, ax_b = axes
 
@@ -210,7 +234,7 @@ def _plot_linecuts(
         )
         ax_p.plot(
             power_dbm_values,
-            pcfm_db[i, :],
+            pcfm_plot_db[i, :],
             linestyle="--",
             linewidth=1.0,
             marker="o",
@@ -218,7 +242,7 @@ def _plot_linecuts(
             markerfacecolor="none",
             markeredgewidth=0.9,
             color=color,
-            label=fr"PCFM, $\beta_2$={beta2_value:.2e}",
+            label=fr"{pcfm_label}, $\beta_2$={beta2_value:.2e}",
         )
     ax_p.set_title(f"{channel_label}: line cuts vs launch power", fontsize=9)
     ax_p.set_xlabel("Launch power [dBm]")
@@ -254,7 +278,7 @@ def _plot_linecuts(
         )
         ax_b.plot(
             beta2_values,
-            pcfm_db[:, j],
+            pcfm_plot_db[:, j],
             linestyle="--",
             linewidth=1.0,
             marker="o",
@@ -262,7 +286,7 @@ def _plot_linecuts(
             markerfacecolor="none",
             markeredgewidth=0.9,
             color=color,
-            label=f"PCFM, P={launch_dbm:.1f} dBm",
+            label=f"{pcfm_label}, P={launch_dbm:.1f} dBm",
         )
     ax_b.set_title(fr"{channel_label}: line cuts vs $\beta_2$", fontsize=9)
     ax_b.set_xlabel(r"$\beta_2$ [s$^2$/m]")
@@ -296,6 +320,9 @@ def run_scan(
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
+    base_system = System.from_toml(cfg_path)
+    runtime_cfg = _load_pcfm_runtime_config(base_system)
+    plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
 
     for beta2_value in beta2_values:
         system = System.from_toml(cfg_path)
@@ -342,7 +369,7 @@ def run_scan(
                 cache_path=td_cache,
                 recompute=recompute_td,
             )
-            td_vec_total = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_POGGIOLINI)
+            td_vec_total = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_PCFM)
             const_pref, sum_a, sum_b = _td_modulation_components(
                 system,
                 ccfs,
@@ -350,7 +377,7 @@ def run_scan(
                 use_kappa=False,
                 use_x_mode=True,
             )
-            const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_POGGIOLINI)
+            const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_PCFM)
             mu0_64 = qam_mu0(64)
             mu0_gaussian = gaussian_mu0()
             td_vec_qam64 = np.asarray(
@@ -461,6 +488,7 @@ def run_scan(
                 power_dbm_values=power_dbm_values,
                 out_path=heatmap_path,
                 channel_label=channel_label,
+                plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
             )
             lg.success(f"Saved scan heatmaps to {heatmap_path}")
             linecuts_path = out_dir / f"single_channel_td_pcfm_scan_linecuts_{channel_label}.png"
@@ -470,6 +498,7 @@ def run_scan(
                 power_dbm_values=power_dbm_values,
                 out_path=linecuts_path,
                 channel_label=channel_label,
+                plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
             )
             lg.success(f"Saved scan line cuts to {linecuts_path}")
     return csv_path
@@ -479,13 +508,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Debug scan for center/edge-channel TD vs PCFM NLI using the same "
-            "functions as the Poggiolini workflow."
+            "functions as the PCFM workflow."
         )
     )
     parser.add_argument(
         "--config",
         type=str,
-        default="./input/poggiolini_struct.toml",
+        default="./input/pcfm_struct.toml",
         help="Base system TOML.",
     )
     parser.add_argument(
@@ -518,7 +547,7 @@ def main() -> None:
     parser.add_argument(
         "--out-dir",
         type=str,
-        default="results/debug/poggiolini_single_channel_scan",
+        default="results/debug/pcfm_single_channel_scan",
         help="Output directory for generated profiles, caches, and reports.",
     )
     argv = _normalize_negative_csv_option(sys.argv[1:], "--power-dbms")

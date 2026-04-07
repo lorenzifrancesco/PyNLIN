@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Mapping
 
+import numpy as np
+
 from pynlin.system import System
 
 PROFILE_MAX_W = 10.0
@@ -20,7 +22,7 @@ def _flat_profiles_enabled(system: System) -> bool:
     raw = getattr(system, "raw_config", None)
     if not isinstance(raw, Mapping):
         return False
-    pog = raw.get("poggiolini")
+    pog = raw.get("pcfm")
     if isinstance(pog, Mapping):
         run = pog.get("run")
         if isinstance(run, Mapping):
@@ -37,14 +39,15 @@ def _flat_profiles_enabled(system: System) -> bool:
     return bool(nlin_section.get("flat_profiles") or nlin_section.get("flat_profile"))
 
 
-def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
-    """Load workflow/runtime flags from [poggiolini] in the system TOML."""
+def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
+    """Load workflow/runtime flags from [pcfm] in the system TOML."""
     defaults: dict[str, object] = {
-        "profile_path": "results/poggiolini_power_profiles.npy",
+        "profile_path": "results/pcfm_power_profiles.npy",
         "launch_csv_path": None,
         "pcfm_numeric_xci": False,
         "td_exclude_self_channel": True,
         "include_lumped_losses": False,
+        "plot_pcfm_total_and_sci": False,
         "power_profiles_mode": "recompute",
         "td_mode": "cached",
         "pcfm_mode": "cached",
@@ -55,7 +58,7 @@ def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
     raw = getattr(system, "raw_config", None)
     if not isinstance(raw, Mapping):
         return defaults
-    pog = raw.get("poggiolini")
+    pog = raw.get("pcfm")
     if not isinstance(pog, Mapping):
         return defaults
     paths = pog.get("paths")
@@ -86,13 +89,14 @@ def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
         ]
         if legacy_run_keys:
             raise ValueError(
-                "Legacy Poggiolini run keys are no longer supported: "
-                f"{legacy_run_keys}. Use *_mode keys in [poggiolini.run]."
+                "Legacy PCFM run keys are no longer supported: "
+                f"{legacy_run_keys}. Use *_mode keys in [pcfm.run]."
             )
         for key in (
             "pcfm_numeric_xci",
             "td_exclude_self_channel",
             "include_lumped_losses",
+            "plot_pcfm_total_and_sci",
             "power_profiles_mode",
             "td_mode",
             "pcfm_mode",
@@ -104,8 +108,8 @@ def _load_poggiolini_runtime_config(system: System) -> dict[str, object]:
                 defaults[key] = run.get(key)
     if isinstance(recompute, Mapping):
         raise ValueError(
-            "Legacy [poggiolini.recompute] is no longer supported. "
-            "Use *_mode keys in [poggiolini.run]."
+            "Legacy [pcfm.recompute] is no longer supported. "
+            "Use *_mode keys in [pcfm.run]."
         )
 
     defaults["power_profiles_mode"] = _normalize_mode(
@@ -137,3 +141,81 @@ def _normalize_mode(name: str, value: object, allowed: set[str]) -> str:
     if mode not in allowed:
         raise ValueError(f"Invalid {name}={value!r}; expected one of {sorted(allowed)}.")
     return mode
+
+
+def _resolve_scaling_run_flags(
+    system: System,
+    *,
+    pcfm_numeric_xci: bool | None = None,
+    recompute_td: bool | None = None,
+    recompute_pcfm: bool | None = None,
+    exclude_self_channel: bool | None = None,
+) -> dict[str, bool]:
+    """Resolve scaling-script runtime booleans from [pcfm.run] with optional overrides."""
+    runtime_cfg = _load_pcfm_runtime_config(system)
+    return {
+        "pcfm_numeric_xci": (
+            bool(runtime_cfg["pcfm_numeric_xci"])
+            if pcfm_numeric_xci is None
+            else bool(pcfm_numeric_xci)
+        ),
+        "recompute_td": (
+            runtime_cfg["td_mode"] == "recompute"
+            if recompute_td is None
+            else bool(recompute_td)
+        ),
+        "recompute_pcfm": (
+            runtime_cfg["pcfm_mode"] == "recompute"
+            if recompute_pcfm is None
+            else bool(recompute_pcfm)
+        ),
+        "exclude_self_channel": (
+            bool(runtime_cfg["td_exclude_self_channel"])
+            if exclude_self_channel is None
+            else bool(exclude_self_channel)
+        ),
+    }
+
+
+def _select_scaling_channel(system: System) -> tuple[int, str]:
+    """Pick a representative CUT for scaling sweeps.
+
+    For irregular multi-band grids, choose the center of the populated band whose
+    midpoint is closest to the overall spectral centroid. This avoids selecting
+    a band-edge channel when bands are concatenated or separated by gaps.
+    """
+    freqs = np.asarray(system.wdm.frequency_grid(), dtype=float).reshape(-1)
+    if freqs.size == 0:
+        raise ValueError("Cannot select a scaling channel from an empty WDM grid.")
+
+    target_freq = float(np.mean(freqs))
+    band_slices = getattr(system.wdm, "_band_slices", None)
+    if isinstance(band_slices, Mapping) and band_slices:
+        best_score = None
+        best_idx = None
+        best_label = "overall"
+        for name, slc in band_slices.items():
+            start = 0 if slc.start is None else int(slc.start)
+            stop = int(slc.stop) if slc.stop is not None else int(freqs.size)
+            if stop <= start:
+                continue
+            idx = np.arange(start, stop, dtype=int)
+            band_freqs = freqs[idx]
+            band_center_idx = int(idx[idx.size // 2])
+            band_center_freq = float(freqs[band_center_idx])
+            spans_target = float(np.min(band_freqs)) <= target_freq <= float(np.max(band_freqs))
+            score = (
+                0 if spans_target else 1,
+                abs(band_center_freq - target_freq),
+                abs(idx.size - freqs.size),
+                band_center_idx,
+            )
+            if best_score is None or score < best_score:
+                best_score = score
+                best_idx = band_center_idx
+                best_label = str(name)
+        if best_idx is not None:
+            return best_idx, best_label
+
+    center_idx = int(np.argmin(np.abs(freqs - target_freq)))
+    return center_idx, "overall"

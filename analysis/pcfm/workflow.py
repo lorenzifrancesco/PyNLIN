@@ -13,7 +13,7 @@ from pynlin.system import System
 from .config import (
     PROFILE_MAX_W,
     _flat_profiles_enabled,
-    _load_poggiolini_runtime_config,
+    _load_pcfm_runtime_config,
     _normalize_mode,
     _to_optional_path,
 )
@@ -25,21 +25,21 @@ from .io import (
 )
 from .models import _load_or_compute_gn, _load_or_compute_gn_direct, _load_or_compute_pcfm
 from .plotting import (
-    plot_poggiolini_diagnostics,
-    plot_poggiolini_gsnr,
-    plot_poggiolini_nlin_power,
+    plot_pcfm_diagnostics,
+    plot_pcfm_gsnr,
+    plot_pcfm_nlin_power,
 )
 from .reporting import _log_td_pcfm_parameters
 from .td import _qam_mu0, _td_modulation_components
 
 from analysis.uwb_nlin import _nlin_cache_path, compute_raman_profiles, plot_power_profiles
 
-MANAKOV_SCALE_POGGIOLINI = 16.0 / 9.0
-POGGIOLINI_MEDIA_DIR = Path("media") / "PCFM"
+MANAKOV_SCALE_PCFM = 16.0 / 9.0
+PCFM_MEDIA_DIR = Path("media") / "PCFM"
 
-def _apply_poggiolini_manakov_scaling(values: np.ndarray) -> np.ndarray:
-    """Apply manual 16/9 Manakov scaling for Poggiolini TD comparisons."""
-    return np.asarray(values, dtype=float) * MANAKOV_SCALE_POGGIOLINI
+def _apply_pcfm_manakov_scaling(values: np.ndarray) -> np.ndarray:
+    """Apply manual 16/9 Manakov scaling for PCFM TD comparisons."""
+    return np.asarray(values, dtype=float) * MANAKOV_SCALE_PCFM
 
 
 def _log_td_gn_vs_pcfm_xci_diff_stats(
@@ -73,8 +73,8 @@ def _log_td_gn_vs_pcfm_xci_diff_stats(
         )
 
 
-def run_poggiolini_workflow(
-    cfg_path: Path | str = Path("./input/poggiolini_struct.toml"),
+def run_pcfm_workflow(
+    cfg_path: Path | str = Path("./input/pcfm_struct.toml"),
     profile_path: Path | str | None = None,
     launch_csv_path: Path | str | None = None,
     power_profiles_mode: str | None = None,
@@ -89,13 +89,13 @@ def run_poggiolini_workflow(
 ) -> None:
     """Run TD + PCFM (+ optional GN) workflow and plot GSNR overlays."""
     system = System.from_toml(cfg_path)
-    runtime_cfg = _load_poggiolini_runtime_config(system)
+    runtime_cfg = _load_pcfm_runtime_config(system)
 
     profile_path = _to_optional_path(
         profile_path if profile_path is not None else runtime_cfg["profile_path"]
     )
     if profile_path is None:
-        raise ValueError("Poggiolini profile path is required.")
+        raise ValueError("PCFM profile path is required.")
     launch_csv_path = _to_optional_path(
         launch_csv_path if launch_csv_path is not None else runtime_cfg["launch_csv_path"]
     )
@@ -159,6 +159,7 @@ def run_poggiolini_workflow(
         if include_lumped_losses is None
         else bool(include_lumped_losses)
     )
+    plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
 
     freqs = system.wdm.frequency_grid()
     beta1_grid, beta2_grid = system.beta_grids(freqs=freqs)
@@ -202,7 +203,7 @@ def run_poggiolini_workflow(
             if not recompute_profiles:
                 raise FileNotFoundError(
                     f"Raman profile missing at {profile_path}. "
-                    "Set [poggiolini.run].power_profiles_mode='recompute'."
+                    "Set [pcfm.run].power_profiles_mode='recompute'."
                 )
             jiang_cfg = JiangIterativeConfig(
                 iterative_steps=120,
@@ -237,12 +238,12 @@ def run_poggiolini_workflow(
     )
 
     if do_plot:
-        plot_power_profiles(system, profile_path, output_dir=POGGIOLINI_MEDIA_DIR)
-        plot_poggiolini_diagnostics(
+        plot_power_profiles(system, profile_path, output_dir=PCFM_MEDIA_DIR)
+        plot_pcfm_diagnostics(
             system=system,
             profile_path=profile_path,
             launch_powers_w=launch_powers,
-            out_dir=POGGIOLINI_MEDIA_DIR,
+            out_dir=PCFM_MEDIA_DIR,
         )
 
     launch_dbm = 10.0 * np.log10(np.maximum(launch_powers, 1e-18) / 1e-3)
@@ -289,7 +290,7 @@ def run_poggiolini_workflow(
         ),
         recompute=recompute_td,
     )
-    nlin_td_flat = _apply_poggiolini_manakov_scaling(nlin_td).reshape(-1)
+    nlin_td_flat = _apply_pcfm_manakov_scaling(nlin_td).reshape(-1)
 
     qam_orders = [16, 64, 256]
     const_pref, sum_a, sum_b = _td_modulation_components(
@@ -300,7 +301,7 @@ def run_poggiolini_workflow(
         use_x_mode=True,
         exclude_self_channel=td_exclude_self_channel,
     )
-    const_pref = _apply_poggiolini_manakov_scaling(const_pref)
+    const_pref = _apply_pcfm_manakov_scaling(const_pref)
 
     td_modulations: dict[str, np.ndarray] = {}
     for order in qam_orders:
@@ -312,7 +313,7 @@ def run_poggiolini_workflow(
     td_modulations["Gaussian"] = np.asarray(nlin_gaussian, dtype=float).reshape(-1)
 
     _save_nlin_csv(
-        Path("results") / f"total_nlin_{Path(profile_path).stem}_k1_x1.csv",
+        Path("results") / f"s3_chan_nlin_td_{Path(profile_path).stem}_k1_x1.csv",
         freqs,
         nlin_td_flat,
         signal_power,
@@ -461,15 +462,16 @@ def run_poggiolini_workflow(
 
     gsnr_td = 10.0 * np.log10(signal_power / np.maximum(nlin_td_flat, 1e-18))
     if do_plot:
-        plot_poggiolini_gsnr(
+        plot_pcfm_gsnr(
             freqs_hz=freqs,
             gsnr_td=gsnr_td,
             gsnr_pcfm=gsnr_pcfm,
             gsnr_gn=gsnr_gn,
-            out_path=POGGIOLINI_MEDIA_DIR / "fig14c.pdf",
+            out_path=PCFM_MEDIA_DIR / "fig14c.pdf",
             gsnr_gn_direct=gsnr_gn_direct,
+            plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
         )
-        plot_poggiolini_nlin_power(
+        plot_pcfm_nlin_power(
             freqs_hz=freqs,
             signal_power_w=signal_power,
             nlin_td_w=nlin_td_flat,
@@ -482,5 +484,6 @@ def run_poggiolini_workflow(
             nlin_gn_direct_xci_w=nlin_gn_direct_xci_ratio,
             gn_direct_is_ratio=True,
             gn_direct_xci_is_ratio=True,
-            out_path=POGGIOLINI_MEDIA_DIR / "nlin_power.pdf",
+            out_path=PCFM_MEDIA_DIR / "nlin_power.pdf",
+            plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
         )

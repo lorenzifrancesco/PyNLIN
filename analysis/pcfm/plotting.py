@@ -8,7 +8,7 @@ from pynlin.nlin.pcfm_gn import fit_spp_polynomials, load_signal_profiles, norma
 from pynlin.system import System
 
 
-def plot_poggiolini_gsnr(
+def plot_pcfm_gsnr(
     freqs_hz: np.ndarray,
     gsnr_td: np.ndarray,
     gsnr_pcfm: dict[str, np.ndarray],
@@ -16,6 +16,7 @@ def plot_poggiolini_gsnr(
     out_path: Path,
     gsnr_gn_direct: dict[str, np.ndarray] | None = None,
     title: str | None = None,
+    plot_pcfm_total_and_sci: bool = False,
 ) -> None:
     """Plot GSNR_NLI overlays with the same style as existing noise plots."""
     dpi = 300
@@ -36,21 +37,22 @@ def plot_poggiolini_gsnr(
     )
 
     colors = ["tab:blue", "tab:orange", "tab:green"]
-    for idx, (label, gsnr) in enumerate(gsnr_pcfm.items()):
-        display = "" if label == "no_loss" else label
-        suffix = f" {display}" if display else ""
-        color = colors[idx % len(colors)]
-        ax.plot(
-            freqs_hz * 1e-12,
-            gsnr,
-            color=color,
-            lw=0.45,
-            marker="o",
-            markersize=1.2,
-            markerfacecolor="none",
-            markeredgewidth=marker_lw,
-            label=f"PCFM{suffix}",
-        )
+    if plot_pcfm_total_and_sci:
+        for idx, (label, gsnr) in enumerate(gsnr_pcfm.items()):
+            display = "" if label == "no_loss" else label
+            suffix = f" {display}" if display else ""
+            color = colors[idx % len(colors)]
+            ax.plot(
+                freqs_hz * 1e-12,
+                gsnr,
+                color=color,
+                lw=0.45,
+                marker="o",
+                markersize=1.2,
+                markerfacecolor="none",
+                markeredgewidth=marker_lw,
+                label=f"PCFM{suffix}",
+            )
 
     if gsnr_gn:
         for idx, (label, gsnr) in enumerate(gsnr_gn.items()):
@@ -94,7 +96,7 @@ def plot_poggiolini_gsnr(
     lg.success(f"Saved GSNR plot to {out_path}")
 
 
-def plot_poggiolini_nlin_power(
+def plot_pcfm_nlin_power(
     freqs_hz: np.ndarray,
     signal_power_w: np.ndarray,
     nlin_td_w: np.ndarray,
@@ -108,6 +110,7 @@ def plot_poggiolini_nlin_power(
     nlin_gn_direct_xci_w: dict[str, np.ndarray] | None = None,
     gn_direct_is_ratio: bool = False,
     gn_direct_xci_is_ratio: bool = False,
+    plot_pcfm_total_and_sci: bool = False,
 ) -> None:
     """Plot per-channel NLIN normalized to end-of-fiber signal power (dB)."""
     dpi = 300
@@ -167,22 +170,23 @@ def plot_poggiolini_nlin_power(
         )
 
     colors = ["tab:blue", "tab:orange", "tab:green"]
-    for idx, (label, nlin) in enumerate(nlin_pcfm_w.items()):
-        display = "" if label == "no_loss" else label
-        suffix = f" {display}" if display else ""
-        color = colors[idx % len(colors)]
-        ratio_db = _ratio_db(nlin)
-        ax.plot(
-            freqs_hz * 1e-12,
-            ratio_db,
-            color=color,
-            lw=0.45,
-            marker="o",
-            markersize=1.2,
-            markerfacecolor="none",
-            markeredgewidth=marker_lw,
-            label=f"PCFM{suffix}",
-        )
+    if plot_pcfm_total_and_sci:
+        for idx, (label, nlin) in enumerate(nlin_pcfm_w.items()):
+            display = "" if label == "no_loss" else label
+            suffix = f" {display}" if display else ""
+            color = colors[idx % len(colors)]
+            ratio_db = _ratio_db(nlin)
+            ax.plot(
+                freqs_hz * 1e-12,
+                ratio_db,
+                color=color,
+                lw=0.45,
+                marker="o",
+                markersize=1.2,
+                markerfacecolor="none",
+                markeredgewidth=marker_lw,
+                label=f"PCFM{suffix}",
+            )
 
     if nlin_pcfm_xci_w:
         for idx, (label, nlin) in enumerate(nlin_pcfm_xci_w.items()):
@@ -281,7 +285,7 @@ def plot_poggiolini_nlin_power(
     lg.success(f"Saved NLIN ratio plot to {out_path}")
 
 
-def plot_poggiolini_diagnostics(
+def plot_pcfm_diagnostics(
     system: System,
     profile_path: Path | str,
     launch_powers_w: np.ndarray,

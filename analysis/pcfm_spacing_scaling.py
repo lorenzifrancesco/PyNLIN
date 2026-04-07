@@ -14,10 +14,15 @@ from pynlin.nlin.pcfm_gn import PcfmConfig
 from pynlin.system import System
 from pynlin.wdm import IrregularWDM, RegularWDM
 
-from analysis.poggiolini.io import _resolve_launch_powers, _write_flat_profile
-from analysis.poggiolini.models import _load_or_compute_pcfm
-from analysis.poggiolini.td import _td_modulation_components
-from analysis.poggiolini.workflow import MANAKOV_SCALE_POGGIOLINI
+from analysis.pcfm.config import (
+    _load_pcfm_runtime_config,
+    _resolve_scaling_run_flags,
+    _select_scaling_channel,
+)
+from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
+from analysis.pcfm.models import _load_or_compute_pcfm
+from analysis.pcfm.td import _td_modulation_components
+from analysis.pcfm.workflow import MANAKOV_SCALE_PCFM
 from analysis.uwb_nlin import _nlin_cache_path
 
 plt.rcParams["text.usetex"] = False
@@ -30,18 +35,6 @@ def _parse_float_list(values: str) -> list[float]:
 def _safe_tag(value: float) -> str:
     text = f"{value:.6e}"
     return text.replace("+", "").replace("-", "m").replace(".", "p")
-
-
-def _center_channel(system: System) -> tuple[int, str]:
-    freqs = system.wdm.frequency_grid()
-    center_idx = int(freqs.size // 2)
-    band_label = "overall"
-    if hasattr(system.wdm, "_band_slices"):
-        for name, slc in system.wdm._band_slices.items():
-            if slc.start <= center_idx < slc.stop:
-                band_label = str(name)
-                break
-    return center_idx, band_label
 
 
 def _fit_exponent(x_values: np.ndarray, values_w: np.ndarray) -> float:
@@ -81,27 +74,40 @@ def _rebuild_wdm_with_spacing(system: System, spacing_hz: float) -> None:
     raise TypeError(f"Unsupported WDM type for spacing sweep: {type(wdm)!r}")
 
 
-def _scaling_series(rows: list[dict]) -> dict[str, np.ndarray]:
-    return {
+def _scaling_series(
+    rows: list[dict],
+    plot_pcfm_total_and_sci: bool,
+) -> dict[str, np.ndarray]:
+    series = {
         "TD 64-QAM": np.array([row["td_channel_w"] for row in rows], dtype=float),
         "TD Gaussian": np.array([row["td_gaussian_channel_w"] for row in rows], dtype=float),
-        "PCFM total": np.array([row["pcfm_channel_w"] for row in rows], dtype=float),
-        "PCFM SCI": np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float),
         "PCFM XCI": np.array([row["pcfm_xci_channel_w"] for row in rows], dtype=float),
     }
+    if plot_pcfm_total_and_sci:
+        series["PCFM total"] = np.array([row["pcfm_channel_w"] for row in rows], dtype=float)
+        series["PCFM SCI"] = np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float)
+    return series
 
 
 def _save_figure(fig: plt.Figure, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(out_path, dpi=260)
+    lg.success("Plot saved: {}", out_path.resolve())
     if out_path.suffix.lower() == ".png":
-        fig.savefig(out_path.with_suffix(".pdf"))
+        pdf_path = out_path.with_suffix(".pdf")
+        fig.savefig(pdf_path)
+        lg.success("Plot saved: {}", pdf_path.resolve())
 
 
-def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int) -> None:
+def _plot_scaling(
+    rows: list[dict],
+    out_path: Path,
+    channel_idx: int,
+    plot_pcfm_total_and_sci: bool,
+) -> None:
     spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
-    series = _scaling_series(rows)
+    series = _scaling_series(rows, plot_pcfm_total_and_sci)
     freqs = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
@@ -134,9 +140,14 @@ def _plot_scaling(rows: list[dict], out_path: Path, channel_idx: int) -> None:
     plt.close(fig)
 
 
-def _plot_normalized_scaling(rows: list[dict], out_path: Path, channel_idx: int) -> None:
+def _plot_normalized_scaling(
+    rows: list[dict],
+    out_path: Path,
+    channel_idx: int,
+    plot_pcfm_total_and_sci: bool,
+) -> None:
     spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
-    series = _scaling_series(rows)
+    series = _scaling_series(rows, plot_pcfm_total_and_sci)
     freqs = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
@@ -176,17 +187,30 @@ def run_spacing_sweep(
     spacing_ghz_values: list[float],
     out_dir: Path,
     launch_dbm: float | None,
-    pcfm_numeric_xci: bool,
-    recompute_td: bool,
-    recompute_pcfm: bool,
-    exclude_self_channel: bool = False,
+    pcfm_numeric_xci: bool | None,
+    recompute_td: bool | None,
+    recompute_pcfm: bool | None,
+    exclude_self_channel: bool | None = None,
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
     skipped_spacings: list[tuple[float, str]] = []
 
     base_system = System.from_toml(cfg_path)
-    center_idx, band_label = _center_channel(base_system)
+    runtime_cfg = _load_pcfm_runtime_config(base_system)
+    run_flags = _resolve_scaling_run_flags(
+        base_system,
+        pcfm_numeric_xci=pcfm_numeric_xci,
+        recompute_td=recompute_td,
+        recompute_pcfm=recompute_pcfm,
+        exclude_self_channel=exclude_self_channel,
+    )
+    pcfm_numeric_xci = run_flags["pcfm_numeric_xci"]
+    recompute_td = run_flags["recompute_td"]
+    recompute_pcfm = run_flags["recompute_pcfm"]
+    exclude_self_channel = run_flags["exclude_self_channel"]
+    plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
+    center_idx, band_label = _select_scaling_channel(base_system)
     lg.info("Selected center channel idx={} in band={}.".format(center_idx, band_label))
 
     for spacing_ghz in spacing_ghz_values:
@@ -239,7 +263,7 @@ def run_spacing_sweep(
             cache_path=td_cache,
             recompute=recompute_td,
         )
-        td_vec = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_POGGIOLINI)
+        td_vec = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_PCFM)
 
         const_pref, sum_a, sum_b = _td_modulation_components(
             system,
@@ -249,7 +273,7 @@ def run_spacing_sweep(
             use_x_mode=True,
             exclude_self_channel=exclude_self_channel,
         )
-        const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_POGGIOLINI)
+        const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_PCFM)
         td_gaussian_vec = np.asarray(
             const_pref * (gaussian_mu0() * sum_a + sum_b),
             dtype=float,
@@ -339,9 +363,19 @@ def run_spacing_sweep(
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
     plot_path = Path("media") / "PCFM" / "center_channel_spacing_scaling.png"
-    _plot_scaling(rows, plot_path, center_idx)
+    _plot_scaling(
+        rows,
+        plot_path,
+        center_idx,
+        plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
+    )
     normalized_plot_path = Path("media") / "PCFM" / "center_channel_spacing_scaling_normalized.png"
-    _plot_normalized_scaling(rows, normalized_plot_path, center_idx)
+    _plot_normalized_scaling(
+        rows,
+        normalized_plot_path,
+        center_idx,
+        plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
+    )
 
     summary_lines = [
         f"Center channel idx={center_idx}, band={band_label}",
@@ -376,7 +410,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=str,
-        default="input/poggiolini_struct.toml",
+        default="input/pcfm_struct.toml",
         help="Path to system TOML.",
     )
     parser.add_argument(
@@ -393,28 +427,32 @@ def main() -> None:
     )
     parser.add_argument(
         "--pcfm-numeric-xci",
-        action="store_true",
-        help="Use numeric XCI in PCFM instead of closed-form XCI.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override [pcfm.run].pcfm_numeric_xci.",
     )
     parser.add_argument(
         "--recompute-td",
-        action="store_true",
-        help="Recompute TD collision caches.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override [pcfm.run].td_mode.",
     )
     parser.add_argument(
         "--recompute-pcfm",
-        action="store_true",
-        help="Recompute PCFM caches.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override [pcfm.run].pcfm_mode.",
     )
     parser.add_argument(
         "--exclude-self-channel",
-        action="store_true",
-        help="Exclude nuB==nuA contribution from TD aggregation (SCI-like term).",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override [pcfm.run].td_exclude_self_channel.",
     )
     parser.add_argument(
         "--out-dir",
         type=str,
-        default="results/debug/poggiolini_spacing_scaling",
+        default="results/debug/pcfm_spacing_scaling",
         help="Output directory for generated profiles, caches, and reports.",
     )
     args = parser.parse_args()
@@ -424,10 +462,10 @@ def main() -> None:
         spacing_ghz_values=_parse_float_list(args.spacing_ghz),
         out_dir=Path(args.out_dir),
         launch_dbm=args.launch_dbm,
-        pcfm_numeric_xci=bool(args.pcfm_numeric_xci),
-        recompute_td=bool(args.recompute_td),
-        recompute_pcfm=bool(args.recompute_pcfm),
-        exclude_self_channel=bool(args.exclude_self_channel),
+        pcfm_numeric_xci=args.pcfm_numeric_xci,
+        recompute_td=args.recompute_td,
+        recompute_pcfm=args.recompute_pcfm,
+        exclude_self_channel=args.exclude_self_channel,
     )
     lg.success(f"Saved scaling CSV to {csv_path}")
     lg.success(f"Saved scaling summary to {summary_path}")
