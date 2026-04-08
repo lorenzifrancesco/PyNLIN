@@ -1,6 +1,22 @@
 # pynlin.nlin package
 
+## Subpackages
+
+```{toctree}
+:maxdepth: 4
+
+pynlin.nlin.nlin_estimation
+```
+
 ## Submodules
+
+## pynlin.nlin.cache_names module
+
+```{automodule} pynlin.nlin.cache_names
+:members:
+:show-inheritance:
+:undoc-members:
+```
 
 ## pynlin.nlin.collision module
 
@@ -18,6 +34,14 @@
 :undoc-members:
 ```
 
+## pynlin.nlin.nlin_estimator_uwb module
+
+```{automodule} pynlin.nlin.nlin_estimator_uwb
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
 ## pynlin.nlin.noise module
 
 ```{automodule} pynlin.nlin.noise
@@ -26,9 +50,17 @@
 :undoc-members:
 ```
 
-## pynlin.nlin.system_nlin module
+## pynlin.nlin.pcfm_gn module
 
-```{automodule} pynlin.nlin.system_nlin
+```{automodule} pynlin.nlin.pcfm_gn
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
+## pynlin.nlin.reference_curves module
+
+```{automodule} pynlin.nlin.reference_curves
 :members:
 :show-inheritance:
 :undoc-members:

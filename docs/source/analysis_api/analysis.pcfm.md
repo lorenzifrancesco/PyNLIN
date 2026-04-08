@@ -10,6 +10,14 @@
 :undoc-members:
 ```
 
+## analysis.pcfm.analytics module
+
+```{automodule} analysis.pcfm.analytics
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
 ## analysis.pcfm.io module
 
 ```{automodule} analysis.pcfm.io

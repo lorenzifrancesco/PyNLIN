@@ -5,7 +5,9 @@
 ```{toctree}
 :maxdepth: 4
 
+analysis.fiber_analysis
 analysis.fwm
+analysis.pcfm
 analysis.raman
 analysis.sandbox
 ```

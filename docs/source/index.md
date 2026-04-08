@@ -6,6 +6,7 @@
 
 overview
 theory
+noise_calculations
 pcfm_td_scientific_spec
 io
 uwb

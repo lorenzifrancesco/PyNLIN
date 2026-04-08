@@ -2,6 +2,14 @@
 
 ## Submodules
 
+## pynlin.raman.pytorch._torch_ode module
+
+```{automodule} pynlin.raman.pytorch._torch_ode
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
 ## pynlin.raman.pytorch.gain_optimizer module
 
 ```{automodule} pynlin.raman.pytorch.gain_optimizer

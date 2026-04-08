@@ -4,4 +4,5 @@
 :maxdepth: 4
 
 analysis
+scripts
 ```

@@ -1,59 +1,15 @@
 # analysis.sandbox.smf-scripts package
 
-## Submodules
+This directory is a legacy sandbox workspace rather than a normal Python
+package: its filesystem name contains a hyphen, so Sphinx autodoc cannot import
+it under a valid module path. The scripts are still useful as reference and are
+summarized below.
 
-## analysis.sandbox.smf-scripts.constellations module
+## Scripts
 
-```{automodule} analysis.sandbox.smf-scripts.constellations
-:members:
-:show-inheritance:
-:undoc-members:
-```
-
-## analysis.sandbox.smf-scripts.plotter_hybrid module
-
-```{automodule} analysis.sandbox.smf-scripts.plotter_hybrid
-:members:
-:show-inheritance:
-:undoc-members:
-```
-
-## analysis.sandbox.smf-scripts.plotter_noise module
-
-```{automodule} analysis.sandbox.smf-scripts.plotter_noise
-:members:
-:show-inheritance:
-:undoc-members:
-```
-
-## analysis.sandbox.smf-scripts.plotter_profiles module
-
-```{automodule} analysis.sandbox.smf-scripts.plotter_profiles
-:members:
-:show-inheritance:
-:undoc-members:
-```
-
-## analysis.sandbox.smf-scripts.plotter_single_chan module
-
-```{automodule} analysis.sandbox.smf-scripts.plotter_single_chan
-:members:
-:show-inheritance:
-:undoc-members:
-```
-
-## analysis.sandbox.smf-scripts.pulse_energy module
-
-```{automodule} analysis.sandbox.smf-scripts.pulse_energy
-:members:
-:show-inheritance:
-:undoc-members:
-```
-
-## Module contents
-
-```{automodule} analysis.sandbox.smf-scripts
-:members:
-:show-inheritance:
-:undoc-members:
-```
+- `constellations.py`: modulation-order and constellation-noise exploratory plots.
+- `plotter_hybrid.py`: hybrid signal/noise plotting utilities.
+- `plotter_noise.py`: channel and power-sweep noise diagnostics.
+- `plotter_profiles.py`: signal, ASE, and pump profile plotting helpers.
+- `plotter_single_chan.py`: single-channel collision and noise visualizations.
+- `pulse_energy.py`: pulse-energy and PSD-style sandbox checks.

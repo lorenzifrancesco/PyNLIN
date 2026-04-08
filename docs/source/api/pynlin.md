@@ -19,6 +19,14 @@ pynlin.raman
 :undoc-members:
 ```
 
+## pynlin.constellation_stats module
+
+```{automodule} pynlin.constellation_stats
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
 ## pynlin.constellations module
 
 ```{automodule} pynlin.constellations
@@ -35,6 +43,14 @@ pynlin.raman
 :undoc-members:
 ```
 
+## pynlin.io_utils module
+
+```{automodule} pynlin.io_utils
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
 ## pynlin.log_init module
 
 ```{automodule} pynlin.log_init
@@ -43,17 +59,17 @@ pynlin.raman
 :undoc-members:
 ```
 
-## pynlin.nlin module
+## pynlin.pulses module
 
-```{automodule} pynlin.nlin
+```{automodule} pynlin.pulses
 :members:
 :show-inheritance:
 :undoc-members:
 ```
 
-## pynlin.pulses module
+## pynlin.system module
 
-```{automodule} pynlin.pulses
+```{automodule} pynlin.system
 :members:
 :show-inheritance:
 :undoc-members:

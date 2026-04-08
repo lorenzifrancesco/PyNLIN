@@ -26,9 +26,33 @@ pynlin.raman.pytorch
 :undoc-members:
 ```
 
+## pynlin.raman.power_profiles module
+
+```{automodule} pynlin.raman.power_profiles
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
 ## pynlin.raman.solvers module
 
 ```{automodule} pynlin.raman.solvers
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
+## pynlin.raman.solvers_jiang module
+
+```{automodule} pynlin.raman.solvers_jiang
+:members:
+:show-inheritance:
+:undoc-members:
+```
+
+## pynlin.raman.undepleted module
+
+```{automodule} pynlin.raman.undepleted
 :members:
 :show-inheritance:
 :undoc-members:
