@@ -120,9 +120,8 @@ def get_kappa2_matrix_uwb(system: System,
     n_modes = getattr(system, "n_modes", 1)
     kappa2 = np.ones((n_modes, n_modes))
     if use_kappa and n_modes > 1:
-        # FIXME: Check the Manakov averaging.
         lg.warning("Applying kappa.csv coupling weights. Check the Manakov averaging.")
-        kappa = np.loadtxt('input/fiber_data/kappa.csv', delimiter=',')
+        kappa = np.loadtxt('input/fiber_data/kappa_uwb.csv', delimiter=',') # 8/9 inserted by hand
         kappa2 = kappa ** 2
     if not use_x_mode:
         kappa2 = np.multiply(kappa2, np.eye(n_modes))
@@ -420,7 +419,7 @@ def total_nlin_uwb(system: System,
     )
 
     kappa2 = get_kappa2_matrix_uwb(system, use_kappa, use_x_mode)
-
+    assert(np.isclose(kappa2[0, 0], (8.0/9.0)**2, atol=0.01), f"Expected kappa2[0,0] to be (8/9)^2 for SMF fallback, got {kappa2[0,0]}")
     total_nlin = np.zeros((n_modes, n_freqs))
     for mA in range(n_modes):
         for nuA in range(n_freqs):

@@ -119,8 +119,7 @@ def _plot_scaling(
     # plot also the scaling function for reference: linear relation in baud rate, normalized to the first point of PCFM XCI
     ref_baud = baud_gbaud[0] * 1e9
     ref_value = series["PCFM XCI"][0] if series["PCFM XCI"].size else 1.0
-    scaling_baud = np.array([ref_baud
-                            , baud_gbaud[-1] * 1e9], dtype=float)
+    scaling_baud = np.array([ref_baud, baud_gbaud[-1] * 1e9], dtype=float)
     scaling_values = ref_value * (scaling_baud / ref_baud)**(-1.0)  # inverse linear scaling as a reference
     ax.plot(
         scaling_baud / 1e9,

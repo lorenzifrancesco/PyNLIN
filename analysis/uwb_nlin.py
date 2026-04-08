@@ -824,7 +824,7 @@ if __name__ == "__main__":
         system.report_max_l_normalizations()
     except Exception as exc:
         lg.warning(f"Could not report L/LD or L/LW: {exc}")
-    # compute_raman_profiles(system, save_path="results/uwb_power_profiles.npy") # FIXME this is not saving a menaingful file
+
     plot_power_profiles(system, "results/uwb_power_profiles.npy")
     profile_path = Path("results/uwb_power_profiles.npy")
     # exit()

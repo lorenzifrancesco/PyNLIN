@@ -49,6 +49,11 @@ def _to_per_polarization_power(power_w: np.ndarray | float) -> np.ndarray | floa
     return power_w / POLARIZATION_COUNT
 
 
+def _to_per_channel_power(power_w: np.ndarray | float) -> np.ndarray | float:
+    """Convert per-polarization power to dual-pol channel normalization."""
+    return power_w * POLARIZATION_COUNT
+
+
 @dataclass
 class PcfmConfig:
     """Configuration knobs for PCFM/GN kernel evaluation and integration grids."""
@@ -698,7 +703,7 @@ def compute_pcfm_nlin(
             np.any(launch_powers_w <= 0) or np.any(launch_powers_w > MAX_POWER_W)):
         raise ValueError("Launch powers are unreasonable for PCFM.")
 
-    g_ch = launch_powers_w / B_ch  * 2 ## FIXME just a rescaling due to power per polarization -> power per channel (x2 multiplication)
+    g_ch = _to_per_channel_power(launch_powers_w) / B_ch
 
     g_sci_psd = np.zeros((1, n_channels), dtype=float)
     g_xci_psd = np.zeros((1, n_channels), dtype=float)
@@ -732,7 +737,7 @@ def compute_pcfm_nlin(
                 coeffs[i], L, beta2_sci, B_ch, cfg.n_f, cfg.n_z, cfg.phase_coeff
             )
         # omit p(L) scaling in PCFM NLI PSD.
-        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
+        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci # FIXME what if we want to use the XCI only result?
 
         g_xci_sum = 0.0
         for j in range(n_channels):
@@ -756,11 +761,11 @@ def compute_pcfm_nlin(
                 # lg.warning("in K_XCI, log: {:.1e} and baud: {:.1e}, Delta f: {:.1e}, Beta2eff: {:.1e}. ".format(log_term, B_ch, delta_f, beta2_eff))
             # omit p(L) scaling in PCFM NLI PSD.
             # 
-            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci / 2.0 ## FIXME just a rescaling due to power per channel -> power per polarization (/2 division of the final result)
+            g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci # this used to be divided by 2, but now no more
             g_xci_sum += g_xci
 
         g_sci_psd[0, i] = g_sci
-        g_xci_psd[0, i] = g_xci_sum
+        g_xci_psd[0, i] = g_xci_sum # summed over all the interferers
         if i in (0, n_channels // 2, n_channels - 1):
             nli_power = _to_per_polarization_power((g_sci + g_xci_sum) * B_ch)
             lg.info(

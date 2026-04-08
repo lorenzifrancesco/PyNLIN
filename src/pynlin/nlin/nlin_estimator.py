@@ -206,7 +206,7 @@ def gvd_correction(cf,
     lo_value = 0.0
     for m_lo in range(m_lo_truncation+1):
         I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
-        interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse) # FIXME oh god, we are doing this every time!
+        interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse) # FIXME this may be hot if taken without caching
         # this is also in normalized units
         def I_specific(x): return interp(x/lda, x/ldb)
         lg.trace(
@@ -364,7 +364,7 @@ def collision_coeffs_system(cf,
                             ipulse: int = 1,
                             recompute: bool = False,):
     """Compute or load channel-pair collision coefficients for the given config."""
-    # assert cf.launch_power == -5 # FIXME this is no longer appropriate for the 
+    # assert cf.launch_power == -5
     # assert cf.raman_gain == 0.0
     # assert cf.baud_rate == 33e9
     # assert cf.channel_spacing == 50e9

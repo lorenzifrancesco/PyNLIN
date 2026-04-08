@@ -272,6 +272,7 @@ def simple_plot_threshold(gvda: float = 0.0,
                           ipulse: int = 1,
                           m_lo_truncation: int = 0):
     """Plot fitted and numeric NLIN vs walk-off for a single pulse family."""
+    raise NotImplementedError("This is using mmf.toml, which is not appropriate for the current workflow. Refactor to take cf/nc as arguments instead of hardcoding the file paths.")
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
     cf = _load_cf_with_legacy_support(cf_path, nc_path)
@@ -412,7 +413,7 @@ def plot_threshold(
     if not use_fB:
         fB_simple_interpolation = True
         lg.trace("Disabling fB_simple_interpolation since use_fB is False")
-
+    raise NotImplementedError("This is using mmf.toml, which is not appropriate for the current workflow. Refactor to take cf/nc as arguments instead of hardcoding the file paths.")
     cf_path = "./input/mmf.toml"  # FIXME repeated code
     nc_path = "./input/numerical_config.toml"
     cf = _load_cf_with_legacy_support(cf_path, nc_path)

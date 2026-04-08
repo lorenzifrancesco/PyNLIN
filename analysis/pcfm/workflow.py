@@ -284,24 +284,25 @@ def run_pcfm_workflow(
         exclude_self_channel=td_exclude_self_channel,
         cache_path=_nlin_cache_path(
             profile_path,
-            use_kappa=False,
+            use_kappa=True, # when false, we needed to apply the Manakov scaling originates from this. When using SMF, the actual kappa is 1x1 and contains 8/9 (Manakov averaging). 8/9 is actually the value contained in the kappa matrix for FMF, so use that
             use_x_mode=True,
             extra_tag=f"disp{dispersion_tag}_{'xci' if td_exclude_self_channel else 'all'}",
         ),
         recompute=recompute_td,
     )
-    nlin_td_flat = _apply_pcfm_manakov_scaling(nlin_td).reshape(-1)
-
+    # nlin_td_flat = _apply_pcfm_manakov_scaling(nlin_td).reshape(-1) 
+    nlin_td_flat = np.asarray(nlin_td, dtype=float).reshape(-1)
+    
     qam_orders = [16, 64, 256]
     const_pref, sum_a, sum_b = _td_modulation_components(
         system,
         ccfs,
         launch_powers,
-        use_kappa=False,
+        use_kappa=True, # see above comment
         use_x_mode=True,
         exclude_self_channel=td_exclude_self_channel,
     )
-    const_pref = _apply_pcfm_manakov_scaling(const_pref)
+    # const_pref = _apply_pcfm_manakov_scaling(const_pref)
 
     td_modulations: dict[str, np.ndarray] = {}
     for order in qam_orders:
