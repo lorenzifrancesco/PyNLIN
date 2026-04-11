@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.constants import c
 
 import pynlin.nlin.nlin_estimator_uwb as nlin_uwb
 from pynlin.constellation_stats import qam_mu0
@@ -60,13 +59,8 @@ def _td_modulation_components(
             )
 
     freqs = system.wdm.frequency_grid()
-    n2 = 2.6e-20
-    aeff = nlin_uwb._effective_area_array(system, freqs)
-    # FIXME: TD currently uses the CUT-channel gamma only. Revisit whether
-    # mixed gamma should be used here for cross-channel UWB interactions.
-    gamma = n2 * (2.0 * np.pi * freqs) / (aeff * c)
-    gamma = gamma[None, :]
-    constant_prefactor = (power_in**3) * (gamma**2) / (baud_rate**2)
+    gamma2 = nlin_uwb._gamma_matrix_uwb(system, freqs) ** 2
+    constant_prefactor = (power_in**3) / (baud_rate**2)
 
     if use_kappa:
         kappa2 = nlin_uwb.get_kappa2_matrix_uwb(system, use_kappa=True, use_x_mode=use_x_mode)
@@ -83,6 +77,7 @@ def _td_modulation_components(
                 a_coeff, b_coeff = _td_prefactor_coeffs(mode_a, mode_b, n_modes)
                 weight = kappa2[mode_a, mode_b]
                 coeffs_b = collision_coeffs_si[mode_a, nu_a, mode_b, :]
+                coeffs_b = coeffs_b * gamma2[nu_a, :]
                 if exclude_self_channel:
                     coeff_sum = float(np.sum(coeffs_b) - coeffs_b[nu_a])
                 else:

@@ -153,6 +153,23 @@ def _effective_area_array(system: System, freqs: np.ndarray) -> np.ndarray:
     return np.full_like(freqs, _get_effective_area(system), dtype=float)
 
 
+def _gamma_matrix_uwb(system: System, freqs: np.ndarray) -> np.ndarray:
+    """Return pairwise nonlinear coefficients ``gamma_ij`` for TD/PCFM parity.
+
+    The active PCFM branch uses
+
+    ``gamma_ij = 2*pi*f_i/c * 2*n2 / (Aeff_i + Aeff_j)``
+
+    for XCI and the same expression collapses to the usual CUT ``gamma_i`` on
+    the diagonal. Using the same matrix here keeps TD and PCFM aligned.
+    """
+    freqs = np.asarray(freqs, dtype=float).reshape(-1)
+    aeff = _effective_area_array(system, freqs)
+    n2 = 2.6e-20
+    cut_factor = n2 * (2.0 * np.pi * freqs) / c
+    return cut_factor[:, None] * (2.0 / (aeff[:, None] + aeff[None, :]))
+
+
 def _get_launch_power_w(system: System) -> float:
     """Resolve scalar launch power from system settings and convert to Watt."""
     lp_dbm = getattr(system, "launch_power", None)
@@ -401,20 +418,18 @@ def total_nlin_uwb(system: System,
     freqs = system.wdm.frequency_grid()
     if freqs.size != n_freqs:
         raise ValueError(f"freq grid size {freqs.size} != n_freqs {n_freqs}")
-    n2 = 2.6e-20  # constant of SiO2
-    aeff = _effective_area_array(system, freqs)
-    gamma = n2 * (2 * np.pi * freqs) / (aeff * c)
-    gamma = gamma[None, :]
-    constant_prefactor = (P_in_arr**3) * (gamma**2) / (br**2)
+    gamma2 = _gamma_matrix_uwb(system, freqs) ** 2
+    base_prefactor = (P_in_arr**3) / (br**2)
     lg.trace(
-        "gamma[min/mean/max]=({:.2e}, {:.2e}, {:.2e}) 1/(W m), "
-        "P_in mean={:.2e} W -> prefactor range [{:.2e}, {:.2e}]".format(
-            float(np.min(gamma)),
-            float(np.mean(gamma)),
-            float(np.max(gamma)),
+        "gamma_ij^2 diag[min/max]=({:.2e}, {:.2e}), offdiag[min/max]=({:.2e}, {:.2e}), "
+        "P_in mean={:.2e} W -> base prefactor range [{:.2e}, {:.2e}]".format(
+            float(np.min(np.diag(gamma2))),
+            float(np.max(np.diag(gamma2))),
+            float(np.min(gamma2)),
+            float(np.max(gamma2)),
             float(P_in_arr.mean()),
-            float(constant_prefactor.min()),
-            float(constant_prefactor.max()),
+            float(base_prefactor.min()),
+            float(base_prefactor.max()),
         )
     )
 
@@ -428,8 +443,13 @@ def total_nlin_uwb(system: System,
                     if exclude_self_channel and nuB == nuA:
                         continue
                     prefactor = nlin_prefactor(system, mA, mB)
-                    total_nlin[mA, nuA] += collision_coeffs_si[mA, nuA, mB, nuB] * kappa2[mA, mB] * prefactor
-    total_nlin *= constant_prefactor
+                    total_nlin[mA, nuA] += (
+                        collision_coeffs_si[mA, nuA, mB, nuB]
+                        * kappa2[mA, mB]
+                        * prefactor
+                        * gamma2[nuA, nuB]
+                    )
+    total_nlin *= base_prefactor
     if cache_target is not None:
         cache_target.parent.mkdir(parents=True, exist_ok=True)
         np.save(cache_target, total_nlin)
