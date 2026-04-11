@@ -7,6 +7,8 @@ from loguru import logger as lg
 from pynlin.nlin.pcfm_gn import fit_spp_polynomials, load_signal_profiles, normalize_spp
 from pynlin.system import System
 
+from .figure_size import scale_figsize_to_ieee_column
+
 
 def plot_pcfm_gsnr(
     freqs_hz: np.ndarray,
@@ -21,7 +23,7 @@ def plot_pcfm_gsnr(
     """Plot GSNR_NLI overlays with the same style as existing noise plots."""
     dpi = 300
     marker_lw = 0.45
-    fig, ax = plt.subplots(figsize=(3.6, 2.8))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
     if title:
         ax.set_title(title, fontsize=9)
     ax.plot(
@@ -130,7 +132,7 @@ def plot_pcfm_nlin_power(
             return 10.0 * np.log10(np.maximum(nlin, 1e-18))
         return 10.0 * np.log10(np.maximum(nlin, 1e-18) / denom)
 
-    fig, ax = plt.subplots(figsize=(3.6, 2.8))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
     if nlin_td_mod_w:
         styles = ["-", "--", ":"]
         style_idx = 0
@@ -297,7 +299,7 @@ def plot_pcfm_diagnostics(
     freqs_thz = freqs * 1e-12
     launch_dbm = 10.0 * np.log10(np.maximum(launch_powers_w, 1e-18) / 1e-3)
 
-    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, launch_dbm, lw=0.8, color="black")
     ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
     ax.set_ylabel(r"$P_\mathrm{launch}\;[\mathrm{dBm}]$")
@@ -314,7 +316,7 @@ def plot_pcfm_diagnostics(
     avg_dbm = 10.0 * np.log10(np.maximum(avg_power, 1e-18) / 1e-3)
     out_dbm = 10.0 * np.log10(np.maximum(out_power, 1e-18) / 1e-3)
 
-    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, avg_dbm, lw=0.8, color="tab:blue", label="avg")
     ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
     ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
@@ -349,7 +351,7 @@ def plot_pcfm_diagnostics(
         picks = [n_ch // 6, n_ch // 2, 5 * n_ch // 6]
         labels = [f"Ch {p}" for p in picks]
 
-    fig, ax = plt.subplots(figsize=(4.0, 2.8))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(4.0, 2.8))
     first = True
     for idx, label in zip(picks, labels):
         p_fit = np.polynomial.polynomial.polyval(z_norm, coeffs[idx])
@@ -396,7 +398,7 @@ def plot_pcfm_diagnostics(
         ],
         dtype=float,
     )
-    fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
+    fig, ax1 = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax1.plot(freqs_thz, p_l, lw=0.8, color="tab:blue")
     ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
     ax1.set_ylabel(r"$p(L)$", color="tab:blue")
@@ -416,7 +418,7 @@ def plot_pcfm_diagnostics(
     else:
         pump_freqs_thz = np.array([])
         pump_powers_dbm = np.array([])
-    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.scatter(freqs_thz, launch_dbm, s=6, alpha=0.7, label="signals (launch)")
     ax.scatter(
         freqs_thz,
@@ -448,7 +450,7 @@ def plot_pcfm_diagnostics(
     wl = 3e8 / freqs
     beta2 = np.array([system.fiber.beta2_at(float(w)) for w in wl], dtype=float)
     aeff = np.array([system.fiber.effective_area_at(float(w)) for w in wl], dtype=float)
-    fig, ax1 = plt.subplots(figsize=(3.6, 2.4))
+    fig, ax1 = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax1.plot(freqs_thz, beta2 * 1e24, lw=0.8, color="tab:blue")
     ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
     ax1.set_ylabel(r"$\\beta_2\\;[10^{-24}\\,s^2/m]$", color="tab:blue")

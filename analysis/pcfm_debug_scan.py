@@ -17,6 +17,10 @@ from pynlin.utils import dBm2watt
 
 try:
     from analysis.pcfm.config import _load_pcfm_runtime_config
+    from analysis.pcfm.figure_size import (
+        IEEE_DOUBLE_COLUMN_ONE_COLUMN_WIDTH_IN,
+        scale_figsize_to_ieee_column,
+    )
     from analysis.pcfm.io import _resolve_signal_power, _write_flat_profile
     from analysis.pcfm.models import _load_or_compute_pcfm
     from analysis.pcfm.td import _td_modulation_components
@@ -24,6 +28,10 @@ try:
     from analysis.uwb_nlin import _nlin_cache_path
 except ModuleNotFoundError:
     from pcfm.config import _load_pcfm_runtime_config  # type: ignore[no-redef]
+    from pcfm.figure_size import (  # type: ignore[no-redef]
+        IEEE_DOUBLE_COLUMN_ONE_COLUMN_WIDTH_IN,
+        scale_figsize_to_ieee_column,
+    )
     from pcfm.io import _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
     from pcfm.models import _load_or_compute_pcfm  # type: ignore[no-redef]
     from pcfm.td import _td_modulation_components  # type: ignore[no-redef]
@@ -155,7 +163,16 @@ def _plot_heatmaps(
         float(max(beta2_values)),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(9.4, 2.9), constrained_layout=True)
+    panel_height = scale_figsize_to_ieee_column(9.4, 2.9)[1]
+    fig, axes = plt.subplots(
+        3,
+        1,
+        figsize=(
+            IEEE_DOUBLE_COLUMN_ONE_COLUMN_WIDTH_IN,
+            3.0 * panel_height,
+        ),
+        constrained_layout=True,
+    )
     pcfm_plot_db = pcfm_db if plot_pcfm_total_and_sci else pcfm_xci_db
     diff_plot_db = diff_db if plot_pcfm_total_and_sci else diff_xci_db
     pcfm_label = "PCFM" if plot_pcfm_total_and_sci else "PCFM XCI"
@@ -167,7 +184,7 @@ def _plot_heatmaps(
         ),
         (diff_plot_db, f"{channel_label}: TD - {pcfm_label} [dB]"),
     ]
-    for ax, (z, title) in zip(axes, plots):
+    for ax, (z, title) in zip(np.atleast_1d(axes), plots):
         im = ax.imshow(
             z,
             aspect="auto",
@@ -200,7 +217,16 @@ def _plot_linecuts(
     )
     pcfm_plot_db = pcfm_db if plot_pcfm_total_and_sci else pcfm_xci_db
     pcfm_label = "PCFM" if plot_pcfm_total_and_sci else "PCFM XCI"
-    fig, axes = plt.subplots(1, 2, figsize=(10.2, 3.4), constrained_layout=True)
+    panel_height = scale_figsize_to_ieee_column(10.2, 3.4)[1]
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(
+            IEEE_DOUBLE_COLUMN_ONE_COLUMN_WIDTH_IN,
+            2.0 * panel_height,
+        ),
+        constrained_layout=True,
+    )
     ax_p, ax_b = axes
 
     beta_colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(beta2_values)))
@@ -248,7 +274,7 @@ def _plot_linecuts(
     ax_p.set_xlabel("Launch power [dBm]")
     ax_p.set_ylabel(r"$10\log_{10}(P_{NLI}/P_{sig})$ [dB]")
     ax_p.grid(alpha=0.25)
-    ax_p.legend(fontsize=6, ncol=2)
+    ax_p.legend(fontsize=5.5, ncol=1)
 
     for j, launch_dbm in enumerate(power_dbm_values):
         color = power_colors[j]
@@ -292,7 +318,7 @@ def _plot_linecuts(
     ax_b.set_xlabel(r"$\beta_2$ [s$^2$/m]")
     ax_b.set_ylabel(r"$10\log_{10}(P_{NLI}/P_{sig})$ [dB]")
     ax_b.grid(alpha=0.25)
-    ax_b.legend(fontsize=6, ncol=2)
+    ax_b.legend(fontsize=5.5, ncol=1)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=260)

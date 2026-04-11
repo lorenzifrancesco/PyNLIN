@@ -18,10 +18,10 @@ from analysis.pcfm.config import (
     _resolve_scaling_run_flags,
     _select_scaling_channel,
 )
+from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
 from analysis.pcfm.models import _load_or_compute_pcfm
 from analysis.pcfm.td import _td_modulation_components
-from analysis.pcfm.workflow import MANAKOV_SCALE_PCFM
 from analysis.uwb_nlin import _nlin_cache_path
 
 plt.rcParams["text.usetex"] = False
@@ -79,7 +79,7 @@ def _plot_scaling(
 ) -> None:
     lengths_km = np.array([row["length_km"] for row in rows], dtype=float)
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
-    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
@@ -188,24 +188,23 @@ def run_length_sweep(
         nlin_td = total_nlin_uwb(
             system,
             ccfs,
-            use_kappa=False,
+            use_kappa=True,
             use_x_mode=True,
             launch_powers_w=launch_vec,
             exclude_self_channel=exclude_self_channel,
             cache_path=td_cache,
             recompute=recompute_td,
         )
-        td_vec = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_PCFM)
+        td_vec = np.asarray(nlin_td, dtype=float).reshape(-1)
 
         const_pref, sum_a, sum_b = _td_modulation_components(
             system,
             ccfs,
             launch_vec,
-            use_kappa=False,
+            use_kappa=True,
             use_x_mode=True,
             exclude_self_channel=exclude_self_channel,
         )
-        const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_PCFM)
         td_gaussian_vec = np.asarray(
             const_pref * (gaussian_mu0() * sum_a + sum_b),
             dtype=float,
@@ -327,7 +326,7 @@ def main() -> None:
     parser.add_argument(
         "--lengths-km",
         type=str,
-        default="10,25,50,100,200,400",
+        default="10,25,50,100,200",
         help="Comma-separated fiber lengths in km.",
     )
     parser.add_argument(

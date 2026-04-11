@@ -19,6 +19,7 @@ from analysis.pcfm.config import (
     _resolve_scaling_run_flags,
     _select_scaling_channel,
 )
+from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
 from analysis.pcfm.models import _load_or_compute_pcfm
 from analysis.pcfm.td import _td_modulation_components
@@ -109,7 +110,7 @@ def _plot_scaling(
     spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
     freqs = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
-    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
@@ -149,7 +150,7 @@ def _plot_normalized_scaling(
     spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
     freqs = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
-    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
     for (label, values), color in zip(series.items(), colors):
         ref = float(values[0]) if values.size else 1.0

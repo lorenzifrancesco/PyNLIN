@@ -34,11 +34,12 @@ from .td import _qam_mu0, _td_modulation_components
 
 from analysis.uwb_nlin import _nlin_cache_path, compute_raman_profiles, plot_power_profiles
 
-MANAKOV_SCALE_PCFM = 16.0 / 9.0
+MANAKOV_SCALE_PCFM = np.nan # this legacy thing must explode
 PCFM_MEDIA_DIR = Path("media") / "PCFM"
 
 def _apply_pcfm_manakov_scaling(values: np.ndarray) -> np.ndarray:
     """Apply manual 16/9 Manakov scaling for PCFM TD comparisons."""
+    raise("No more using this")
     return np.asarray(values, dtype=float) * MANAKOV_SCALE_PCFM
 
 

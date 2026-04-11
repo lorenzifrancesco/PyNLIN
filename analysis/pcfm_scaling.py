@@ -70,19 +70,19 @@ def main() -> None:
     parser.add_argument(
         "--channel-spacing-ghz",
         type=str,
-        default="100,500,700",
+        default="100,200,300,500,700",
         help="Comma-separated channel spacing values in GHz.",
     )
     parser.add_argument(
         "--baud-rates-gbaud",
         type=str,
-        default="10,50,100",
+        default="10,25,50,75,100",
         help="Comma-separated baud rates in GBaud.",
     )
     parser.add_argument(
         "--lengths-km",
         type=str,
-        default="10,25,50,100,200,400",
+        default="10,25,50,100,200",
         help="Comma-separated fiber lengths in km.",
     )
     parser.add_argument(

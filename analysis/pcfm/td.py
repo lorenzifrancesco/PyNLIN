@@ -63,7 +63,7 @@ def _td_modulation_components(
     n2 = 2.6e-20
     aeff = nlin_uwb._effective_area_array(system, freqs)
     # FIXME: TD currently uses the CUT-channel gamma only. Revisit whether
-    # mixed gamma should be used here for cross-channel interactions.
+    # mixed gamma should be used here for cross-channel UWB interactions.
     gamma = n2 * (2.0 * np.pi * freqs) / (aeff * c)
     gamma = gamma[None, :]
     constant_prefactor = (power_in**3) * (gamma**2) / (baud_rate**2)
