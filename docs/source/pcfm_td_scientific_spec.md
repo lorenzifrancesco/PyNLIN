@@ -385,11 +385,18 @@ Its scientific role is to expose the modulation-affine decomposition of the
 TD output. That functionality is useful, but scientifically it belongs to the
 same TD model already implemented in `pynlin`.
 
-### 3. TD uses CUT-channel `gamma` in the current postprocessing
+### 3. TD/PCFM gamma conventions must stay aligned
 
-The present TD postprocessing keeps the CUT-channel Kerr coefficient for all
-interferers, whereas PCFM XCI uses `gamma_ij`. This is harmless in the constant
-`A_eff` idealized limit, but it matters outside that regime.
+The active TD branch should use the same pairwise Kerr coefficient convention
+as PCFM XCI,
+
+```{math}
+\gamma_{ij} = \frac{2 \pi f_i}{c} \frac{2 n_2}{A_{\mathrm{eff},i}+A_{\mathrm{eff},j}},
+```
+
+which reduces to the usual CUT coefficient on the diagonal. If TD and PCFM
+diverge on this point, off-diagonal comparisons become biased as soon as
+`A_eff(f)` is not constant.
 
 ## Recommended Scientific Interpretation
 

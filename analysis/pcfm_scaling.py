@@ -70,7 +70,7 @@ def main() -> None:
     parser.add_argument(
         "--channel-spacing-ghz",
         type=str,
-        default="100,200,300,500,700",
+        default="56.25,62.5,75,100,118.75,125",
         help="Comma-separated channel spacing values in GHz.",
     )
     parser.add_argument(

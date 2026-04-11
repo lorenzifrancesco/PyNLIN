@@ -15,9 +15,11 @@ from pynlin.system import System
 from pynlin.wdm import IrregularWDM, RegularWDM
 
 from analysis.pcfm.config import (
+    _channel_nonoverlap_spacing_hz,
     _load_pcfm_runtime_config,
     _resolve_scaling_run_flags,
     _select_scaling_channel,
+    _wdm_nonoverlap_max_spacing_hz,
 )
 from analysis.pcfm.analytics import flat_profile_pcfm_xci_channel_power
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
@@ -224,11 +226,41 @@ def run_spacing_sweep(
     exclude_self_channel = run_flags["exclude_self_channel"]
     plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
     center_idx, band_label = _select_scaling_channel(base_system)
+    min_spacing_nonoverlap_hz = _channel_nonoverlap_spacing_hz(base_system)
+    min_spacing_nonoverlap_ghz = min_spacing_nonoverlap_hz * 1e-9
+    max_spacing_nonoverlap_hz = _wdm_nonoverlap_max_spacing_hz(base_system)
+    max_spacing_nonoverlap_ghz = (
+        None if max_spacing_nonoverlap_hz is None else max_spacing_nonoverlap_hz * 1e-9
+    )
     lg.info("Selected center channel idx={} in band={}.".format(center_idx, band_label))
+    lg.info(
+        "Using spacing fit range S in [{:.3f}, {}] GHz.".format(
+            min_spacing_nonoverlap_ghz,
+            "inf"
+            if max_spacing_nonoverlap_ghz is None
+            else f"{max_spacing_nonoverlap_ghz:.3f}",
+        )
+    )
 
     for spacing_ghz in spacing_ghz_values:
         system = System.from_toml(cfg_path)
         spacing_hz = float(spacing_ghz) * 1e9
+        if spacing_hz < min_spacing_nonoverlap_hz:
+            reason = (
+                "below non-overlap threshold "
+                f"{min_spacing_nonoverlap_ghz:.3f} GHz"
+            )
+            skipped_spacings.append((float(spacing_ghz), reason))
+            lg.warning("Skipping S={:.2f} GHz: {}".format(float(spacing_ghz), reason))
+            continue
+        if max_spacing_nonoverlap_hz is not None and spacing_hz > max_spacing_nonoverlap_hz:
+            reason = (
+                "above inter-band non-overlap threshold "
+                f"{max_spacing_nonoverlap_ghz:.3f} GHz"
+            )
+            skipped_spacings.append((float(spacing_ghz), reason))
+            lg.warning("Skipping S={:.2f} GHz: {}".format(float(spacing_ghz), reason))
+            continue
         try:
             _rebuild_wdm_with_spacing(system, spacing_hz)
         except ValueError as exc:
@@ -392,6 +424,12 @@ def run_spacing_sweep(
 
     summary_lines = [
         f"Center channel idx={center_idx}, band={band_label}, freq={channel_freq_thz:.6f} THz",
+        "Spacing fit range: [{:.6f}, {}] GHz".format(
+            min_spacing_nonoverlap_ghz,
+            "inf"
+            if max_spacing_nonoverlap_ghz is None
+            else f"{max_spacing_nonoverlap_ghz:.6f}",
+        ),
         f"TD mode: {'exclude self-channel (nuB==nuA)' if exclude_self_channel else 'include all channels'}",
         f"TD 64-QAM exponent: {_fit_exponent(spacing_hz, np.array([row['td_channel_w'] for row in rows], dtype=float)):.6f}",
         f"TD Gaussian exponent: {_fit_exponent(spacing_hz, np.array([row['td_gaussian_channel_w'] for row in rows], dtype=float)):.6f}",
@@ -424,7 +462,7 @@ def main() -> None:
     parser.add_argument(
         "--spacing-ghz",
         type=str,
-        default="100, 200, 300, 500, 700",
+        default="56.25,62.5,75,100,118.75,125",
         help="Comma-separated channel spacing values in GHz.",
     )
     parser.add_argument(
