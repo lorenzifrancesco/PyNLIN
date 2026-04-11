@@ -2,8 +2,11 @@ from pathlib import Path
 from typing import Mapping
 
 import numpy as np
+from scipy.constants import c
 
+from pynlin.pulses import PulseType, RaisedCosinePulse, RootRaisedCosinePulse
 from pynlin.system import System
+from pynlin.wdm import IrregularWDM
 
 PROFILE_MAX_W = 10.0
 _BINARY_MODES = {"off", "on"}
@@ -219,3 +222,60 @@ def _select_scaling_channel(system: System) -> tuple[int, str]:
 
     center_idx = int(np.argmin(np.abs(freqs - target_freq)))
     return center_idx, "overall"
+
+
+def _channel_nonoverlap_spacing_hz(system: System) -> float:
+    """Return the minimum adjacent-channel spacing that avoids spectral overlap.
+
+    The spacing sweep should stay in the regime where neighboring WDM channels
+    do not overlap spectrally. For Nyquist/Gaussian pulses we use the symbol
+    rate as the effective occupied bandwidth. For raised-cosine families we
+    include the roll-off expansion of the support.
+    """
+    baud_rate_hz = float(system.pulse.baud_rate)
+    pulse_cfg = getattr(system, "pulse_config", None)
+    pulse_type = getattr(pulse_cfg, "type", None)
+    rolloff = getattr(pulse_cfg, "rolloff", None)
+    if rolloff is None:
+        rolloff = getattr(system.pulse, "rolloff", None)
+    rolloff = 0.0 if rolloff is None else max(float(rolloff), 0.0)
+
+    if pulse_type in (PulseType.RAISED_COSINE, PulseType.ROOT_RAISED_COSINE) or isinstance(
+        system.pulse, (RaisedCosinePulse, RootRaisedCosinePulse)
+    ):
+        return baud_rate_hz * (1.0 + rolloff)
+    return baud_rate_hz
+
+
+def _wdm_nonoverlap_max_spacing_hz(system: System) -> float | None:
+    """Return the largest spacing that preserves non-overlap between WDM bands.
+
+    For irregular multi-band grids, increasing the global spacing stretches each
+    band from its fixed start wavelength. This yields a hard upper bound beyond
+    which adjacent bands overlap in frequency. Regular single-band grids do not
+    have this constraint, so ``None`` is returned.
+    """
+    wdm = system.wdm
+    if not isinstance(wdm, IrregularWDM):
+        return None
+
+    ordered_specs = sorted(wdm.band_specs.items(), key=lambda kv: kv[1].start_nm)
+    if len(ordered_specs) < 2:
+        return None
+
+    max_spacing_hz = float("inf")
+    for idx, (_, upper_spec) in enumerate(ordered_specs[:-1]):
+        upper_start_hz = float(c / (upper_spec.start_nm * 1e-9))
+        upper_span_channels = int(upper_spec.n_channels) - 1
+        if upper_span_channels <= 0:
+            continue
+        for _, lower_spec in ordered_specs[idx + 1 :]:
+            lower_start_hz = float(c / (lower_spec.start_nm * 1e-9))
+            gap_hz = upper_start_hz - lower_start_hz
+            if gap_hz <= 0.0:
+                return 0.0
+            max_spacing_hz = min(max_spacing_hz, gap_hz / upper_span_channels)
+
+    if not np.isfinite(max_spacing_hz):
+        return None
+    return max_spacing_hz
