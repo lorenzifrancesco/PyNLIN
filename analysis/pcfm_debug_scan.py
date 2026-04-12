@@ -24,7 +24,6 @@ try:
     from analysis.pcfm.io import _resolve_signal_power, _write_flat_profile
     from analysis.pcfm.models import _load_or_compute_pcfm
     from analysis.pcfm.td import _td_modulation_components
-    from analysis.pcfm.workflow import MANAKOV_SCALE_PCFM
     from analysis.uwb_nlin import _nlin_cache_path
 except ModuleNotFoundError:
     from pcfm.config import _load_pcfm_runtime_config  # type: ignore[no-redef]
@@ -35,7 +34,6 @@ except ModuleNotFoundError:
     from pcfm.io import _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
     from pcfm.models import _load_or_compute_pcfm  # type: ignore[no-redef]
     from pcfm.td import _td_modulation_components  # type: ignore[no-redef]
-    from pcfm.workflow import MANAKOV_SCALE_PCFM  # type: ignore[no-redef]
     from uwb_nlin import _nlin_cache_path  # type: ignore[no-redef]
 
 
@@ -382,28 +380,27 @@ def run_scan(
             )
             td_cache = _nlin_cache_path(
                 profile_path=profile_path,
-                use_kappa=False,
+                use_kappa=True,
                 use_x_mode=True,
                 extra_tag=f"disp{disp_tag}_p{p_tag}",
             )
             nlin_td = total_nlin_uwb(
                 system,
                 ccfs,
-                use_kappa=False,
+                use_kappa=True,
                 use_x_mode=True,
                 launch_powers_w=launch_vec,
                 cache_path=td_cache,
                 recompute=recompute_td,
             )
-            td_vec_total = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_PCFM)
+            td_vec_total = np.asarray(nlin_td, dtype=float).reshape(-1)
             const_pref, sum_a, sum_b = _td_modulation_components(
                 system,
                 ccfs,
                 launch_vec,
-                use_kappa=False,
+                use_kappa=True,
                 use_x_mode=True,
             )
-            const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_PCFM)
             mu0_64 = qam_mu0(64)
             mu0_gaussian = gaussian_mu0()
             td_vec_qam64 = np.asarray(

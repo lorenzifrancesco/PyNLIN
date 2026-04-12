@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from loguru import logger as lg
+from matplotlib.ticker import ScalarFormatter
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -12,8 +13,10 @@ from pynlin.constellation_stats import gaussian_mu0
 from pynlin.nlin.nlin_estimator_uwb import collision_coeffs_system_uwb, total_nlin_uwb
 from pynlin.nlin.pcfm_gn import PcfmConfig
 from pynlin.system import System
+from pynlin.utils import dBm2watt, watt2dBm
 
 from analysis.pcfm.config import (
+    _format_scaling_plot_title,
     _load_pcfm_runtime_config,
     _resolve_scaling_run_flags,
     _select_scaling_channel,
@@ -44,6 +47,13 @@ def _fit_exponent(lengths_m: np.ndarray, values_w: np.ndarray) -> float:
     return float(coeffs[0])
 
 
+def _disable_dbm_axis_grouping(ax: plt.Axes) -> None:
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    ax.yaxis.set_major_formatter(formatter)
+    ax.yaxis.offsetText.set_visible(False)
+
+
 def _scaling_series(
     rows: list[dict],
     plot_pcfm_total_and_sci: bool,
@@ -64,17 +74,16 @@ def _save_figure(fig: plt.Figure, out_path: Path) -> None:
     fig.tight_layout()
     fig.savefig(out_path, dpi=260)
     lg.success("Plot saved: {}", out_path.resolve())
-    if out_path.suffix.lower() == ".png":
-        pdf_path = out_path.with_suffix(".pdf")
-        fig.savefig(pdf_path)
-        lg.success("Plot saved: {}", pdf_path.resolve())
 
 
 def _plot_scaling(
     rows: list[dict],
     out_path: Path,
+    base_system: System,
     channel_idx: int,
+    band_label: str,
     channel_freq_thz: float,
+    launch_powers_w: np.ndarray,
     plot_pcfm_total_and_sci: bool,
 ) -> None:
     lengths_km = np.array([row["length_km"] for row in rows], dtype=float)
@@ -84,7 +93,7 @@ def _plot_scaling(
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
             lengths_km,
-            values,
+            watt2dBm(np.maximum(np.asarray(values, dtype=float), 1e-18)),
             marker="o",
             markersize=3,
             markerfacecolor="none",
@@ -100,16 +109,25 @@ def _plot_scaling(
     linear_values = initial_value_w * (lengths_km / initial_length_km)
     ax.plot(
         lengths_km,
-        linear_values,
+        watt2dBm(np.maximum(np.asarray(linear_values, dtype=float), 1e-18)),
         linestyle="--",
         color="gray",
         label="Linear scaling (p=1.000)",
     )
     ax.set_xscale("log")
-    ax.set_yscale("log")
     ax.set_xlabel("Fiber length [km]")
-    ax.set_ylabel("Center-channel NLI power [W]")
-    ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
+    ax.set_ylabel("Center-channel NLI power [dBm]")
+    _disable_dbm_axis_grouping(ax)
+    ax.set_title(
+        _format_scaling_plot_title(
+            base_system,
+            sweep_axis="length",
+            channel_idx=channel_idx,
+            band_label=band_label,
+            launch_powers_w=launch_powers_w,
+            channel_freq_thz=channel_freq_thz,
+        )
+    )
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _save_figure(fig, out_path)
@@ -148,6 +166,15 @@ def run_length_sweep(
     center_idx, band_label = _select_scaling_channel(base_system)
     freqs = base_system.wdm.frequency_grid()
     channel_freq_thz = float(freqs[center_idx] * 1e-12)
+    if launch_dbm is not None:
+        title_launch_vec = np.full(base_system.n_channels, float(dBm2watt(launch_dbm)), dtype=float)
+    else:
+        title_launch_vec = _resolve_launch_powers(
+            base_system,
+            profile_path=None,
+            launch_csv_path=None,
+            use_profile=False,
+        )
     lg.info(
         "Selected center channel idx={} in band={} at {:.6f} THz.".format(
             center_idx, band_label, channel_freq_thz
@@ -158,7 +185,7 @@ def run_length_sweep(
         system = System.from_toml(cfg_path)
         system.fiber.length = float(length_km) * 1e3
         if launch_dbm is not None:
-            launch_w = 10 ** ((float(launch_dbm) - 30.0) / 10.0)
+            launch_w = float(dBm2watt(launch_dbm))
             launch_vec = np.full(system.n_channels, launch_w, dtype=float)
         else:
             launch_vec = _resolve_launch_powers(
@@ -181,7 +208,7 @@ def run_length_sweep(
         td_tag = f"{profile_tag}_{'xci' if exclude_self_channel else 'all'}"
         td_cache = _nlin_cache_path(
             profile_path=profile_path,
-            use_kappa=False,
+            use_kappa=True,
             use_x_mode=True,
             extra_tag=td_tag,
         )
@@ -290,12 +317,15 @@ def run_length_sweep(
     data = np.column_stack([[row[name] for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
-    plot_path = Path("media") / "PCFM" / "center_channel_length_scaling.png"
+    plot_path = Path("media") / "PCFM" / "center_channel_length_scaling.pdf"
     _plot_scaling(
         rows,
         plot_path,
+        base_system,
         center_idx,
+        band_label,
         channel_freq_thz,
+        title_launch_vec,
         plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
     )
 

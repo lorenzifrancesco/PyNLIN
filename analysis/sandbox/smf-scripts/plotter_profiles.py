@@ -507,12 +507,12 @@ for fiber_length in fiber_lengths:
 
             if pump_direction != "direct":
                 print("\nWarning: stem plot do not respect real pump directions!")
-            markerline, stemline, baseline, = plt.stem(1e6 * pump_wavelengths_bi[:num_co], 10 * np.log10(
-                pump_powers_bi[:num_co]) + 30, linefmt=None, markerfmt="x", basefmt=None)
+            markerline, stemline, baseline, = plt.stem(1e6 * pump_wavelengths_bi[:num_co], watt2dBm(
+                np.maximum(pump_powers_bi[:num_co], 1e-30)), linefmt=None, markerfmt="x", basefmt=None)
             plt.setp(stemline, linewidth=3, label="co")
             plt.setp(markerline, markersize=15)
-            markerline, stemline, baseline, = plt.stem(1e6 * pump_wavelengths_bi[num_co:], 10 * np.log10(
-                pump_powers_bi[num_co:]) + 30, linefmt=None, markerfmt="o", basefmt=None)
+            markerline, stemline, baseline, = plt.stem(1e6 * pump_wavelengths_bi[num_co:], watt2dBm(
+                np.maximum(pump_powers_bi[num_co:], 1e-30)), linefmt=None, markerfmt="o", basefmt=None)
             plt.setp(stemline, linewidth=3, label="ct")
             plt.setp(markerline, markersize=15)
             cmap_vals = cm.rainbow([item / num_bi for item in range(num_bi)])
@@ -549,7 +549,7 @@ for fiber_length in fiber_lengths:
             if pump_direction != "direct":
                 print("\nWarning: stem plot do not respect real pump directions!")
             markerline, stemline, baseline, = plt.stem(
-                1e6 * pump_wavelengths_co, 10 * np.log10(pump_powers_co) + 30, linefmt=None, markerfmt="x", basefmt=None)
+                1e6 * pump_wavelengths_co, watt2dBm(np.maximum(pump_powers_co, 1e-30)), linefmt=None, markerfmt="x", basefmt=None)
             plt.setp(stemline, linewidth=3, label="co")
             plt.setp(markerline, markersize=15)
             cmap_vals = cm.rainbow([item / num_co for item in range(num_co)])

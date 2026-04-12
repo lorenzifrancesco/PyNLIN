@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from loguru import logger as lg
+from matplotlib.ticker import ScalarFormatter
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -12,8 +13,10 @@ from pynlin.constellation_stats import gaussian_mu0
 from pynlin.nlin.nlin_estimator_uwb import collision_coeffs_system_uwb, total_nlin_uwb
 from pynlin.nlin.pcfm_gn import PcfmConfig
 from pynlin.system import System
+from pynlin.utils import dBm2watt, watt2dBm
 
 from analysis.pcfm.config import (
+    _format_scaling_plot_title,
     _load_pcfm_runtime_config,
     _resolve_scaling_run_flags,
     _select_scaling_channel,
@@ -23,7 +26,6 @@ from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
 from analysis.pcfm.models import _load_or_compute_pcfm
 from analysis.pcfm.td import _td_modulation_components
-from analysis.pcfm.workflow import MANAKOV_SCALE_PCFM
 from analysis.uwb_nlin import _nlin_cache_path
 
 plt.rcParams["text.usetex"] = False
@@ -43,6 +45,13 @@ def _fit_exponent(x_values: np.ndarray, values_w: np.ndarray) -> float:
         return float("nan")
     coeffs = np.polyfit(np.log(x_values[mask]), np.log(values_w[mask]), 1)
     return float(coeffs[0])
+
+
+def _disable_dbm_axis_grouping(ax: plt.Axes) -> None:
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    ax.yaxis.set_major_formatter(formatter)
+    ax.yaxis.offsetText.set_visible(False)
 
 
 def _set_baud_rate(system: System, baud_rate_hz: float) -> None:
@@ -88,17 +97,16 @@ def _save_figure(fig: plt.Figure, out_path: Path) -> None:
     fig.tight_layout()
     fig.savefig(out_path, dpi=260)
     lg.success("Plot saved: {}", out_path.resolve())
-    if out_path.suffix.lower() == ".png":
-        pdf_path = out_path.with_suffix(".pdf")
-        fig.savefig(pdf_path)
-        lg.success("Plot saved: {}", pdf_path.resolve())
 
 
 def _plot_scaling(
     rows: list[dict],
     out_path: Path,
+    base_system: System,
     channel_idx: int,
+    band_label: str,
     channel_freq_thz: float,
+    launch_powers_w: np.ndarray,
     plot_pcfm_total_and_sci: bool,
 ) -> None:
     baud_gbaud = np.array([row["baud_rate_gbaud"] for row in rows], dtype=float)
@@ -108,7 +116,7 @@ def _plot_scaling(
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
             baud_gbaud,
-            values,
+            watt2dBm(np.maximum(np.asarray(values, dtype=float), 1e-18)),
             marker="o",
             markersize=3,
             markerfacecolor="none",
@@ -124,17 +132,26 @@ def _plot_scaling(
     scaling_values = ref_value * (scaling_baud / ref_baud)**(-1.0)  # inverse linear scaling as a reference
     ax.plot(
         scaling_baud / 1e9,
-        scaling_values,
+        watt2dBm(np.maximum(np.asarray(scaling_values, dtype=float), 1e-18)),
         linestyle="--",
         color="gray",
         label="linear scaling reference",
     )
         
     ax.set_xscale("log")
-    ax.set_yscale("log")
     ax.set_xlabel("Baud rate [GBaud]")
-    ax.set_ylabel("Center-channel NLI power [W]")
-    ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
+    ax.set_ylabel("Center-channel NLI power [dBm]")
+    _disable_dbm_axis_grouping(ax)
+    ax.set_title(
+        _format_scaling_plot_title(
+            base_system,
+            sweep_axis="baud",
+            channel_idx=channel_idx,
+            band_label=band_label,
+            launch_powers_w=launch_powers_w,
+            channel_freq_thz=channel_freq_thz,
+        )
+    )
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _save_figure(fig, out_path)
@@ -144,8 +161,11 @@ def _plot_scaling(
 def _plot_normalized_scaling(
     rows: list[dict],
     out_path: Path,
+    base_system: System,
     channel_idx: int,
+    band_label: str,
     channel_freq_thz: float,
+    launch_powers_w: np.ndarray,
     plot_pcfm_total_and_sci: bool,
 ) -> None:
     baud_gbaud = np.array([row["baud_rate_gbaud"] for row in rows], dtype=float)
@@ -170,7 +190,16 @@ def _plot_normalized_scaling(
     ax.set_yscale("log")
     ax.set_xlabel("Baud rate [GBaud]")
     ax.set_ylabel("Normalized center-channel NLI power")
-    ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
+    ax.set_title(
+        _format_scaling_plot_title(
+            base_system,
+            sweep_axis="baud",
+            channel_idx=channel_idx,
+            band_label=band_label,
+            launch_powers_w=launch_powers_w,
+            channel_freq_thz=channel_freq_thz,
+        )
+    )
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _save_figure(fig, out_path)
@@ -207,6 +236,15 @@ def run_baud_sweep(
     center_idx, band_label = _select_scaling_channel(base_system)
     freqs = base_system.wdm.frequency_grid()
     channel_freq_thz = float(freqs[center_idx] * 1e-12)
+    if launch_dbm is not None:
+        title_launch_vec = np.full(base_system.n_channels, float(dBm2watt(launch_dbm)), dtype=float)
+    else:
+        title_launch_vec = _resolve_launch_powers(
+            base_system,
+            profile_path=None,
+            launch_csv_path=None,
+            use_profile=False,
+        )
     lg.info(
         "Selected center channel idx={} in band={} at {:.6f} THz.".format(
             center_idx, band_label, channel_freq_thz
@@ -218,7 +256,7 @@ def run_baud_sweep(
         baud_hz = float(baud_gbaud) * 1e9
         _set_baud_rate(system, baud_hz)
         if launch_dbm is not None:
-            launch_w = 10 ** ((float(launch_dbm) - 30.0) / 10.0)
+            launch_w = float(dBm2watt(launch_dbm))
             launch_vec = np.full(system.n_channels, launch_w, dtype=float)
         else:
             launch_vec = _resolve_launch_powers(
@@ -241,7 +279,7 @@ def run_baud_sweep(
         td_tag = f"{baud_tag}_{'xci' if exclude_self_channel else 'all'}"
         td_cache = _nlin_cache_path(
             profile_path=profile_path,
-            use_kappa=False,
+            use_kappa=True,
             use_x_mode=True,
             extra_tag=td_tag,
         )
@@ -255,7 +293,6 @@ def run_baud_sweep(
             cache_path=td_cache,
             recompute=recompute_td,
         )
-        # td_vec = np.asarray(nlin_td, dtype=float).reshape(-1) * float(MANAKOV_SCALE_PCFM)
         td_vec = np.asarray(nlin_td, dtype=float).reshape(-1) 
         
         const_pref, sum_a, sum_b = _td_modulation_components(
@@ -266,7 +303,6 @@ def run_baud_sweep(
             use_x_mode=True,
             exclude_self_channel=exclude_self_channel,
         )
-        # const_pref = np.asarray(const_pref, dtype=float) * float(MANAKOV_SCALE_PCFM)
         td_gaussian_vec = np.asarray(
             const_pref * (gaussian_mu0() * sum_a + sum_b),
             dtype=float,
@@ -360,12 +396,15 @@ def run_baud_sweep(
     data = np.column_stack([[row[name] for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
-    plot_path = Path("media") / "PCFM" / "center_channel_baud_scaling.png"
+    plot_path = Path("media") / "PCFM" / "center_channel_baud_scaling.pdf"
     _plot_scaling(
         rows,
         plot_path,
+        base_system,
         center_idx,
+        band_label,
         channel_freq_thz,
+        title_launch_vec,
         plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
     )
 

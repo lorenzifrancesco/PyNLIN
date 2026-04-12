@@ -22,7 +22,7 @@ from pynlin.raman.undepleted import (
     signal_power_undepleted_coprop,
 )
 from pynlin.system import System
-from pynlin.utils import alpha_to_linear, dBm2watt
+from pynlin.utils import alpha_to_linear, dBm2watt, watt2dBm
 from pynlin.wdm import IrregularWDM
 
 
@@ -82,7 +82,7 @@ def _alpha_db_per_km(alpha_np_per_m: float) -> float:
 
 def _to_dbm(power_w: np.ndarray | float, floor_w: float = 1e-30) -> np.ndarray:
     power = np.maximum(np.asarray(power_w, dtype=float), floor_w)
-    return 10.0 * np.log10(power) + 30.0
+    return watt2dBm(power)
 
 
 def _exp_approx_profile(

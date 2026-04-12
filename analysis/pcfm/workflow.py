@@ -9,6 +9,7 @@ from pynlin.nlin.nlin_estimator_uwb import collision_coeffs_system_uwb, total_nl
 from pynlin.nlin.pcfm_gn import PcfmConfig, load_signal_profiles
 from pynlin.raman.solvers_jiang import JiangIterativeConfig
 from pynlin.system import System
+from pynlin.utils import watt2dBm
 
 from .config import (
     PROFILE_MAX_W,
@@ -53,8 +54,8 @@ def _log_td_gn_vs_pcfm_xci_diff_stats(
         pcfm_xci_flat = np.asarray(pcfm_xci, dtype=float).reshape(-1)
         diff_w = td_gn - pcfm_xci_flat
         ratio = td_gn / np.maximum(pcfm_xci_flat, 1e-30)
-        td_db = 10.0 * np.log10(np.maximum(td_gn, 1e-30))
-        xci_db = 10.0 * np.log10(np.maximum(pcfm_xci_flat, 1e-30))
+        td_db = watt2dBm(np.maximum(td_gn, 1e-30))
+        xci_db = watt2dBm(np.maximum(pcfm_xci_flat, 1e-30))
         diff_db = td_db - xci_db
         lg.info(
             "TD(GN)-PCFM(XCI) [{}] linear diff [W]: max={:.3e}, min={:.3e}, avg={:.3e}; "
@@ -247,7 +248,7 @@ def run_pcfm_workflow(
             out_dir=PCFM_MEDIA_DIR,
         )
 
-    launch_dbm = 10.0 * np.log10(np.maximum(launch_powers, 1e-18) / 1e-3)
+    launch_dbm = watt2dBm(np.maximum(launch_powers, 1e-18))
     lg.info(
         "Launch power summary (per-channel): dBm min/med/max = "
         f"{float(np.min(launch_dbm)):.2f} / {float(np.median(launch_dbm)):.2f} / "
@@ -482,10 +483,10 @@ def run_pcfm_workflow(
             nlin_td_mod_w=td_modulations,
             nlin_pcfm_xci_w=nlin_pcfm_xci,
             nlin_gn_xci_w=nlin_gn_xci,
-            nlin_gn_direct_w=nlin_gn_direct_ratio,
-            nlin_gn_direct_xci_w=nlin_gn_direct_xci_ratio,
-            gn_direct_is_ratio=True,
-            gn_direct_xci_is_ratio=True,
+            nlin_gn_direct_w=nlin_gn_direct,
+            nlin_gn_direct_xci_w=nlin_gn_direct_xci,
+            gn_direct_is_ratio=False,
+            gn_direct_xci_is_ratio=False,
             out_path=PCFM_MEDIA_DIR / "nlin_power.pdf",
             plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
         )

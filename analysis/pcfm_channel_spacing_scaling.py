@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from loguru import logger as lg
+from matplotlib.ticker import ScalarFormatter
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -12,10 +13,12 @@ from pynlin.constellation_stats import gaussian_mu0
 from pynlin.nlin.nlin_estimator_uwb import collision_coeffs_system_uwb, total_nlin_uwb
 from pynlin.nlin.pcfm_gn import PcfmConfig
 from pynlin.system import System
+from pynlin.utils import dBm2watt, watt2dBm
 from pynlin.wdm import IrregularWDM, RegularWDM
 
 from analysis.pcfm.config import (
     _channel_nonoverlap_spacing_hz,
+    _format_scaling_plot_title,
     _load_pcfm_runtime_config,
     _resolve_scaling_run_flags,
     _select_scaling_channel,
@@ -46,6 +49,13 @@ def _fit_exponent(x_values: np.ndarray, values_w: np.ndarray) -> float:
         return float("nan")
     coeffs = np.polyfit(np.log(x_values[mask]), np.log(values_w[mask]), 1)
     return float(coeffs[0])
+
+
+def _disable_dbm_axis_grouping(ax: plt.Axes) -> None:
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    ax.yaxis.set_major_formatter(formatter)
+    ax.yaxis.offsetText.set_visible(False)
 
 
 def _rebuild_wdm_with_spacing(system: System, spacing_hz: float) -> None:
@@ -117,18 +127,21 @@ def _save_figure(fig: plt.Figure, out_path: Path) -> None:
 def _plot_scaling(
     rows: list[dict],
     out_path: Path,
+    base_system: System,
     channel_idx: int,
-    channel_freq_thz: float,
+    band_label: str,
+    launch_powers_w: np.ndarray,
     plot_pcfm_total_and_sci: bool,
 ) -> None:
     spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
+    freqs_thz = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
     for (label, values), color in zip(series.items(), colors):
         ax.plot(
             spacing_ghz,
-            values,
+            watt2dBm(np.maximum(np.asarray(values, dtype=float), 1e-18)),
             marker="o",
             markersize=3,
             markerfacecolor="none",
@@ -144,17 +157,26 @@ def _plot_scaling(
     scaling_values = ref_value * (scaling_spacing / ref_spacing) ** (-1.0)
     ax.plot(
         scaling_spacing / 1e9,
-        scaling_values,
+        watt2dBm(np.maximum(np.asarray(scaling_values, dtype=float), 1e-18)),
         linestyle="--",
         color="gray",
         label="inverse linear scaling reference",
     )
 
     ax.set_xscale("log")
-    ax.set_yscale("log")
     ax.set_xlabel("Channel spacing [GHz]")
-    ax.set_ylabel("Center-channel NLI power [W]")
-    ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
+    ax.set_ylabel("Center-channel NLI power [dBm]")
+    _disable_dbm_axis_grouping(ax)
+    ax.set_title(
+        _format_scaling_plot_title(
+            base_system,
+            sweep_axis="spacing",
+            channel_idx=channel_idx,
+            band_label=band_label,
+            launch_powers_w=launch_powers_w,
+            channel_freq_range_thz=(float(np.min(freqs_thz)), float(np.max(freqs_thz))),
+        )
+    )
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _save_figure(fig, out_path)
@@ -164,12 +186,15 @@ def _plot_scaling(
 def _plot_normalized_scaling(
     rows: list[dict],
     out_path: Path,
+    base_system: System,
     channel_idx: int,
-    channel_freq_thz: float,
+    band_label: str,
+    launch_powers_w: np.ndarray,
     plot_pcfm_total_and_sci: bool,
 ) -> None:
     spacing_ghz = np.array([row["channel_spacing_ghz"] for row in rows], dtype=float)
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
+    freqs_thz = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
     colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
     for (label, values), color in zip(series.items(), colors):
@@ -190,7 +215,16 @@ def _plot_normalized_scaling(
     ax.set_yscale("log")
     ax.set_xlabel("Channel spacing [GHz]")
     ax.set_ylabel("Normalized center-channel NLI power")
-    ax.set_title(f"Center channel idx={channel_idx}, f={channel_freq_thz:.3f} THz")
+    ax.set_title(
+        _format_scaling_plot_title(
+            base_system,
+            sweep_axis="spacing",
+            channel_idx=channel_idx,
+            band_label=band_label,
+            launch_powers_w=launch_powers_w,
+            channel_freq_range_thz=(float(np.min(freqs_thz)), float(np.max(freqs_thz))),
+        )
+    )
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _save_figure(fig, out_path)
@@ -226,6 +260,15 @@ def run_spacing_sweep(
     exclude_self_channel = run_flags["exclude_self_channel"]
     plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
     center_idx, band_label = _select_scaling_channel(base_system)
+    if launch_dbm is not None:
+        title_launch_vec = np.full(base_system.n_channels, float(dBm2watt(launch_dbm)), dtype=float)
+    else:
+        title_launch_vec = _resolve_launch_powers(
+            base_system,
+            profile_path=None,
+            launch_csv_path=None,
+            use_profile=False,
+        )
     min_spacing_nonoverlap_hz = _channel_nonoverlap_spacing_hz(base_system)
     min_spacing_nonoverlap_ghz = min_spacing_nonoverlap_hz * 1e-9
     max_spacing_nonoverlap_hz = _wdm_nonoverlap_max_spacing_hz(base_system)
@@ -272,7 +315,7 @@ def run_spacing_sweep(
         channel_freq_thz = float(freqs[center_idx] * 1e-12)
 
         if launch_dbm is not None:
-            launch_w = 10 ** ((float(launch_dbm) - 30.0) / 10.0)
+            launch_w = float(dBm2watt(launch_dbm))
             launch_vec = np.full(system.n_channels, launch_w, dtype=float)
         else:
             launch_vec = _resolve_launch_powers(
@@ -295,7 +338,7 @@ def run_spacing_sweep(
         td_tag = f"{spacing_tag}_{'xci' if exclude_self_channel else 'all'}"
         td_cache = _nlin_cache_path(
             profile_path=profile_path,
-            use_kappa=False,
+            use_kappa=True,
             use_x_mode=True,
             extra_tag=td_tag,
         )
@@ -413,12 +456,14 @@ def run_spacing_sweep(
     data = np.column_stack([[row[name] for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
-    plot_path = Path("media") / "PCFM" / "center_channel_spacing_scaling.png"
+    plot_path = Path("media") / "PCFM" / "center_channel_spacing_scaling.pdf"
     _plot_scaling(
         rows,
         plot_path,
+        base_system,
         center_idx,
-        channel_freq_thz,
+        band_label,
+        title_launch_vec,
         plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
     )
 

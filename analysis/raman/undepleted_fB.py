@@ -13,6 +13,7 @@ from pynlin.raman.undepleted import (
     pump_power_for_flat_signal,
     signal_power_undepleted_counterprop,
 )
+from pynlin.utils import watt2dBm
 
 # -------- Parameters --------
 L_km = 20.0               # fiber length [km]
@@ -45,7 +46,7 @@ z = np.linspace(0.0, L, num_points)
 
 def to_dBm(Pw):
     """Convert Watts to dBm while avoiding log of zero."""
-    return 10.0 * np.log10(np.maximum(Pw, 1e-30)) + 30.0
+    return watt2dBm(np.maximum(Pw, 1e-30))
 
 # -------- Compute --------
 def main():

@@ -268,7 +268,7 @@ for fiber_length in fiber_lengths:
 		
 		selected_power = -14.0
 		pow_idx = np.where(power_dBm_list == selected_power)[0]
-		P_B = 10**((selected_power-30) / 10)  # average power of the constellation in mW
+		P_B = dBm2watt(selected_power)  # average power of the constellation in W
 		T = (1 / baud_rate)
 		P_A = power_list
 		full_coi = [i + 1 for i in range(50)]
@@ -382,11 +382,11 @@ for fiber_length in fiber_lengths:
 				fig_ase, (ax1, ax2, ax3) = plt.subplots(nrows=3, sharex=True, figsize=(plot_width, plot_height))
 				plt.plot(show=True)
 				for scan in range(len(coi_selection)):
-						ax1.plot(power_dBm_list, 10 * np.log10(ase_co[coi_selection_idx[scan], :]) + 30, marker=markers[scan],
+						ax1.plot(power_dBm_list, watt2dBm(np.maximum(ase_co[coi_selection_idx[scan], :], 1e-30)), marker=markers[scan],
 										markersize=10, color='green', label="ch." + str(coi_selection[scan]) + " co.")
-						ax2.plot(power_dBm_list, 10 * np.log10(ase_ct[coi_selection_idx[scan], :]) + 30, marker=markers[scan],
+						ax2.plot(power_dBm_list, watt2dBm(np.maximum(ase_ct[coi_selection_idx[scan], :], 1e-30)), marker=markers[scan],
 										markersize=10, color='blue', label="ch." + str(coi_selection[scan]) + " count.")
-						ax3.plot(power_dBm_list, 10 * np.log10(ase_bi[coi_selection_idx[scan], :]) + 30, marker=markers[scan],
+						ax3.plot(power_dBm_list, watt2dBm(np.maximum(ase_bi[coi_selection_idx[scan], :], 1e-30)), marker=markers[scan],
 										markersize=10, color='orange', label="ch." + str(coi_selection[scan] + 1))
 				ax1.grid(which="both")
 				ax3.grid(which="both")
@@ -518,11 +518,11 @@ for fiber_length in fiber_lengths:
 		if 'NLIN_vs_wavelength' in plot_selection:
 				fig_NLIN_channel, ((ax1)) = plt.subplots(nrows=1, ncols=1, sharex=True, figsize=(plot_width, 10))
 				plt.plot(show=True)
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_co[:, pow_idx]) + 30, marker='x', markersize=15, ls='dotted', color='green', label='CO')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_none[:, pow_idx])+30, marker='x', markersize=15, ls='dashdot',color='grey', label='perf.')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_co[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dotted', color='green', label='CO')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_none[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dashdot',color='grey', label='perf.')
 				
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_bi[:, pow_idx]) + 30, marker='x', markersize=15, color='orange', label='BI')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_ct[:, pow_idx]) + 30, marker='x', markersize=15, ls='dashed', color='blue', label='CT')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_bi[:, pow_idx], 1e-30)), marker='x', markersize=15, color='orange', label='BI')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_ct[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dashed', color='blue', label='CT')
 				# ax1.yaxis.set_major_locator(plt.MaxNLocator(5))
 				plt.xlabel(r"Channel wavelength [μm]")
 				plt.xticks(ticks=wavelength_list,
@@ -538,16 +538,16 @@ for fiber_length in fiber_lengths:
 				fig_NLIN_channel, ((ax1)) = plt.subplots(nrows=1, ncols=1, sharex=True, figsize=(plot_width, 10))
 				plt.plot(show=True)
 				tmp = pow_idx
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_co[:, pow_idx]) + 30, marker='x', markersize=15, ls='dotted', color='green', label='CO')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_none[:, pow_idx])+30, marker='x', markersize=15, ls='dashdot',color='grey', label='perf.')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_bi[:, pow_idx]) + 30, marker='x', markersize=15, color='orange', label='BI')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_ct[:, pow_idx]) + 30, marker='x', markersize=15, ls='dashed', color='blue', label='CT')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_co[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dotted', color='green', label='CO')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_none[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dashdot',color='grey', label='perf.')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_bi[:, pow_idx], 1e-30)), marker='x', markersize=15, color='orange', label='BI')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_ct[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dashed', color='blue', label='CT')
 				alt_selected_power = -6.0
 				pow_idx = np.where(power_dBm_list == alt_selected_power)[0]
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_co[:, pow_idx]) + 30, marker='x', markersize=15, ls='dotted', color='green')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_none[:, pow_idx])+30, marker='x', markersize=15, ls='dashdot',color='grey')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_bi[:, pow_idx]) + 30, marker='x', markersize=15, color='orange')
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * Delta_theta_2_ct[:, pow_idx]) + 30, marker='x', markersize=15, ls='dashed', color='blue')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_co[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dotted', color='green')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_none[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dashdot',color='grey')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_bi[:, pow_idx], 1e-30)), marker='x', markersize=15, color='orange')
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * Delta_theta_2_ct[:, pow_idx], 1e-30)), marker='x', markersize=15, ls='dashed', color='blue')
 				pow_idx = tmp
 				# ax1.yaxis.set_major_locator(plt.MaxNLocator(5))
 				plt.xlabel(r"Channel wavelength [μm]")
@@ -564,11 +564,11 @@ for fiber_length in fiber_lengths:
 		if 'SRSN_vs_wavelength' in plot_selection:
 				fig_NLIN_channel, ((ax1)) = plt.subplots(nrows=1, ncols=1, sharex=True, figsize=(plot_width, 10))
 				plt.plot(show=True)
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * (R_co[:, pow_idx]-Delta_theta_2_co[:, pow_idx]))+30, marker='x', markersize=15, color='green', label="ch." + str(coi) + "co")
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * (R_none[:, pow_idx]-Delta_theta_2_none[:, pow_idx]))+30, marker='x', markersize=15, color='grey', label="ch." + str(coi) + "perfect")
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * (R_bi[:, pow_idx]-Delta_theta_2_bi[:, pow_idx]))+30, marker='x', markersize=15, color='orange', label="ch." + str(coi) + "bi")
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * (R_co[:, pow_idx]-Delta_theta_2_co[:, pow_idx]), 1e-30)), marker='x', markersize=15, color='green', label="ch." + str(coi) + "co")
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * (R_none[:, pow_idx]-Delta_theta_2_none[:, pow_idx]), 1e-30)), marker='x', markersize=15, color='grey', label="ch." + str(coi) + "perfect")
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * (R_bi[:, pow_idx]-Delta_theta_2_bi[:, pow_idx]), 1e-30)), marker='x', markersize=15, color='orange', label="ch." + str(coi) + "bi")
 				
-				plt.plot(wavelength_list, 10 * np.log10(P_A[pow_idx] * (R_ct[:, pow_idx]-Delta_theta_2_ct[:, pow_idx]))+30, marker='x', markersize=15, color='blue', label="ch." + str(coi) + "ct")
+				plt.plot(wavelength_list, watt2dBm(np.maximum(P_A[pow_idx] * (R_ct[:, pow_idx]-Delta_theta_2_ct[:, pow_idx]), 1e-30)), marker='x', markersize=15, color='blue', label="ch." + str(coi) + "ct")
 				# ax1.yaxis.set_major_locator(plt.MaxNLocator(5))
 				plt.xlabel(r"Channel wavelength [μm]")
 				plt.xticks(ticks=wavelength_list,

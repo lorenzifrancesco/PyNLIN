@@ -3,11 +3,22 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger as lg
+from matplotlib.ticker import ScalarFormatter
 
 from pynlin.nlin.pcfm_gn import fit_spp_polynomials, load_signal_profiles, normalize_spp
 from pynlin.system import System
+from pynlin.utils import watt2dBm
 
 from .figure_size import scale_figsize_to_ieee_column
+
+
+def _disable_dbm_axis_grouping(ax: plt.Axes, which: str = "y") -> None:
+    """Force plain tick labels on dBm axes without offset/scientific grouping."""
+    axis = ax.yaxis if which == "y" else ax.xaxis
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    axis.set_major_formatter(formatter)
+    axis.offsetText.set_visible(False)
 
 
 def plot_pcfm_gsnr(
@@ -114,7 +125,7 @@ def plot_pcfm_nlin_power(
     gn_direct_xci_is_ratio: bool = False,
     plot_pcfm_total_and_sci: bool = False,
 ) -> None:
-    """Plot per-channel NLIN normalized to end-of-fiber signal power (dB)."""
+    """Plot per-channel NLIN power in dBm."""
     dpi = 300
     marker_lw = 0.45
     signal_power_w = np.asarray(signal_power_w, dtype=float).reshape(-1)
@@ -122,22 +133,21 @@ def plot_pcfm_nlin_power(
         raise ValueError(
             f"signal_power_w size {signal_power_w.size} != freq size {freqs_hz.size}"
         )
-    denom = np.maximum(signal_power_w, 1e-18)
 
-    def _ratio_db(nlin: np.ndarray, already_ratio: bool = False) -> np.ndarray:
+    def _power_dbm(nlin: np.ndarray, already_ratio: bool = False) -> np.ndarray:
         nlin = np.asarray(nlin, dtype=float).reshape(-1)
-        if nlin.size != denom.size:
-            raise ValueError(f"NLIN size {nlin.size} != signal power size {denom.size}")
+        if nlin.size != signal_power_w.size:
+            raise ValueError(f"NLIN size {nlin.size} != signal power size {signal_power_w.size}")
         if already_ratio:
-            return 10.0 * np.log10(np.maximum(nlin, 1e-18))
-        return 10.0 * np.log10(np.maximum(nlin, 1e-18) / denom)
+            raise ValueError("plot_pcfm_nlin_power expects absolute powers in W, not ratios.")
+        return watt2dBm(np.maximum(nlin, 1e-18))
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
     if nlin_td_mod_w:
         styles = ["-", "--", ":"]
         style_idx = 0
         for label, nlin in nlin_td_mod_w.items():
-            ratio_db = _ratio_db(nlin)
+            power_dbm = _power_dbm(nlin)
             is_gaussian = "gauss" in str(label).lower()
             color = "tab:red" if is_gaussian else "black"
             if is_gaussian:
@@ -147,7 +157,7 @@ def plot_pcfm_nlin_power(
                 style_idx += 1
             ax.plot(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 color=color,
                 lw=0.45,
                 ls=linestyle,
@@ -158,10 +168,10 @@ def plot_pcfm_nlin_power(
                 label=f"TD {label}",
             )
     else:
-        ratio_db = _ratio_db(nlin_td_w)
+        power_dbm = _power_dbm(nlin_td_w)
         ax.plot(
             freqs_hz * 1e-12,
-            ratio_db,
+            power_dbm,
             color="black",
             lw=0.45,
             marker="o",
@@ -177,10 +187,10 @@ def plot_pcfm_nlin_power(
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
             color = colors[idx % len(colors)]
-            ratio_db = _ratio_db(nlin)
+            power_dbm = _power_dbm(nlin)
             ax.plot(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 color=color,
                 lw=0.45,
                 marker="o",
@@ -195,10 +205,10 @@ def plot_pcfm_nlin_power(
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
             color = colors[idx % len(colors)]
-            ratio_db = _ratio_db(nlin)
+            power_dbm = _power_dbm(nlin)
             ax.plot(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 color=color,
                 lw=0.45,
                 ls="--",
@@ -214,10 +224,10 @@ def plot_pcfm_nlin_power(
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
             color = colors[idx % len(colors)]
-            ratio_db = _ratio_db(nlin)
+            power_dbm = _power_dbm(nlin)
             ax.scatter(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 s=8,
                 marker="o",
                 facecolors="none",
@@ -231,10 +241,10 @@ def plot_pcfm_nlin_power(
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
             color = colors[idx % len(colors)]
-            ratio_db = _ratio_db(nlin, already_ratio=gn_direct_is_ratio)
+            power_dbm = _power_dbm(nlin, already_ratio=gn_direct_is_ratio)
             ax.scatter(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 s=8,
                 marker="o",
                 facecolors="none",
@@ -248,10 +258,10 @@ def plot_pcfm_nlin_power(
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
             color = colors[idx % len(colors)]
-            ratio_db = _ratio_db(nlin)
+            power_dbm = _power_dbm(nlin)
             ax.scatter(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 s=8,
                 marker="o",
                 facecolors="none",
@@ -265,10 +275,10 @@ def plot_pcfm_nlin_power(
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
             color = colors[idx % len(colors)]
-            ratio_db = _ratio_db(nlin, already_ratio=gn_direct_xci_is_ratio)
+            power_dbm = _power_dbm(nlin, already_ratio=gn_direct_xci_is_ratio)
             ax.scatter(
                 freqs_hz * 1e-12,
-                ratio_db,
+                power_dbm,
                 s=8,
                 marker="o",
                 facecolors="none",
@@ -278,7 +288,8 @@ def plot_pcfm_nlin_power(
             )
 
     ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax.set_ylabel(r"$P_{NLI}/P_{sig}(L)\;[\mathrm{dB}]$")
+    ax.set_ylabel(r"$P_{NLI}\;[\mathrm{dBm}]$")
+    _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()
@@ -297,12 +308,13 @@ def plot_pcfm_diagnostics(
     out_dir.mkdir(parents=True, exist_ok=True)
     freqs = system.wdm.frequency_grid()
     freqs_thz = freqs * 1e-12
-    launch_dbm = 10.0 * np.log10(np.maximum(launch_powers_w, 1e-18) / 1e-3)
+    launch_dbm = watt2dBm(np.maximum(launch_powers_w, 1e-18))
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, launch_dbm, lw=0.8, color="black")
     ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
     ax.set_ylabel(r"$P_\mathrm{launch}\;[\mathrm{dBm}]$")
+    _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     fig.tight_layout()
     fig.savefig(out_dir / "launch_power.pdf", dpi=300)
@@ -313,14 +325,15 @@ def plot_pcfm_diagnostics(
     span = float(z_axis[-1] - z_axis[0]) if z_axis.size else 0.0
     avg_power = np.trapezoid(sig_ch_z, z_axis, axis=1) / max(span, 1.0)
     out_power = sig_ch_z[:, -1]
-    avg_dbm = 10.0 * np.log10(np.maximum(avg_power, 1e-18) / 1e-3)
-    out_dbm = 10.0 * np.log10(np.maximum(out_power, 1e-18) / 1e-3)
+    avg_dbm = watt2dBm(np.maximum(avg_power, 1e-18))
+    out_dbm = watt2dBm(np.maximum(out_power, 1e-18))
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, avg_dbm, lw=0.8, color="tab:blue", label="avg")
     ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
     ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
     ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
+    _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()
@@ -440,6 +453,7 @@ def plot_pcfm_diagnostics(
         )
     ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
     ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
+    _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()

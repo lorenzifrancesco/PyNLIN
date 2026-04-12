@@ -235,7 +235,7 @@ coi_selection_idx_average = [5]
 
 selected_power = -14.0
 pow_idx = np.where(power_dBm_list == selected_power)[0]
-P_B = 10**((selected_power-30) / 10)  # average power of the constellation in mW
+P_B = dBm2watt(selected_power)  # average power of the constellation in W
 T = (1 / baud_rate)
 P_A = power_list
 full_coi = [i + 1 for i in range(50)]
