@@ -3,11 +3,11 @@
 This reproduces the analytical comparison used in the scratch ``N_vs_KXCI``
 workflow, using the TD model
 
-    N(x) T^2 L^-2 = 4/9 * (1 + ((2 pi/lambda) * (L/L_eff) * x)^(1/eta))^(-eta)
+    N(x) T^2 L^-2 = 4/9 * (1 + (((2 pi)/lambda) * (L/L_eff) * x)^(1/eta))^(-eta)
 
 against the flat-profile closed-form XCI kernel
 
-    K_XCI(x) T^2 L^-2 = (L_eff/(2 pi L) * |ln((x + 1/2)/(x - 1/2))|
+    K_XCI(x) T^2 L^-2 = (1/(2 pi)) * (L_eff/L) * |ln((x + 1/2)/(x - 1/2))|
 
 for x = Delta f / B.
 
@@ -80,7 +80,7 @@ def _configure_matplotlib() -> None:
 
 def n_eq18(x: np.ndarray, lam: float, l_over_leff: float, eta: float) -> np.ndarray:
     """Eq. (18) curve used in the original comparison."""
-    scale = float(l_over_leff) / float(lam)
+    scale = (2.0 * np.pi) * float(l_over_leff) / float(lam)
     return (4.0 / 9.0) * (1.0 + (scale * x) ** (1.0 / eta)) ** (-eta)
 
 
@@ -90,8 +90,8 @@ def n_softplus_scaled(
     l_over_ld: float,
     ps: tuple[float, float, float] | np.ndarray,
 ) -> np.ndarray:
-    """Evaluate the TD softplus using x_walkoff=(L/LD)*x."""
-    return softplus(float(l_over_ld) * np.asarray(x, dtype=float), *ps)
+    """Evaluate the TD softplus using x_walkoff=(2 pi)(L/LD)x."""
+    return softplus((2.0 * np.pi) * float(l_over_ld) * np.asarray(x, dtype=float), *ps)
 
 
 def k_xci(x: np.ndarray, leff_over_l: float) -> np.ndarray:
@@ -99,7 +99,7 @@ def k_xci(x: np.ndarray, leff_over_l: float) -> np.ndarray:
     out = np.full_like(x, np.nan, dtype=float)
     mask = x > 0.5
     if np.any(mask):
-        out[mask] = float(leff_over_l) * np.abs(
+        out[mask] = (float(leff_over_l) / (2.0 * np.pi)) * np.abs(
             np.log((x[mask] + 0.5) / (x[mask] - 0.5))
         )
     return out
@@ -139,12 +139,15 @@ def k_xci_eq18_normalized(x: np.ndarray, l_over_leff: float) -> np.ndarray:
     if l_over_leff <= 0.0:
         raise ValueError("L/Leff must be strictly positive.")
     out = np.full_like(x, np.nan, dtype=float)
-    mask = x > 0.5
+    # mask = x > 0.5
+    mask = np.ones_like(x, dtype=bool)# FIXME
     if not np.any(mask):
         return out
     z_plus = np.pi * l_over_leff * (x[mask] + 0.5)
     z_minus = np.pi * l_over_leff * (x[mask] - 0.5)
-    out[mask] = (2.0 / (np.pi * l_over_leff)) * (_g_kernel(z_plus) - _g_kernel(z_minus))
+    out[mask] = (
+        (2.0 / (np.pi * l_over_leff)) * (_g_kernel(z_plus) - _g_kernel(z_minus))
+    ) / (2.0 * np.pi)
     return out
 
 
@@ -324,7 +327,7 @@ def _comparison_figure(
         pad = 0.06 * (ymax - ymin) if ymax > ymin else 0.1
         ax.set_ylim(ymin - pad, ymax + pad)
 
-    # _add_reference_y_ticks(ax)
+    _add_reference_y_ticks(ax)
 
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$")
     ax.set_ylabel("Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$")
@@ -405,7 +408,7 @@ def _combined_comparison_figure(
             color=COLOR_N,
             label=rf"$\mathcal{{N}}$, {tag}",
         )
-        _plot_pcfm_style_line(
+        _plot_pcfm_style_line( # FIXME
             ax,
             x,
             case["y_k"],
@@ -525,6 +528,7 @@ def _prepare_flat_td_corrections(
     ipulse: int,
     recompute: bool,
     max_l_over_ld: float,
+    eta_override: float | None = None,
     m_lo_truncation: int = 2,
 ) -> dict[str, Any]:
     _force_flat_profile_mode(system)
@@ -558,7 +562,7 @@ def _prepare_flat_td_corrections(
         profile_path=profile_path,
         max_lld=max_l_over_ld,
     )
-    ps_ideal = tuple(
+    ps_ideal_raw = tuple(
         float(v)
         for v in ideal_fit_coefficients(
             0.0,
@@ -568,10 +572,23 @@ def _prepare_flat_td_corrections(
             baud_rate=float(system.pulse.baud_rate),
         )
     )
+    ps_ideal = (
+        ps_ideal_raw[0],
+        ps_ideal_raw[1],
+        float(ps_ideal_raw[2] if eta_override is None else eta_override),
+    )
+    if eta_override is not None:
+        lg.info(
+            "TD correction setup: preserving user eta={:.6g} instead of ideal-fit eta={:.6g}".format(
+                float(eta_override),
+                ps_ideal_raw[2],
+            )
+        )
     return {
         "system": system,
         "profile_path": profile_path,
         "ps_ideal": ps_ideal,
+        "ps_ideal_raw": ps_ideal_raw,
         "rmax_lookup": rmax_lookup,
         "rmin_lookup": rmin_lookup,
         "s2b_cache": s2b_cache,
@@ -869,6 +886,7 @@ def main() -> None:
             ipulse=int(args.ipulse),
             recompute=bool(args.recompute_corrections),
             max_l_over_ld=max(l_over_leff_values),
+            eta_override=float(args.eta),
         )
 
     suffixes = [".pdf", ".png"] if args.format == "both" else [f".{args.format}"]
