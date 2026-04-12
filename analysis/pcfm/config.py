@@ -49,6 +49,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
         "profile_path": "results/pcfm_power_profiles.npy",
         "launch_csv_path": None,
         "pcfm_numeric_xci": False,
+        "pcfm_eq18_xci": False,
         "td_exclude_self_channel": True,
         "include_lumped_losses": False,
         "plot_pcfm_total_and_sci": False,
@@ -98,6 +99,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
             )
         for key in (
             "pcfm_numeric_xci",
+            "pcfm_eq18_xci",
             "td_exclude_self_channel",
             "include_lumped_losses",
             "plot_pcfm_total_and_sci",
@@ -151,6 +153,7 @@ def _resolve_scaling_run_flags(
     system: System,
     *,
     pcfm_numeric_xci: bool | None = None,
+    pcfm_eq18_xci: bool | None = None,
     recompute_td: bool | None = None,
     recompute_pcfm: bool | None = None,
     exclude_self_channel: bool | None = None,
@@ -162,6 +165,11 @@ def _resolve_scaling_run_flags(
             bool(runtime_cfg["pcfm_numeric_xci"])
             if pcfm_numeric_xci is None
             else bool(pcfm_numeric_xci)
+        ),
+        "pcfm_eq18_xci": (
+            bool(runtime_cfg["pcfm_eq18_xci"])
+            if pcfm_eq18_xci is None
+            else bool(pcfm_eq18_xci)
         ),
         "recompute_td": (
             runtime_cfg["td_mode"] == "recompute"

@@ -25,6 +25,7 @@ from .io import (
     _write_flat_profile,
 )
 from .models import _load_or_compute_gn, _load_or_compute_gn_direct, _load_or_compute_pcfm
+from .models import _load_or_compute_flat_analytic_xci
 from .plotting import (
     plot_pcfm_diagnostics,
     plot_pcfm_gsnr,
@@ -151,6 +152,7 @@ def run_pcfm_workflow(
         if pcfm_numeric_xci is None
         else bool(pcfm_numeric_xci)
     )
+    pcfm_eq18_xci = bool(runtime_cfg["pcfm_eq18_xci"])
     td_exclude_self_channel = (
         bool(runtime_cfg["td_exclude_self_channel"])
         if td_exclude_self_channel is None
@@ -161,7 +163,18 @@ def run_pcfm_workflow(
         if include_lumped_losses is None
         else bool(include_lumped_losses)
     )
+    if pcfm_eq18_xci and include_lumped_losses:
+        raise ValueError(
+            "PCFM Eq. 18 XCI does not support lumped losses. "
+            "Disable [pcfm.run].include_lumped_losses or disable [pcfm.run].pcfm_eq18_xci."
+        )
     plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
+    cfg = PcfmConfig(
+        degree=9,
+        include_mci=False,
+        use_numeric_sci=True,
+        use_numeric_xci=pcfm_numeric_xci,
+    )
 
     freqs = system.wdm.frequency_grid()
     beta1_grid, beta2_grid = system.beta_grids(freqs=freqs)
@@ -246,6 +259,7 @@ def run_pcfm_workflow(
             profile_path=profile_path,
             launch_powers_w=launch_powers,
             out_dir=PCFM_MEDIA_DIR,
+            cfg=cfg,
         )
 
     launch_dbm = watt2dBm(np.maximum(launch_powers, 1e-18))
@@ -268,7 +282,7 @@ def run_pcfm_workflow(
         system=system,
         launch_powers_w=launch_powers,
         profile_path=profile_path,
-        cfg=PcfmConfig(use_numeric_sci=True, use_numeric_xci=pcfm_numeric_xci),
+        cfg=cfg,
     )
 
     ccfs = collision_coeffs_system_uwb(
@@ -331,13 +345,6 @@ def run_pcfm_workflow(
     else:
         loss_cases = {"no_loss": None}
 
-    cfg = PcfmConfig(
-        degree=9,
-        include_mci=False,
-        use_numeric_sci=True,
-        use_numeric_xci=pcfm_numeric_xci,
-    )
-
     gsnr_pcfm = {}
     gsnr_gn = {} if compute_gn else None
     gsnr_gn_direct = {} if compute_gn_direct else None
@@ -382,6 +389,33 @@ def run_pcfm_workflow(
         gsnr_pcfm[label] = 10.0 * np.log10(signal_power / np.maximum(nlin_pcfm_flat, 1e-18))
         nlin_pcfm[label] = nlin_pcfm_flat
         nlin_pcfm_xci[label] = nlin_pcfm_xci_flat
+
+        if pcfm_eq18_xci:
+            if flat_profiles:
+                eq18_path = (
+                    Path("results")
+                    / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_pcfm_{label}_xci_eq18.npy"
+                )
+                nlin_pcfm_eq18_xci_flat = np.asarray(
+                    _load_or_compute_flat_analytic_xci(
+                        system,
+                        launch_powers_w=launch_powers,
+                        output_path=eq18_path,
+                        xci_model="eq18",
+                        recompute=recompute_pcfm,
+                    ),
+                    dtype=float,
+                ).reshape(-1)
+                _save_nlin_csv(
+                    Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}_xci_eq18.csv",
+                    freqs,
+                    nlin_pcfm_eq18_xci_flat,
+                    signal_power,
+                )
+                eq18_label = "eq18" if label == "no_loss" else f"{label} eq18"
+                nlin_pcfm_xci[eq18_label] = nlin_pcfm_eq18_xci_flat
+            else:
+                lg.info("Skipping PCFM Eq. 18 XCI: enabled only for flat power profile mode.")
 
         if compute_gn:
             gn_path = (

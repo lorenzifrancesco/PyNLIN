@@ -97,6 +97,8 @@ def _scaling_series(
         "PCFM XCI": np.array([row["pcfm_xci_channel_w"] for row in rows], dtype=float),
         "PCFM XCI asymptotic": np.array([row["analytic_limit_channel_w"] for row in rows], dtype=float),
     }
+    if rows and "pcfm_eq18_xci_channel_w" in rows[0]:
+        series["PCFM XCI Eq18"] = np.array([row["pcfm_eq18_xci_channel_w"] for row in rows], dtype=float)
     if plot_pcfm_total_and_sci:
         series["PCFM total"] = np.array([row["pcfm_channel_w"] for row in rows], dtype=float)
         series["PCFM SCI"] = np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float)
@@ -112,6 +114,17 @@ def _center_channel_analytic_limit(system: System, launch_channel_w: float, chan
         launch_powers_w=launch,
         use_beta2_eff=True,
         log_order=1,
+    )
+
+
+def _center_channel_eq18_xci(system: System, launch_channel_w: float, channel_idx: int) -> float:
+    launch = np.full(system.wdm.frequency_grid().size, float(launch_channel_w), dtype=float)
+    return flat_profile_pcfm_xci_channel_power(
+        system,
+        channel_idx=channel_idx,
+        launch_powers_w=launch,
+        use_beta2_eff=True,
+        xci_model="eq18",
     )
 
 
@@ -237,6 +250,7 @@ def run_spacing_sweep(
     out_dir: Path,
     launch_dbm: float | None,
     pcfm_numeric_xci: bool | None,
+    pcfm_eq18_xci: bool | None,
     recompute_td: bool | None,
     recompute_pcfm: bool | None,
     exclude_self_channel: bool | None = None,
@@ -250,11 +264,13 @@ def run_spacing_sweep(
     run_flags = _resolve_scaling_run_flags(
         base_system,
         pcfm_numeric_xci=pcfm_numeric_xci,
+        pcfm_eq18_xci=pcfm_eq18_xci,
         recompute_td=recompute_td,
         recompute_pcfm=recompute_pcfm,
         exclude_self_channel=exclude_self_channel,
     )
     pcfm_numeric_xci = run_flags["pcfm_numeric_xci"]
+    pcfm_eq18_xci = run_flags["pcfm_eq18_xci"]
     recompute_td = run_flags["recompute_td"]
     recompute_pcfm = run_flags["recompute_pcfm"]
     exclude_self_channel = run_flags["exclude_self_channel"]
@@ -403,19 +419,26 @@ def run_spacing_sweep(
                 system, float(launch_vec[center_idx]), center_idx
             ),
         }
-        rows.append(row)
-        lg.info(
-            "S={:.2f} GHz -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
-            "PCFM_SCI={:.3e} W, PCFM_XCI={:.3e} W, Analytic={:.3e} W".format(
-                row["channel_spacing_ghz"],
-                row["td_channel_w"],
-                row["td_gaussian_channel_w"],
-                row["pcfm_channel_w"],
-                row["pcfm_sci_channel_w"],
-                row["pcfm_xci_channel_w"],
-                row["analytic_limit_channel_w"],
+        if pcfm_eq18_xci:
+            row["pcfm_eq18_xci_channel_w"] = _center_channel_eq18_xci(
+                system, float(launch_vec[center_idx]), center_idx
             )
+        rows.append(row)
+        msg = (
+            "S={:.2f} GHz -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
+            "PCFM_SCI={:.3e} W, PCFM_XCI={:.3e} W, Analytic={:.3e} W"
+        ).format(
+            row["channel_spacing_ghz"],
+            row["td_channel_w"],
+            row["td_gaussian_channel_w"],
+            row["pcfm_channel_w"],
+            row["pcfm_sci_channel_w"],
+            row["pcfm_xci_channel_w"],
+            row["analytic_limit_channel_w"],
         )
+        if pcfm_eq18_xci:
+            msg += ", PCFM_XCI_Eq18={:.3e} W".format(row["pcfm_eq18_xci_channel_w"])
+        lg.info(msg)
 
     rows.sort(key=lambda item: item["channel_spacing_ghz"])
     if not rows:
@@ -432,6 +455,13 @@ def run_spacing_sweep(
         exponent = _fit_exponent(spacing_hz, np.array([row[key] for row in rows], dtype=float))
         for row in rows:
             row[f"{key}_scaling_exp"] = exponent
+    if pcfm_eq18_xci:
+        exponent = _fit_exponent(
+            spacing_hz,
+            np.array([row["pcfm_eq18_xci_channel_w"] for row in rows], dtype=float),
+        )
+        for row in rows:
+            row["pcfm_eq18_xci_channel_w_scaling_exp"] = exponent
 
     csv_path = out_dir / "center_channel_spacing_scaling.csv"
     header = [
@@ -453,6 +483,13 @@ def run_spacing_sweep(
         "pcfm_xci_channel_w_scaling_exp",
         "analytic_limit_channel_w_scaling_exp",
     ]
+    if pcfm_eq18_xci:
+        header.extend(
+            [
+                "pcfm_eq18_xci_channel_w",
+                "pcfm_eq18_xci_channel_w_scaling_exp",
+            ]
+        )
     data = np.column_stack([[row[name] for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
@@ -483,6 +520,10 @@ def run_spacing_sweep(
         f"PCFM XCI exponent: {_fit_exponent(spacing_hz, np.array([row['pcfm_xci_channel_w'] for row in rows], dtype=float)):.6f}",
         f"Analytic limit exponent: {_fit_exponent(spacing_hz, np.array([row['analytic_limit_channel_w'] for row in rows], dtype=float)):.6f}",
     ]
+    if pcfm_eq18_xci:
+        summary_lines.append(
+            f"PCFM XCI Eq18 exponent: {_fit_exponent(spacing_hz, np.array([row['pcfm_eq18_xci_channel_w'] for row in rows], dtype=float)):.6f}"
+        )
     if skipped_spacings:
         summary_lines.append("Skipped spacing points:")
         summary_lines.extend(
@@ -554,6 +595,7 @@ def main() -> None:
         out_dir=Path(args.out_dir),
         launch_dbm=args.launch_dbm,
         pcfm_numeric_xci=args.pcfm_numeric_xci,
+        pcfm_eq18_xci=None,
         recompute_td=args.recompute_td,
         recompute_pcfm=args.recompute_pcfm,
         exclude_self_channel=args.exclude_self_channel,

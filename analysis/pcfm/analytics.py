@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
 import numpy as np
 from scipy.constants import c
+from scipy.integrate import quad
+from scipy.special import sici
 
 from pynlin.nlin import pcfm_gn
 from pynlin.system import System
@@ -55,6 +58,69 @@ def flat_profile_xci_kernel(
     return float(length_m / (2.0 * math.pi * beta2_eff) * log_term * float(poly_sum))
 
 
+@lru_cache(maxsize=None)
+def _j_of_x_scalar(x_value: float) -> float:
+    if np.isclose(x_value, 0.0):
+        return 0.0
+    sign = 1.0 if x_value >= 0.0 else -1.0
+    x_abs = abs(x_value)
+
+    def integrand(t: float) -> float:
+        if np.isclose(t, 0.0):
+            return 1.0
+        si_value, _ = sici(t)
+        return si_value / t
+
+    value, _ = quad(integrand, 0.0, x_abs, limit=300, epsabs=1e-11, epsrel=1e-11)
+    return sign * value
+
+
+def _g_kernel(z: np.ndarray) -> np.ndarray:
+    z = np.asarray(z, dtype=float)
+    out = np.empty_like(z)
+    for idx, zi in np.ndenumerate(z):
+        if np.isclose(zi, 0.0):
+            out[idx] = 0.0
+            continue
+        si_value, _ = sici(float(zi))
+        out[idx] = _j_of_x_scalar(float(zi)) - si_value + (1.0 - np.cos(zi)) / zi
+    return out
+
+
+def flat_profile_xci_kernel_eq18(
+    *,
+    length_m: float,
+    beta2_eff_s2_per_m: float,
+    bandwidth_hz: float,
+    delta_f_hz: float,
+) -> float:
+    """Return the dimensional flat-profile Eq. 18 XCI kernel for PCFM.
+
+    The standalone analytical script works with the normalized quantity
+
+        K * T^2 / L^2
+
+    as a function of x = Delta f / B. Here we convert that normalized kernel
+    back to the dimensional PCFM kernel K before applying the usual PCFM
+    XCI prefactors.
+    """
+    delta_abs_hz = float(abs(delta_f_hz))
+    bandwidth_hz = float(abs(bandwidth_hz))
+    if delta_abs_hz <= bandwidth_hz / 2.0:
+        raise ValueError("Eq. 18 flat-profile XCI requires |Delta f| > B/2.")
+
+    beta2_eff = max(abs(float(beta2_eff_s2_per_m)), pcfm_gn.MIN_BETA2)
+    x = delta_abs_hz / bandwidth_hz
+    l_over_ld = beta2_eff * float(length_m) * (bandwidth_hz**2)
+    z_plus = np.pi * l_over_ld * (x + 0.5)
+    z_minus = np.pi * l_over_ld * (x - 0.5)
+    k_normalized = float(
+        ((2.0 / (np.pi * l_over_ld)) * (_g_kernel(np.array([z_plus])) - _g_kernel(np.array([z_minus]))))[0]
+        / (2.0 * np.pi)
+    )
+    return float(k_normalized * (float(length_m) * bandwidth_hz) ** 2)
+
+
 def flat_profile_pcfm_xci_channel_power(
     system: System,
     *,
@@ -62,6 +128,7 @@ def flat_profile_pcfm_xci_channel_power(
     launch_powers_w: np.ndarray,
     use_beta2_eff: bool = True,
     log_order: int | None = None,
+    xci_model: str = "closed_form",
 ) -> float:
     """Return the current-implementation PCFM-XCI power for a flat profile.
 
@@ -100,14 +167,24 @@ def flat_profile_pcfm_xci_channel_power(
             if beta_coeffs
             else float(beta2[j])
         )
-        k_xci = flat_profile_xci_kernel(
-            length_m=length_m,
-            beta2_eff_s2_per_m=beta2_xci,
-            bandwidth_hz=bandwidth_hz,
-            delta_f_hz=delta_f,
-            poly_sum=1.0,
-            log_order=log_order,
-        )
+        if xci_model == "closed_form":
+            k_xci = flat_profile_xci_kernel(
+                length_m=length_m,
+                beta2_eff_s2_per_m=beta2_xci,
+                bandwidth_hz=bandwidth_hz,
+                delta_f_hz=delta_f,
+                poly_sum=1.0,
+                log_order=log_order,
+            )
+        elif xci_model == "eq18":
+            k_xci = flat_profile_xci_kernel_eq18(
+                length_m=length_m,
+                beta2_eff_s2_per_m=beta2_xci,
+                bandwidth_hz=bandwidth_hz,
+                delta_f_hz=delta_f,
+            )
+        else:
+            raise ValueError(f"Unsupported xci_model={xci_model!r}.")
         gamma_xci = (
             2.0
             * math.pi
@@ -121,7 +198,7 @@ def flat_profile_pcfm_xci_channel_power(
             * float(g_ch[j] ** 2)
             * (gamma_xci**2)
             * k_xci
-            / 2.0
+            # / 2.0 # FIXME this is too much and it is something from the past
         )
 
     return float(pcfm_gn._to_per_polarization_power(total_psd * bandwidth_hz))
