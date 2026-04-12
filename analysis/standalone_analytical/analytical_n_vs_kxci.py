@@ -1,18 +1,16 @@
 """Standalone non-interactive plotter for the analytical N vs K_XCI comparison.
 
 This reproduces the analytical comparison used in the scratch ``N_vs_KXCI``
-workflow, using the Eq. (18) model
+workflow, using the TD model
 
-    N(x) T^2 L^-2 = 4/9 * (1 + ((1/lambda) * (L/L_eff) * x)^(1/eta))^(-eta)
+    N(x) T^2 L^-2 = 4/9 * (1 + ((2 pi/lambda) * (L/L_eff) * x)^(1/eta))^(-eta)
 
 against the flat-profile closed-form XCI kernel
 
-    K_XCI(x) T^2 L^-2 = (L_eff/L) * |ln((x + 1/2)/(x - 1/2))|
+    K_XCI(x) T^2 L^-2 = (L_eff/(2 pi L) * |ln((x + 1/2)/(x - 1/2))|
 
 for x = Delta f / B.
 
-The script is intentionally non-interactive: it always writes publication-ready
-figures to disk and never calls ``plt.show()``.
 """
 
 from __future__ import annotations
@@ -22,14 +20,17 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 os.environ.setdefault("MPLCONFIGDIR", str(REPO_ROOT / ".mplconfig"))
 
 import matplotlib
 import numpy as np
+from loguru import logger as lg
 from scipy.integrate import quad
 from scipy.special import sici
+from matplotlib.ticker import FixedLocator
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -38,15 +39,34 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
+from analysis.pcfm.io import _write_flat_profile
+from pynlin.nlin.cache_names import s2a_lo_timeint_path, s2b_lo_extrema_path
+from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus
+from pynlin.nlin.nlin_estimation.lo_correction_uwb import (
+    build_lookup_integral_table_with_raman,
+)
+from pynlin.nlin.nlin_estimator_uwb import apply_plateau_correction
+from pynlin.system import System
 from pynlin.utils import _toml_load
 
 
 DEFAULT_OUT_DIR = REPO_ROOT / "media" / "standalone_analytical"
 DEFAULT_CONFIG_PATH = REPO_ROOT / "input" / "analytical_n_vs_kxci.toml"
+DEFAULT_SYSTEM_CONFIG_PATH = REPO_ROOT / "input" / "pcfm_struct.toml"
 DEFAULT_MPLRC_PATH = Path.home() / ".config" / "matplotlib" / "matplotlibrc"
 DPI = 300
 CONFIG_SECTION = "analytical_n_vs_kxci"
 LINE_LW = 0.75
+GNUPLOT_RED = "#A00000"
+GNUPLOT_GREEN = "#00A000"
+GNUPLOT_BLUE = "#5060D0"
+GNUPLOT_ORANGE = "#B06000"
+GNUPLOT_GRAY = "#606060"
+
+COLOR_N = GNUPLOT_RED
+COLOR_N_REFERENCE = GNUPLOT_GRAY
+COLOR_KXCI = GNUPLOT_GREEN
+COLOR_KXCI_EQ18 = GNUPLOT_BLUE
 
 
 def _configure_matplotlib() -> None:
@@ -62,6 +82,16 @@ def n_eq18(x: np.ndarray, lam: float, l_over_leff: float, eta: float) -> np.ndar
     """Eq. (18) curve used in the original comparison."""
     scale = float(l_over_leff) / float(lam)
     return (4.0 / 9.0) * (1.0 + (scale * x) ** (1.0 / eta)) ** (-eta)
+
+
+def n_softplus_scaled(
+    x: np.ndarray,
+    *,
+    l_over_ld: float,
+    ps: tuple[float, float, float] | np.ndarray,
+) -> np.ndarray:
+    """Evaluate the TD softplus using x_walkoff=(L/LD)*x."""
+    return softplus(float(l_over_ld) * np.asarray(x, dtype=float), *ps)
 
 
 def k_xci(x: np.ndarray, leff_over_l: float) -> np.ndarray:
@@ -209,33 +239,32 @@ def _plot_pcfm_style_line(
     ax.plot(x_right, y_right, color=color, lw=LINE_LW, ls=linestyle)
 
 
-def _annotate_references(ax: plt.Axes, x: np.ndarray) -> tuple[float, float]:
+def _add_reference_y_ticks(ax: plt.Axes) -> tuple[float, float]:
     y_ln3 = float(np.log(3.0))
     y_four_ninths = 4.0 / 9.0
-    x_anchor = float(x[min(len(x) - 1, int(0.82 * len(x)))])
 
-    ax.axhline(y_ln3, color="tab:red", linestyle="--", linewidth=LINE_LW, label=r"$\ln(3)$")
-    ax.axhline(
-        y_four_ninths,
-        color="tab:green",
-        linestyle="--",
-        linewidth=LINE_LW,
-        label=r"$4/9$",
+    current_ticks = np.asarray(ax.get_yticks(), dtype=float)
+    merged_ticks = np.unique(
+        np.concatenate([current_ticks, np.array([y_ln3, y_four_ninths])])
     )
-    ax.annotate(
-        r"$\ln(3)$",
-        xy=(x_anchor, y_ln3),
-        xytext=(5, 5),
-        textcoords="offset points",
-        color="tab:red",
-    )
-    ax.annotate(
-        r"$4/9$",
-        xy=(x_anchor, y_four_ninths),
-        xytext=(5, -12),
-        textcoords="offset points",
-        color="tab:green",
-    )
+    ax.yaxis.set_major_locator(FixedLocator(merged_ticks))
+
+    fig = ax.figure
+    fig.canvas.draw()
+
+    for tick, value in zip(ax.yaxis.get_major_ticks(), ax.get_yticks()):
+        if np.isclose(value, y_ln3):
+            tick.label1.set_text(r"$\ln(3)$")
+            tick.label1.set_color("tab:red")
+            tick.tick1line.set_color("tab:red")
+            tick.tick2line.set_color("tab:red")
+        elif np.isclose(value, y_four_ninths):
+            # tick.label1.set_text(r"$4/9$")
+            tick.label1.set_color("tab:green")
+            tick.tick1line.set_color("tab:green")
+            tick.tick2line.set_color("tab:green")
+
+    fig.canvas.draw()
     return y_ln3, y_four_ninths
 
 
@@ -245,18 +274,30 @@ def _comparison_figure(
     y_k: np.ndarray,
     *,
     y_k_eq18: np.ndarray,
+    y_n_reference: np.ndarray | None,
     loglog: bool,
     normalize: bool,
     show_crossover: bool,
     show_kxci_alternative: bool,
+    n_label: str,
+    n_reference_label: str | None,
 ) -> tuple[plt.Figure, float | None]:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
-    _plot_pcfm_style_line(ax, x, y_n, color="black", label=r"$\mathnormal \mathcal{N}(x)\,T^2L^{-2}$")
+    _plot_pcfm_style_line(ax, x, y_n, color=COLOR_N, label=n_label)
+    if y_n_reference is not None and n_reference_label is not None:
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            y_n_reference,
+            color=COLOR_N_REFERENCE,
+            linestyle="--",
+            label=n_reference_label,
+        )
     _plot_pcfm_style_line(
         ax,
         x,
         y_k,
-        color="tab:blue",
+        color=COLOR_KXCI,
         label=r"$\mathnormal K_{\mathrm{XCI}}(x)\,T^2L^{-2}$",
     )
     if show_kxci_alternative:
@@ -264,25 +305,32 @@ def _comparison_figure(
             ax,
             x,
             y_k_eq18,
-            color="tab:orange",
+            color=COLOR_KXCI_EQ18,
             label=r"$\mathnormal K_{\mathrm{XCI}}^{\mathrm{Eq.18}}(x)\,T^2L^{-2}$",
         )
     ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
 
-    y_ln3, y_four_ninths = _annotate_references(ax, x)
+    y_ln3 = float(np.log(3.0))
+    y_four_ninths = 4.0 / 9.0
     _style_axes(ax, loglog=loglog)
 
     if not loglog:
         arrays = [y_n, y_k, y_ln3, y_four_ninths]
+        if y_n_reference is not None:
+            arrays.append(y_n_reference)
         if show_kxci_alternative:
             arrays.append(y_k_eq18)
         ymin, ymax = finite_min_max(*arrays)
         pad = 0.06 * (ymax - ymin) if ymax > ymin else 0.1
         ax.set_ylim(ymin - pad, ymax + pad)
 
+    # _add_reference_y_ticks(ax)
+
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$")
     ax.set_ylabel("Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$")
-    ax.legend(loc="best", fontsize=7)
+    ax.legend(loc="best", 
+            #   fontsize=7
+              )
 
     crossover = None
     if show_crossover:
@@ -300,7 +348,7 @@ def _comparison_figure(
                 xytext=(4, -10),
                 textcoords="offset points",
                 color="0.25",
-                fontsize=7,
+                # fontsize=7,
             )
 
     fig.tight_layout()
@@ -316,13 +364,13 @@ def _ratio_figure(
     crossover: float | None,
 ) -> plt.Figure:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
-    _plot_pcfm_style_line(ax, x, ratio, color="tab:blue", label=r"$\mathnormal{ K_{\mathrm{XCI}}/\mathcal{N}}$")
+    _plot_pcfm_style_line(ax, x, ratio, color=COLOR_KXCI, label=r"$\mathnormal{ K_{\mathrm{XCI}}/\mathcal{N}}$")
     if ratio_eq18 is not None:
         _plot_pcfm_style_line(
             ax,
             x,
             ratio_eq18,
-            color="tab:orange",
+            color=COLOR_KXCI_EQ18,
             label=r"$K_{\mathrm{XCI}}^{\mathrm{Eq.18}}/\mathcal{N}$",
         )
     if crossover is not None and np.isfinite(crossover):
@@ -330,7 +378,90 @@ def _ratio_figure(
     _style_axes(ax, loglog=loglog)
     ax.set_xlabel(r"$\Delta f / B$")
     ax.set_ylabel(r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$")
-    ax.legend(loc="best", fontsize=7)
+    ax.legend(loc="best", 
+            #   fontsize=7
+              )
+    fig.tight_layout()
+    return fig
+
+
+def _combined_comparison_figure(
+    x: np.ndarray,
+    cases: list[dict[str, Any]],
+    *,
+    loglog: bool,
+    normalize: bool,
+    show_kxci_alternative: bool,
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.9))
+    arrays: list[np.ndarray | float] = []
+
+    for case in cases:
+        tag = case["case_label"]
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            case["y_n"],
+            color=COLOR_N,
+            label=rf"$\mathcal{{N}}$, {tag}",
+        )
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            case["y_k"],
+            color=COLOR_KXCI,
+            label=rf"$K_{{\mathrm{{XCI}}}}$, {tag}",
+        )
+        arrays.extend([case["y_n"], case["y_k"]])
+        if show_kxci_alternative:
+            _plot_pcfm_style_line(
+                ax,
+                x,
+                case["y_k_eq18"],
+                color=COLOR_KXCI_EQ18,
+                label=rf"$K_{{\mathrm{{XCI}}}}^{{\mathrm{{Eq.18}}}}$, {tag}",
+            )
+            arrays.append(case["y_k_eq18"])
+
+    ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
+    _style_axes(ax, loglog=loglog)
+
+    if not loglog:
+        ymin, ymax = finite_min_max(*arrays)
+        pad = 0.06 * (ymax - ymin) if ymax > ymin else 0.1
+        ax.set_ylim(ymin - pad, ymax + pad)
+
+    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$")
+    ax.set_ylabel("Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def _combined_ratio_figure(
+    x: np.ndarray,
+    cases: list[dict[str, Any]],
+    *,
+    loglog: bool,
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.5))
+
+    for case in cases:
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            case["ratio"],
+            color=COLOR_KXCI,
+            label=rf"$K_{{\mathrm{{XCI}}}}/\mathcal{{N}}$, {case['case_label']}",
+        )
+        crossover = case["crossover"]
+        if crossover is not None and np.isfinite(crossover):
+            ax.axvline(crossover, color=COLOR_N_REFERENCE, linestyle="--", linewidth=LINE_LW)
+
+    _style_axes(ax, loglog=loglog)
+    ax.set_xlabel(r"$\Delta f / B$")
+    ax.set_ylabel(r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$")
+    ax.legend(loc="best")
     fig.tight_layout()
     return fig
 
@@ -341,11 +472,175 @@ def _save_figure(fig: plt.Figure, out_path: Path) -> None:
     print(f"Saved {out_path}")
 
 
+def _case_tag(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".").replace("-", "m").replace(".", "p")
+
+
+def _as_float_list(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return [float(item) for item in value]
+    return [float(value)]
+
+
+def _force_flat_profile_mode(system: System) -> None:
+    raw = getattr(system, "raw_config", None)
+    if not isinstance(raw, dict):
+        raw = {}
+        system.raw_config = raw
+
+    pcfm = raw.get("pcfm")
+    if not isinstance(pcfm, dict):
+        pcfm = {}
+        raw["pcfm"] = pcfm
+    run = pcfm.get("run")
+    if not isinstance(run, dict):
+        run = {}
+        pcfm["run"] = run
+    run["power_profiles_mode"] = "flat"
+
+    nlin_section = raw.get("nlin")
+    if not isinstance(nlin_section, dict):
+        nlin_section = {}
+        raw["nlin"] = nlin_section
+    nlin_section["flat_profiles"] = True
+
+
+def _ensure_flat_profile(
+    system: System,
+    profile_path: Path,
+    *,
+    recompute: bool,
+) -> Path:
+    if recompute or not profile_path.exists():
+        _write_flat_profile(profile_path, system)
+    return profile_path
+
+
+def _prepare_flat_td_corrections(
+    system: System,
+    *,
+    profile_path: Path,
+    ipulse: int,
+    recompute: bool,
+    max_l_over_ld: float,
+    m_lo_truncation: int = 2,
+) -> dict[str, Any]:
+    _force_flat_profile_mode(system)
+    profile_path = _ensure_flat_profile(system, profile_path, recompute=recompute)
+    pulse_name = "gaussian" if ipulse == 0 else "nyquist"
+    lld_max = max(float(max_l_over_ld), 2.5)
+    s2b_cache = s2b_lo_extrema_path(
+        ipulse=ipulse,
+        m_lo_truncation=m_lo_truncation,
+        fiber_length=float(system.fiber_length),
+        lld_max=lld_max,
+    )
+    s2a_caches = [
+        s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo)
+        for m_lo in range(m_lo_truncation + 1)
+    ]
+    lg.info(
+        "TD correction lookup setup: pulse={} flat_profile={} profile_path={} "
+        "S2B cache={} source S2A caches={}".format(
+            pulse_name,
+            profile_path.exists(),
+            profile_path,
+            s2b_cache,
+            [str(path) for path in s2a_caches],
+        )
+    )
+    rmax_lookup, rmin_lookup = build_lookup_integral_table_with_raman(
+        system,
+        ipulse=ipulse,
+        recompute=recompute,
+        profile_path=profile_path,
+        max_lld=max_l_over_ld,
+    )
+    ps_ideal = tuple(
+        float(v)
+        for v in ideal_fit_coefficients(
+            0.0,
+            0.0,
+            ipulse=ipulse,
+            fiber_length=float(system.fiber_length),
+            baud_rate=float(system.pulse.baud_rate),
+        )
+    )
+    return {
+        "system": system,
+        "profile_path": profile_path,
+        "ps_ideal": ps_ideal,
+        "rmax_lookup": rmax_lookup,
+        "rmin_lookup": rmin_lookup,
+        "s2b_cache": s2b_cache,
+        "s2a_caches": s2a_caches,
+        "pulse_name": pulse_name,
+        "m_lo_truncation": int(m_lo_truncation),
+    }
+
+
+def _td_corrected_softplus_params_flat(
+    l_over_ld: float,
+    td_ctx: dict[str, Any],
+) -> tuple[float, float, float]:
+    lo_value = float(td_ctx["rmin_lookup"](float(l_over_ld), float(l_over_ld)))
+    ps_ideal = tuple(float(v) for v in td_ctx["ps_ideal"])
+    ps_corrected = tuple(float(v) for v in apply_plateau_correction(ps_ideal, lo_value))
+    lg.info(
+        "TD flat-profile correction from cache {} at L/LD={:.6g}: "
+        "using rmin_lookup(L/LD,L/LD)={:.6e}; ideal (a,Lambda,eta)=({:.6e},{:.6e},{:.6e}) "
+        "-> corrected (a,Lambda,eta)=({:.6e},{:.6e},{:.6e})".format(
+            td_ctx["s2b_cache"],
+            float(l_over_ld),
+            lo_value,
+            ps_ideal[0],
+            ps_ideal[1],
+            ps_ideal[2],
+            ps_corrected[0],
+            ps_corrected[1],
+            ps_corrected[2],
+        )
+    )
+    return ps_corrected
+
+
+def _write_summary(path: Path, rows: list[dict[str, float]]) -> None:
+    if not rows:
+        return
+    header = (
+        "l_over_ld,crossover_x,plateau_ideal,lambda_ideal,eta_ideal,"
+        "plateau_corrected,lambda_corrected,eta_corrected"
+    )
+    lines = [header]
+    for row in rows:
+        lines.append(
+            ",".join(
+                [
+                    f"{row['l_over_ld']:.12g}",
+                    "nan" if not np.isfinite(row["crossover_x"]) else f"{row['crossover_x']:.12g}",
+                    f"{row['plateau_ideal']:.12g}",
+                    f"{row['lambda_ideal']:.12g}",
+                    f"{row['eta_ideal']:.12g}",
+                    f"{row['plateau_corrected']:.12g}",
+                    f"{row['lambda_corrected']:.12g}",
+                    f"{row['eta_corrected']:.12g}",
+                ]
+            )
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="ascii")
+    print(f"Saved {path}")
+
+
 def _config_key_map() -> dict[str, str]:
     return {
         "lam": "lam",
         "lambda": "lam",
         "l_over_leff": "l_over_leff",
+        "l_over_leff_values": "l_over_leff_values",
+        "l_over_ld_values": "l_over_leff_values",
         "l-over-leff": "l_over_leff",
         "eta": "eta",
         "x_min": "x_min",
@@ -365,6 +660,17 @@ def _config_key_map() -> dict[str, str]:
         "out-dir": "out_dir",
         "stem": "stem",
         "format": "format",
+        "use_td_corrections": "use_td_corrections",
+        "use-td-corrections": "use_td_corrections",
+        "system_config": "system_config",
+        "system-config": "system_config",
+        "profile_path": "profile_path",
+        "profile-path": "profile_path",
+        "recompute_corrections": "recompute_corrections",
+        "recompute-corrections": "recompute_corrections",
+        "flat_profile": "flat_profile",
+        "flat-profile": "flat_profile",
+        "ipulse": "ipulse",
     }
 
 
@@ -398,6 +704,11 @@ def _load_config_defaults(config_path: Path | None) -> dict[str, object]:
 
     if "out_dir" in defaults:
         defaults["out_dir"] = (config_path.parent / Path(defaults["out_dir"])).resolve()
+    for key in ("system_config", "profile_path"):
+        if key in defaults and defaults[key] is not None:
+            defaults[key] = (config_path.parent / Path(defaults[key])).resolve()
+    if "l_over_leff_values" in defaults:
+        defaults["l_over_leff_values"] = _as_float_list(defaults["l_over_leff_values"])
 
     return defaults
 
@@ -417,6 +728,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--lam", type=float, default=1.0, help="Lambda parameter in Eq. (18).")
     parser.add_argument("--l-over-leff", type=float, default=1.0, help="Ratio L / L_eff.")
+    parser.add_argument(
+        "--l-over-leff-values",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Optional list of L/LD-style values to sweep in one run.",
+    )
     parser.add_argument("--eta", type=float, default=1.0, help="Eta parameter in Eq. (18).")
     parser.add_argument("--x-min", type=float, default=0.0, help="Lower x bound.")
     parser.add_argument("--x-max", type=float, default=10.0, help="Upper x bound.")
@@ -469,6 +787,43 @@ def build_parser() -> argparse.ArgumentParser:
         default="pdf",
         help="Output format.",
     )
+    parser.add_argument(
+        "--use-td-corrections",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Apply the flat-profile TD plateau correction via the UWB lookup/cache path.",
+    )
+    parser.add_argument(
+        "--system-config",
+        type=Path,
+        default=DEFAULT_SYSTEM_CONFIG_PATH if DEFAULT_SYSTEM_CONFIG_PATH.exists() else None,
+        help="System TOML used to build/load the TD correction lookup tables.",
+    )
+    parser.add_argument(
+        "--profile-path",
+        type=Path,
+        default=None,
+        help="Optional flat-profile cache path used by the Raman lookup builder.",
+    )
+    parser.add_argument(
+        "--recompute-corrections",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Force recomputation of the TD lookup tables instead of loading caches.",
+    )
+    parser.add_argument(
+        "--flat-profile",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use a synthetic flat power profile when building TD corrections.",
+    )
+    parser.add_argument(
+        "--ipulse",
+        type=int,
+        choices=(0, 1),
+        default=1,
+        help="Pulse selector for the TD ideal fit and lookup caches: 0=Gaussian, 1=Nyquist.",
+    )
     return parser
 
 
@@ -488,63 +843,183 @@ def main() -> None:
 
     if args.lam <= 0.0 or args.l_over_leff <= 0.0 or args.eta <= 0.0:
         raise ValueError("lambda, L/Leff, and eta must be strictly positive.")
+    l_over_leff_values = _as_float_list(args.l_over_leff_values) or [float(args.l_over_leff)]
+    if any(value <= 0.0 for value in l_over_leff_values):
+        raise ValueError("All L/Leff values must be strictly positive.")
+    if args.use_td_corrections and args.system_config is None:
+        raise ValueError("--system-config is required when --use-td-corrections is enabled.")
 
     x = _make_x_grid(args.x_min, args.x_max, args.npts, args.loglog)
-    leff_over_l = 1.0 / args.l_over_leff
-    y_n = n_eq18(x, lam=args.lam, l_over_leff=args.l_over_leff, eta=args.eta)
-    y_k = k_xci(x, leff_over_l=leff_over_l)
-    y_k_eq18 = k_xci_eq18_normalized(x, l_over_leff=args.l_over_leff)
-
-    if args.normalize:
-        for y in (y_n, y_k, y_k_eq18):
-            finite = y[np.isfinite(y)]
-            if finite.size == 0:
-                continue
-            scale = np.nanmax(np.abs(finite))
-            if scale > 0.0:
-                y /= scale
-
-    fig_cmp, crossover = _comparison_figure(
-        x,
-        y_n,
-        y_k,
-        y_k_eq18=y_k_eq18,
-        loglog=args.loglog,
-        normalize=args.normalize,
-        show_crossover=args.show_crossover,
-        show_kxci_alternative=args.show_kxci_alternative,
-    )
+    td_ctx: dict[str, Any] | None = None
+    if args.use_td_corrections:
+        system = System.from_toml(args.system_config)
+        if args.flat_profile:
+            profile_path = (
+                args.profile_path
+                if args.profile_path is not None
+                else args.out_dir / f"{args.stem}_flat_profile.npy"
+            )
+        elif args.profile_path is None:
+            raise ValueError("--profile-path is required when --no-flat-profile is used.")
+        else:
+            profile_path = args.profile_path
+        td_ctx = _prepare_flat_td_corrections(
+            system,
+            profile_path=Path(profile_path),
+            ipulse=int(args.ipulse),
+            recompute=bool(args.recompute_corrections),
+            max_l_over_ld=max(l_over_leff_values),
+        )
 
     suffixes = [".pdf", ".png"] if args.format == "both" else [f".{args.format}"]
-    for suffix in suffixes:
-        _save_figure(fig_cmp, args.out_dir / f"{args.stem}{suffix}")
-    plt.close(fig_cmp)
+    multi_case = len(l_over_leff_values) > 1
+    summary_rows: list[dict[str, float]] = []
+    case_results: list[dict[str, Any]] = []
 
-    if args.show_ratio:
-        ratio = safe_ratio(y_k, y_n)
-        ratio_eq18 = safe_ratio(y_k_eq18, y_n) if args.show_kxci_alternative else None
-        fig_ratio = _ratio_figure(
+    for l_over_leff in l_over_leff_values:
+        leff_over_l = 1.0 / l_over_leff
+        y_n_paper = n_eq18(x, lam=args.lam, l_over_leff=l_over_leff, eta=args.eta)
+        y_k = k_xci(x, leff_over_l=leff_over_l)
+        y_k_eq18 = k_xci_eq18_normalized(x, l_over_leff=l_over_leff)
+
+        y_n = y_n_paper
+        y_n_reference = None
+        n_label = r"$\mathnormal \mathcal{N}(x)\,T^2L^{-2}$"
+        n_reference_label = None
+        plateau_ideal = float("nan")
+        lambda_ideal = float("nan")
+        eta_ideal = float("nan")
+        plateau_corrected = float("nan")
+        lambda_corrected = float("nan")
+        eta_corrected = float("nan")
+
+        if td_ctx is not None:
+            ps_ideal = td_ctx["ps_ideal"]
+            ps_corrected = _td_corrected_softplus_params_flat(l_over_leff, td_ctx)
+            y_n = n_softplus_scaled(x, l_over_ld=l_over_leff, ps=ps_corrected)
+            y_n_reference = y_n_paper
+            n_label = r"$\mathnormal \mathcal{N}_{\mathrm{TD,corr}}(x)\,T^2L^{-2}$"
+            n_reference_label = r"$\mathnormal \mathcal{N}_{\mathrm{Eq.18}}(x)\,T^2L^{-2}$"
+            plateau_ideal, lambda_ideal, eta_ideal = ps_ideal
+            plateau_corrected, lambda_corrected, eta_corrected = ps_corrected
+
+        if args.normalize:
+            arrays_to_scale = [y_n, y_k, y_k_eq18]
+            if y_n_reference is not None:
+                arrays_to_scale.append(y_n_reference)
+            for y in arrays_to_scale:
+                finite = y[np.isfinite(y)]
+                if finite.size == 0:
+                    continue
+                scale = np.nanmax(np.abs(finite))
+                if scale > 0.0:
+                    y /= scale
+
+        fig_cmp, crossover = _comparison_figure(
             x,
-            ratio,
-            ratio_eq18=ratio_eq18,
+            y_n,
+            y_k,
+            y_k_eq18=y_k_eq18,
+            y_n_reference=y_n_reference,
             loglog=args.loglog,
-            crossover=crossover,
+            normalize=args.normalize,
+            show_crossover=args.show_crossover,
+            show_kxci_alternative=args.show_kxci_alternative,
+            n_label=n_label,
+            n_reference_label=n_reference_label,
         )
-        for suffix in suffixes:
-            _save_figure(fig_ratio, args.out_dir / f"{args.stem}_ratio{suffix}")
-        plt.close(fig_ratio)
 
-    print(
-        "Parameters: "
-        f"lambda={args.lam}, L/Leff={args.l_over_leff}, eta={args.eta}, "
-        f"x in [{args.x_min}, {args.x_max}]"
-    )
+        case_stem = args.stem if not multi_case else f"{args.stem}_lld{_case_tag(l_over_leff)}"
+        for suffix in suffixes:
+            _save_figure(fig_cmp, args.out_dir / f"{case_stem}{suffix}")
+        plt.close(fig_cmp)
+
+        if args.show_ratio:
+            ratio = safe_ratio(y_k, y_n)
+            ratio_eq18 = safe_ratio(y_k_eq18, y_n) if args.show_kxci_alternative else None
+            fig_ratio = _ratio_figure(
+                x,
+                ratio,
+                ratio_eq18=ratio_eq18,
+                loglog=args.loglog,
+                crossover=crossover,
+            )
+            for suffix in suffixes:
+                _save_figure(fig_ratio, args.out_dir / f"{case_stem}_ratio{suffix}")
+            plt.close(fig_ratio)
+        else:
+            ratio = safe_ratio(y_k, y_n)
+
+        print(
+            "Parameters: "
+            f"lambda={args.lam}, L/Leff={l_over_leff}, eta={args.eta}, "
+            f"x in [{args.x_min}, {args.x_max}]"
+        )
+        if td_ctx is not None:
+            print(
+                "TD flat-profile correction: "
+                f"a={plateau_corrected:.6g}, Lambda={lambda_corrected:.6g}, eta={eta_corrected:.6g}"
+            )
+        if crossover is None:
+            print("No crossover found in the selected x-range.")
+        else:
+            print(f"First crossover at x = Delta f / B ≈ {crossover:.6g}")
+
+        summary_rows.append(
+            {
+                "l_over_ld": float(l_over_leff),
+                "crossover_x": float(crossover) if crossover is not None else float("nan"),
+                "plateau_ideal": plateau_ideal,
+                "lambda_ideal": lambda_ideal,
+                "eta_ideal": eta_ideal,
+                "plateau_corrected": plateau_corrected,
+                "lambda_corrected": lambda_corrected,
+                "eta_corrected": eta_corrected,
+            }
+        )
+        case_results.append(
+            {
+                "l_over_leff": float(l_over_leff),
+                "case_label": rf"$L/L_D={l_over_leff:g}$",
+                "y_n": np.asarray(y_n, dtype=float).copy(),
+                "y_k": np.asarray(y_k, dtype=float).copy(),
+                "y_k_eq18": np.asarray(y_k_eq18, dtype=float).copy(),
+                "ratio": np.asarray(ratio, dtype=float).copy(),
+                "crossover": crossover,
+            }
+        )
+
     if pre_args.config is not None:
         print(f"Config: {pre_args.config}")
-    if crossover is None:
-        print("No crossover found in the selected x-range.")
-    else:
-        print(f"First crossover at x = Delta f / B ≈ {crossover:.6g}")
+    if multi_case:
+        fig_combined = _combined_comparison_figure(
+            x,
+            case_results,
+            loglog=args.loglog,
+            normalize=args.normalize,
+            show_kxci_alternative=args.show_kxci_alternative,
+        )
+        for suffix in suffixes:
+            _save_figure(fig_combined, args.out_dir / f"{args.stem}_combined{suffix}")
+        plt.close(fig_combined)
+
+        if args.show_ratio:
+            fig_combined_ratio = _combined_ratio_figure(
+                x,
+                case_results,
+                loglog=args.loglog,
+            )
+            for suffix in suffixes:
+                _save_figure(fig_combined_ratio, args.out_dir / f"{args.stem}_combined_ratio{suffix}")
+            plt.close(fig_combined_ratio)
+    if td_ctx is not None:
+        print(f"TD lookup system: {args.system_config}")
+        print(f"TD flat profile: {td_ctx['profile_path']}")
+        print(
+            "Cache behavior: lookup tables and low-order datasets are loaded if present; "
+            "missing ones are computed and saved unless --recompute-corrections forces regeneration."
+        )
+        _write_summary(args.out_dir / f"{args.stem}_td_corrections.csv", summary_rows)
     print("K_XCI is only defined for x > 1/2; values at x <= 1/2 are masked.")
 
 
