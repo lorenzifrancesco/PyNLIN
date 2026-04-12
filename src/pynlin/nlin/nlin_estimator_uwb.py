@@ -128,6 +128,7 @@ def get_kappa2_matrix_uwb(system: System,
     if use_kappa:
         lg.warning("Applying kappa.csv coupling weights. Check the Manakov averaging.")
         kappa = np.atleast_2d(np.loadtxt('input/fiber_data/kappa_uwb.csv', delimiter=','))
+        assert(np.isclose(kappa[0, 0], 8.0 / 9.0, atol=0.01)), "Expected kappa[0,0] ~ 8/9 for SMF; check kappa_uwb.csv contents."   
         if n_modes == 1:
             kappa2 = np.array([[float(kappa[0, 0]) ** 2]], dtype=float)
         else:

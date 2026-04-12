@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 from loguru import logger as lg
 
+from .analytics import flat_profile_pcfm_xci_channel_power
 from pynlin.nlin.pcfm_gn import (
     PcfmConfig,
     compute_gn_direct,
@@ -74,6 +75,37 @@ def _load_or_compute_pcfm(
         return nlin, sci, xci
     _save(output_path, out)
     return out
+
+
+def _load_or_compute_flat_analytic_xci(
+    system: System,
+    launch_powers_w: np.ndarray,
+    output_path: Path,
+    *,
+    xci_model: str,
+    recompute: bool = False,
+) -> np.ndarray:
+    """Compute or load a flat-profile analytic XCI vector and persist to .npy."""
+    if output_path.exists() and not recompute:
+        lg.info(f"Loading cached flat analytic XCI from {output_path}")
+        return np.load(output_path)
+
+    lg.info(f"Computing flat analytic XCI (model={xci_model})")
+    values = np.array(
+        [
+            flat_profile_pcfm_xci_channel_power(
+                system,
+                channel_idx=idx,
+                launch_powers_w=launch_powers_w,
+                xci_model=xci_model,
+            )
+            for idx in range(system.wdm.frequency_grid().size)
+        ],
+        dtype=float,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(output_path, values)
+    return values
 
 
 def _load_or_compute_gn(

@@ -619,6 +619,71 @@ r_{ij}\ln\!\left(\frac{r_{ij}+1/2}{r_{ij}-1/2}\right)
 x_{ij}F_{\mathrm{S1}}(x_{ij})
 }.$$
 
+#### Script-only Eq. (18) XCI alternative
+
+The standalone script
+`analysis/standalone_analytical/analytical_n_vs_kxci.py` also plots an
+alternative flat-Raman XCI curve labelled
+$K_{\mathrm{XCI}}^{\mathrm{Eq.18}}$. In the script, this is implemented
+in normalized variables as
+
+$$
+K_{\mathrm{XCI}}^{\mathrm{Eq.18}}(x)\,T^2L^{-2}
+=
+\frac{1}{2\pi}
+\cdot
+\frac{2}{\pi (L/L_{\mathrm{eff}})}
+\left[
+g\!\left(\pi \frac{L}{L_{\mathrm{eff}}}\left(x+\frac12\right)\right)
+-
+g\!\left(\pi \frac{L}{L_{\mathrm{eff}}}\left(x-\frac12\right)\right)
+\right],
+$$
+
+or equivalently
+
+$$
+K_{\mathrm{XCI}}^{\mathrm{Eq.18}}(x)\,T^2L^{-2}
+=
+\frac{1}{\pi^2 (L/L_{\mathrm{eff}})}
+\left[
+g\!\left(\pi \frac{L}{L_{\mathrm{eff}}}\left(x+\frac12\right)\right)
+-
+g\!\left(\pi \frac{L}{L_{\mathrm{eff}}}\left(x-\frac12\right)\right)
+\right].
+$$
+
+Here
+
+$$
+g(z)=J(z)-\operatorname{Si}(z)+\frac{1-\cos z}{z},
+$$
+
+with
+
+$$
+J(z)=\int_0^z \frac{\operatorname{Si}(t)}{t}\,dt.
+$$
+
+The three terms in $g(z)$ are all odd functions of $z$, so $g$ itself
+is odd. Therefore, if one analytically extends the formula to small $x$,
+then at $x=0$ one gets
+
+$$
+K_{\mathrm{XCI}}^{\mathrm{Eq.18}}(0)\,T^2L^{-2}
+=
+\frac{2}{\pi^2 (L/L_{\mathrm{eff}})}
+g\!\left(\pi \frac{L}{L_{\mathrm{eff}}}\frac12\right),
+$$
+
+which is finite. So, unlike the closed-form logarithmic XCI kernel, the
+Eq. (18) alternative does not develop a singularity as $x\to 0$.
+
+In the current script, however, this alternative curve is still masked
+for $x\le 1/2$ so that all plotted XCI curves share the same
+non-overlapping-domain convention as the closed-form
+$K_{\mathrm{XCI}}$.
+
 This expression is the cleanest implementation-level comparison
 available in the idealized regime. It also shows that there is no
 general proof in the current code that `PCFM >= TD`.

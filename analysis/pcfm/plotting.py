@@ -5,6 +5,8 @@ import numpy as np
 from loguru import logger as lg
 from matplotlib.ticker import ScalarFormatter
 
+from pynlin.nlin import pcfm_gn as pcfm
+from pynlin.nlin.pcfm_gn import PcfmConfig
 from pynlin.nlin.pcfm_gn import fit_spp_polynomials, load_signal_profiles, normalize_spp
 from pynlin.system import System
 from pynlin.utils import watt2dBm
@@ -303,8 +305,10 @@ def plot_pcfm_diagnostics(
     profile_path: Path | str,
     launch_powers_w: np.ndarray,
     out_dir: Path,
+    cfg: PcfmConfig | None = None,
 ) -> None:
     """Generate diagnostic plots for intermediate quantities."""
+    cfg = cfg or PcfmConfig()
     out_dir.mkdir(parents=True, exist_ok=True)
     freqs = system.wdm.frequency_grid()
     freqs_thz = freqs * 1e-12
@@ -319,6 +323,74 @@ def plot_pcfm_diagnostics(
     fig.tight_layout()
     fig.savefig(out_dir / "launch_power.pdf", dpi=300)
     lg.success(f"Saved launch power plot to {out_dir / 'launch_power.pdf'}")
+    plt.close(fig)
+
+    beta1, beta2 = system.beta_grids(freqs=freqs)
+    beta1 = np.asarray(beta1, dtype=float)
+    beta2 = np.asarray(beta2, dtype=float)
+    if beta1.ndim == 2:
+        if beta1.shape[0] != 1:
+            raise ValueError(
+                "plot_pcfm_diagnostics currently expects a single-mode system for the L/LW histogram."
+            )
+        beta1 = beta1[0]
+    if beta2.ndim == 2:
+        if beta2.shape[0] != 1:
+            raise ValueError(
+                "plot_pcfm_diagnostics currently expects a single-mode system for the L/LD histogram."
+            )
+        beta2 = beta2[0]
+
+    length_m = float(system.fiber_length)
+    baud_rate_hz = float(system.pulse.baud_rate)
+
+    beta1_diff = np.abs(beta1[:, None] - beta1[None, :])
+    pair_mask = np.triu(np.ones(beta1_diff.shape, dtype=bool), k=1)
+    l_over_lw_pairs = (beta1_diff[pair_mask] * length_m * baud_rate_hz).reshape(-1)
+    l_over_lw_pairs = l_over_lw_pairs[np.isfinite(l_over_lw_pairs) & (l_over_lw_pairs > 0.0)]
+
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.6))
+    if l_over_lw_pairs.size:
+        bins = np.geomspace(float(np.min(l_over_lw_pairs)), float(np.max(l_over_lw_pairs)), 40)
+        if np.unique(bins).size < 2:
+            bins = np.linspace(float(np.min(l_over_lw_pairs)), float(np.max(l_over_lw_pairs)) + 1e-12, 10)
+        ax.hist(l_over_lw_pairs, bins=bins, color="tab:blue", edgecolor="black", linewidth=0.5)
+        ax.set_xscale("log")
+    ax.set_xlabel(r"$L/L_W$")
+    ax.set_ylabel("channel-pair count")
+    ax.grid(False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "l_over_lw_histogram.pdf", dpi=300)
+    lg.success(f"Saved L/LW histogram to {out_dir / 'l_over_lw_histogram.pdf'}")
+    plt.close(fig)
+
+    if cfg.use_beta2_eff:
+        coeffs_beta = pcfm._beta_coeffs_from_profile(
+            system,
+            float(system.center_frequency or np.mean(freqs)),
+        )
+        if coeffs_beta is not None:
+            beta2_diag = np.array([pcfm._beta2_eff(float(f), float(f), coeffs_beta) for f in freqs], dtype=float)
+        else:
+            beta2_diag = beta2
+    else:
+        beta2_diag = beta2
+    l_over_ld = np.abs(beta2_diag) * length_m * (baud_rate_hz ** 2)
+    l_over_ld = l_over_ld[np.isfinite(l_over_ld) & (l_over_ld > 0.0)]
+
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.6))
+    if l_over_ld.size:
+        bins = np.geomspace(float(np.min(l_over_ld)), float(np.max(l_over_ld)), 30)
+        if np.unique(bins).size < 2:
+            bins = np.linspace(float(np.min(l_over_ld)), float(np.max(l_over_ld)) + 1e-18, 10)
+        ax.hist(l_over_ld, bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
+        ax.set_xscale("log")
+    ax.set_xlabel(r"$L/L_D$")
+    ax.set_ylabel("channel count")
+    ax.grid(False)
+    fig.tight_layout()
+    fig.savefig(out_dir / "l_over_ld_histogram.pdf", dpi=300)
+    lg.success(f"Saved L/LD histogram to {out_dir / 'l_over_ld_histogram.pdf'}")
     plt.close(fig)
 
     sig_ch_z, z_axis = load_signal_profiles(profile_path, system)

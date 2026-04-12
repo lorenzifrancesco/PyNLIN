@@ -78,12 +78,31 @@ def build_lookup_integral_table_with_raman(cf,
         lld_max=lld[-1],
     )
     if os.path.exists(filename) and not recompute:
-        lg.info(f"Loading precomputed Raman correction grid from {filename}")
+        lg.info(
+            "Loading precomputed Raman correction grid from {} "
+            "(keys: s2b_lo_corr_max, s2b_lo_corr_min; pulse={}; m_lo_truncation={}; "
+            "L={:.1f} km; L/LD_max={:.2f})".format(
+                filename,
+                "gaussian" if ipulse == 0 else "nyquist",
+                m_lo_truncation,
+                fiber_length / 1e3,
+                lld[-1],
+            )
+        )  # FIXME: extra cache-provenance logging; remove or downgrade for high-throughput runs.
         with np.load(filename, allow_pickle=False) as data:
             raman_correction_grid_max = data["s2b_lo_corr_max"]
             raman_correction_grid_min = data["s2b_lo_corr_min"]
     else:
-        lg.info(f"Computing Raman correction grid and saving to {filename}")
+        lg.info(
+            "Computing Raman correction grid and saving to {} "
+            "(pulse={}; m_lo_truncation={}; L={:.1f} km; L/LD_max={:.2f})".format(
+                filename,
+                "gaussian" if ipulse == 0 else "nyquist",
+                m_lo_truncation,
+                fiber_length / 1e3,
+                lld[-1],
+            )
+        )  # FIXME: extra cache-provenance logging; remove or downgrade for high-throughput runs.
         z_axis = np.linspace(0.0, fiber_length, z_samples, dtype=float)
         # x/LD = x * (L/LD)/L so each column corresponds to one LLD sample.
         x_over_ld = z_axis[:, None] / ld[None, :]
@@ -102,8 +121,11 @@ def build_lookup_integral_table_with_raman(cf,
             )
             add_min = np.zeros((n_samples, n_samples))
             add_max = np.zeros((n_samples, n_samples))
-            lg.info(f"Calculating m_lo={m_lo}")
-            I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
+            s2a_path = s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo)
+            lg.info(
+                f"Calculating m_lo={m_lo} using S2A cache {s2a_path}"
+            )  # FIXME: extra per-order cache logging; remove or downgrade for high-throughput runs.
+            I_low_dataset = np.load(s2a_path)
             interp = RegularGridInterpolator(
                 (I_low_dataset["lld_range"], I_low_dataset["lld_range"]),
                 I_low_dataset["I_low_values"],
