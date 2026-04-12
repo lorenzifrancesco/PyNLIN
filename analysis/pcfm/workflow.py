@@ -280,13 +280,13 @@ def run_pcfm_workflow(
     nlin_td = total_nlin_uwb(
         system,
         ccfs,
-        use_kappa=False,
+        use_kappa=True,
         use_x_mode=True,
         launch_powers_w=launch_powers,
         exclude_self_channel=td_exclude_self_channel,
         cache_path=_nlin_cache_path(
             profile_path,
-            use_kappa=True, # when false, we needed to apply the Manakov scaling originates from this. When using SMF, the actual kappa is 1x1 and contains 8/9 (Manakov averaging). 8/9 is actually the value contained in the kappa matrix for FMF, so use that
+            use_kappa=True,
             use_x_mode=True,
             extra_tag=f"disp{dispersion_tag}_{'xci' if td_exclude_self_channel else 'all'}",
         ),

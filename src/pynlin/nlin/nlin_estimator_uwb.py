@@ -116,13 +116,22 @@ def _resolve_n_workers(reserve_cpus: int | None) -> int:
 def get_kappa2_matrix_uwb(system: System,
                           use_kappa: bool = False,
                           use_x_mode: bool = False) -> np.ndarray:
-    """Build squared coupling matrix with SMF fallback (n_modes=1 -> [[1]])."""
+    """Build squared coupling matrix.
+
+    When ``use_kappa=True``, always source the coupling from
+    ``input/fiber_data/kappa_uwb.csv``. For SMF this reduces to the special
+    1x1 Manakov factor stored in the CSV (currently ``8/9``), which keeps the
+    TD prefactor aligned with the PCFM comparison path.
+    """
     n_modes = getattr(system, "n_modes", 1)
     kappa2 = np.ones((n_modes, n_modes))
-    if use_kappa and n_modes > 1:
+    if use_kappa:
         lg.warning("Applying kappa.csv coupling weights. Check the Manakov averaging.")
-        kappa = np.loadtxt('input/fiber_data/kappa_uwb.csv', delimiter=',') # 8/9 inserted by hand
-        kappa2 = kappa ** 2
+        kappa = np.atleast_2d(np.loadtxt('input/fiber_data/kappa_uwb.csv', delimiter=','))
+        if n_modes == 1:
+            kappa2 = np.array([[float(kappa[0, 0]) ** 2]], dtype=float)
+        else:
+            kappa2 = kappa ** 2
     if not use_x_mode:
         kappa2 = np.multiply(kappa2, np.eye(n_modes))
     return kappa2
@@ -434,7 +443,10 @@ def total_nlin_uwb(system: System,
     )
 
     kappa2 = get_kappa2_matrix_uwb(system, use_kappa, use_x_mode)
-    assert(np.isclose(kappa2[0, 0], (8.0/9.0)**2, atol=0.01), f"Expected kappa2[0,0] to be (8/9)^2 for SMF fallback, got {kappa2[0,0]}")
+    if use_kappa and n_modes == 1 and not np.isclose(kappa2[0, 0], (8.0 / 9.0) ** 2, atol=0.01):
+        raise AssertionError(
+            f"Expected kappa2[0,0] to be (8/9)^2 for SMF kappa fallback, got {kappa2[0,0]}"
+        )
     total_nlin = np.zeros((n_modes, n_freqs))
     for mA in range(n_modes):
         for nuA in range(n_freqs):

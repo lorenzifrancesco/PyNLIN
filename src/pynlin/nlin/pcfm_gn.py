@@ -737,7 +737,7 @@ def compute_pcfm_nlin(
                 coeffs[i], L, beta2_sci, B_ch, cfg.n_f, cfg.n_z, cfg.phase_coeff
             )
         # omit p(L) scaling in PCFM NLI PSD.
-        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci # FIXME what if we want to use the XCI only result?
+        g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
         for j in range(n_channels):
@@ -757,7 +757,7 @@ def compute_pcfm_nlin(
             else:
                 log_term = np.abs(np.log((delta_abs + B_ch / 2.0) / (delta_abs - B_ch / 2.0)))
                 beta2_eff = max(abs(beta2_xci), MIN_BETA2)
-                k_xci = (L / (2.0 * np.pi * beta2_eff)) * log_term * poly_sums[j]
+                k_xci = (L / (2.0 * np.pi * beta2_eff)) * log_term * poly_sums[j] # FIXME (just for reference, nothing to fix really): here is the 2 pi at the denominator.  
                 # lg.warning("in K_XCI, log: {:.1e} and baud: {:.1e}, Delta f: {:.1e}, Beta2eff: {:.1e}. ".format(log_term, B_ch, delta_f, beta2_eff))
             # omit p(L) scaling in PCFM NLI PSD.
             # 
