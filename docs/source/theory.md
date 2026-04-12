@@ -410,6 +410,184 @@ $$\mathcal{N}^{(\mathrm{SI})}_{ij}
 where $F_{\mathrm{S1}}$ is the normalized reference curve loaded from
 the S1 cache.
 
+The fitted S1 reference used by the TD path is parameterized as
+
+$$F_{\mathrm{S1}}(x)
+=
+a\left(1+\left(\frac{x}{\Lambda}\right)^{1/\eta}\right)^{-\eta},$$
+
+with code-level correspondence
+
+$$
+(a,\Lambda,\eta) \equiv (\texttt{ps[0]}, \texttt{ps[1]}, \texttt{ps[2]}).
+$$
+
+Equivalently, this is the `softplus(x, a, b, c)` fit used in
+`ideal_fits.py` and `ideal_fits_uwb.py`, with
+
+$$
+b \equiv \Lambda, \qquad c \equiv \eta.
+$$
+
+For the current cached perfect-S1 references
+($\mathrm{gvd}_a=\mathrm{gvd}_b=0$, no Raman), the fitted parameters are
+approximately:
+
+- Gaussian pulse (`ipulse=0`)
+
+  $$
+  (a,\Lambda,\eta) \approx (0.28221327,\; 3.28726640,\; 0.49259348).
+  $$
+
+- Nyquist pulse (`ipulse=1`)
+
+  $$
+  (a,\Lambda,\eta) \approx (0.47125353,\; 2.11578009,\; 0.92291662).
+  $$
+
+### LO and HI correction scaling in the TD fit
+
+The Raman/GVD-aware TD path does not refit the whole S1 curve. Instead,
+it starts from the ideal coefficients $(a,\Lambda,\eta)$ and applies two
+separate parameter corrections:
+
+- an LO correction that changes the plateau value,
+- an HI correction that shifts the horizontal turning-point scale.
+
+Write the ideal curve as
+
+$$
+\mathcal{N}_{\mathrm{ideal}}(x)
+=
+a\left(1+\left(\frac{x}{\Lambda}\right)^{1/\eta}\right)^{-\eta}.
+$$
+
+Let $a_{\mathrm{LO}}$ denote the corrected LO plateau value extracted
+from the Raman/GVD lookup, and let $h_{\mathrm{HI}}$ denote the HI
+correction factor from the Raman integral. The implementation applies
+the following transformations.
+
+#### LO correction
+
+The LO correction replaces the plateau amplitude and rescales
+$\Lambda$ so that the product $a\Lambda$ is preserved:
+
+$$
+a \longrightarrow a_{\mathrm{LO}},
+$$
+
+$$
+\Lambda \longrightarrow \Lambda_{\mathrm{LO}}
+=
+\Lambda \frac{a}{a_{\mathrm{LO}}},
+$$
+
+$$
+\eta \longrightarrow \eta.
+$$
+
+Therefore
+
+$$
+\mathcal{N}_{\mathrm{LO}}(x)
+=
+a_{\mathrm{LO}}
+\left(
+1+\left(
+\frac{x}{\Lambda (a/a_{\mathrm{LO}})}
+\right)^{1/\eta}
+\right)^{-\eta}.
+$$
+
+Equivalently,
+
+$$
+a_{\mathrm{LO}}\Lambda_{\mathrm{LO}} = a\Lambda.
+$$
+
+This is exactly the scaling implemented by
+`apply_plateau_correction`, which sets
+
+$$
+\texttt{ps[0]} \leftarrow a_{\mathrm{LO}}, \qquad
+\texttt{ps[1]} \leftarrow \texttt{ps[1]}\frac{\texttt{old\_lo\_value}}{\texttt{lo\_value}}.
+$$
+
+#### HI correction
+
+The HI correction leaves the plateau untouched and multiplies the
+horizontal scale:
+
+$$
+a \longrightarrow a,
+$$
+
+$$
+\Lambda \longrightarrow \Lambda_{\mathrm{HI}}
+=
+\Lambda h_{\mathrm{HI}},
+$$
+
+$$
+\eta \longrightarrow \eta.
+$$
+
+Hence
+
+$$
+\mathcal{N}_{\mathrm{HI}}(x)
+=
+a\left(1+\left(\frac{x}{\Lambda h_{\mathrm{HI}}}\right)^{1/\eta}\right)^{-\eta}.
+$$
+
+This is the scaling implemented by `apply_turning_point_correction`,
+which applies
+
+$$
+\texttt{ps[1]} \leftarrow \texttt{ps[1]} \, h_{\mathrm{HI}}.
+$$
+
+#### Combined LO + HI correction
+
+When both corrections are active, the final corrected fit is
+
+$$
+\mathcal{N}_{\mathrm{corr}}(x)
+=
+a_{\mathrm{LO}}
+\left(
+1+\left(
+\frac{x}{\Lambda_{\mathrm{corr}}}
+\right)^{1/\eta}
+\right)^{-\eta},
+$$
+
+with
+
+$$
+\Lambda_{\mathrm{corr}}
+=
+\Lambda \frac{a}{a_{\mathrm{LO}}} h_{\mathrm{HI}}.
+$$
+
+So the final parameter map is
+
+$$
+a_{\mathrm{corr}} = a_{\mathrm{LO}}, \qquad
+\Lambda_{\mathrm{corr}} = \Lambda \frac{a}{a_{\mathrm{LO}}} h_{\mathrm{HI}}, \qquad
+\eta_{\mathrm{corr}} = \eta.
+$$
+
+Two practical consequences follow immediately:
+
+- the LO correction preserves the large-walkoff tail prefactor
+  $a\Lambda$,
+- the HI correction directly scales that tail prefactor by
+  $h_{\mathrm{HI}}$.
+
+In the current flat-$f_B$ branch, only the LO correction is applied; the
+HI correction is skipped.
+
 For SMF, the TD modulation coefficient is $5\mu_0-4$ (because $S_0=1$),
 hence the current workflow gives
 
