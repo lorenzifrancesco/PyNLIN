@@ -6,6 +6,7 @@ from scipy.constants import c
 
 from pynlin.pulses import PulseType, RaisedCosinePulse, RootRaisedCosinePulse
 from pynlin.system import System
+from pynlin.utils import watt2dBm
 from pynlin.wdm import IrregularWDM
 
 PROFILE_MAX_W = 10.0
@@ -279,3 +280,86 @@ def _wdm_nonoverlap_max_spacing_hz(system: System) -> float | None:
     if not np.isfinite(max_spacing_hz):
         return None
     return max_spacing_hz
+
+
+def _format_pulse_title_token(system: System) -> str:
+    pulse_cfg = getattr(system, "pulse_config", None)
+    pulse_type = getattr(pulse_cfg, "type", None)
+    label_map = {
+        PulseType.GAUSSIAN: "Gaussian",
+        PulseType.NYQUIST: "Nyquist",
+        PulseType.RAISED_COSINE: "RC",
+        PulseType.ROOT_RAISED_COSINE: "RRC",
+    }
+    pulse_label = (
+        label_map.get(pulse_type)
+        if pulse_type is not None
+        else system.pulse.__class__.__name__.replace("Pulse", "")
+    )
+    rolloff = getattr(pulse_cfg, "rolloff", None)
+    if rolloff is None:
+        rolloff = getattr(system.pulse, "rolloff", None)
+    if rolloff is not None and pulse_type in (
+        PulseType.NYQUIST,
+        PulseType.RAISED_COSINE,
+        PulseType.ROOT_RAISED_COSINE,
+    ):
+        return f"pulse={pulse_label}, rho={float(rolloff):.2f}"
+    return f"pulse={pulse_label}"
+
+
+def _format_launch_power_title_token(
+    launch_powers_w: np.ndarray | None,
+    *,
+    channel_idx: int,
+) -> str | None:
+    if launch_powers_w is None:
+        return None
+    launch = np.asarray(launch_powers_w, dtype=float).reshape(-1)
+    if launch.size == 0 or channel_idx < 0 or channel_idx >= launch.size:
+        return None
+    launch_dbm = np.asarray(watt2dBm(np.maximum(launch, 1e-18)), dtype=float).reshape(-1)
+    cut_dbm = float(launch_dbm[channel_idx])
+    if np.allclose(launch_dbm, cut_dbm, atol=1e-9, rtol=0.0):
+        return f"Pch={cut_dbm:.2f} dBm"
+    return f"Pch(CUT)={cut_dbm:.2f} dBm"
+
+
+def _format_scaling_plot_title(
+    system: System,
+    *,
+    sweep_axis: str,
+    channel_idx: int,
+    band_label: str,
+    launch_powers_w: np.ndarray | None = None,
+    channel_freq_thz: float | None = None,
+    channel_freq_range_thz: tuple[float, float] | None = None,
+) -> str:
+    head = [f"Center channel idx={int(channel_idx)}"]
+    if band_label:
+        head.append(f"band={band_label}")
+    if channel_freq_range_thz is not None:
+        f_lo, f_hi = channel_freq_range_thz
+        head.append(f"f={float(f_lo):.3f}-{float(f_hi):.3f} THz")
+    elif channel_freq_thz is not None:
+        head.append(f"f={float(channel_freq_thz):.3f} THz")
+
+    fixed = []
+    if sweep_axis != "length" and system.fiber_length is not None:
+        fixed.append(f"L={float(system.fiber_length) * 1e-3:.1f} km")
+    if sweep_axis != "baud" and system.baud_rate is not None:
+        fixed.append(f"R={float(system.baud_rate) * 1e-9:.1f} GBd")
+    if sweep_axis != "spacing" and getattr(system.wdm, "spacing", None) is not None:
+        fixed.append(f"df={float(system.wdm.spacing) * 1e-9:.2f} GHz")
+    fixed.append(_format_pulse_title_token(system))
+    launch_token = _format_launch_power_title_token(
+        launch_powers_w,
+        channel_idx=channel_idx,
+    )
+    if launch_token is not None:
+        fixed.append(launch_token)
+
+    title = ", ".join(head)
+    if fixed:
+        title += "\n" + ", ".join(fixed)
+    return title
