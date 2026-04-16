@@ -41,11 +41,17 @@ class PsdSystemConfig(BaseModel):
     method: str = "welch"
     window: str = "hann"
     nperseg: int = 4096
+    higher_order_overlap: float = 0.75
+    higher_order_smoothing_bins: int = 3
     db: bool = True
     bispectrum: bool = False
     bispectrum_max_ghz: float = 50.0
     bispectrum_bins: int = 64
     bispectrum_out: str = "media/psd/bispectrum.png"
+    trispectrum: bool = False
+    trispectrum_max_ghz: float = 50.0
+    trispectrum_bins: int = 64
+    trispectrum_out: str = "media/psd/trispectrum.png"
     include_gaussian: bool = False
     fourth_order_proxy: bool = False
     fourth_out: str = "media/psd/fourth_order_proxy.pdf"
@@ -368,6 +374,61 @@ def _fourth_order_proxy(
     return _compute_psd(intensity, fs, method, window, nperseg)
 
 
+def _prepare_higher_order_estimation(
+    waveform: np.ndarray,
+    nperseg: int,
+    window: str,
+    overlap: float,
+    label: str,
+) -> tuple[int, np.ndarray, int]:
+    nperseg = min(int(nperseg), waveform.size)
+    if nperseg < 8:
+        raise ValueError(f"nperseg too small for {label}.")
+    if not (0.0 <= overlap < 1.0):
+        raise ValueError("higher_order_overlap must lie in [0, 1).")
+    hop = max(1, int(round(nperseg * (1.0 - overlap))))
+    if waveform.size < nperseg:
+        raise ValueError(f"Not enough data for {label}.")
+    win = scipy.signal.get_window(window, nperseg)
+    return nperseg, win, hop
+
+
+def _smooth_plane(plane: np.ndarray, bins: int) -> np.ndarray:
+    bins = int(bins)
+    if bins <= 1:
+        return plane
+    kernel = np.ones((bins, bins), dtype=float)
+    kernel = kernel / np.sum(kernel)
+    return scipy.signal.convolve2d(plane, kernel, mode="same", boundary="symm")
+
+
+def _spectral_plane_grid(
+    fs: float,
+    fft_len: int,
+    max_freq_hz: float,
+    n_bins: int,
+) -> tuple[float, float, dict[int, int], np.ndarray, np.ndarray, np.ndarray]:
+    freqs = np.fft.fftfreq(fft_len, d=1.0 / fs)
+    freq_step_hz = fs / fft_len
+    shifted_freqs = np.fft.fftshift(freqs)
+    shifted_to_raw = np.fft.fftshift(np.arange(fft_len))
+    freq_bin_numbers = np.rint(shifted_freqs / freq_step_hz).astype(int)
+    bin_to_raw = {int(bin_num): int(raw_idx) for bin_num, raw_idx in zip(freq_bin_numbers, shifted_to_raw)}
+
+    max_freq_hz = min(max_freq_hz, np.max(np.abs(shifted_freqs)))
+    valid = np.where(np.abs(shifted_freqs) <= max_freq_hz)[0]
+    if valid.size < 2:
+        raise ValueError("max_freq_hz too low for higher-order spectrum grid.")
+    if n_bins > valid.size:
+        n_bins = valid.size
+    grid_idx = np.linspace(0, valid.size - 1, n_bins, dtype=int)
+    bins = valid[grid_idx]
+    raw_bins = shifted_to_raw[bins]
+    selected_bin_numbers = freq_bin_numbers[bins]
+    f_axis = shifted_freqs[bins]
+    return freq_step_hz, max_freq_hz, bin_to_raw, raw_bins, selected_bin_numbers, f_axis
+
+
 def _estimate_bispectrum(
     waveform: np.ndarray,
     fs: float,
@@ -375,43 +436,43 @@ def _estimate_bispectrum(
     window: str,
     max_freq_hz: float,
     n_bins: int,
+    overlap: float = 0.5,
+    smoothing_bins: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    nperseg = min(int(nperseg), waveform.size)
-    if nperseg < 8:
-        raise ValueError("nperseg too small for bispectrum.")
-    win = scipy.signal.get_window(window, nperseg)
-    hop = nperseg
-    n_segments = waveform.size // hop
-    if n_segments < 1:
-        raise ValueError("Not enough data for bispectrum.")
+    nperseg, win, hop = _prepare_higher_order_estimation(
+        waveform,
+        nperseg,
+        window,
+        overlap,
+        "bispectrum",
+    )
     fft_len = nperseg
-    freqs = np.fft.fftfreq(fft_len, d=1.0 / fs)
-    max_freq_hz = min(max_freq_hz, np.max(freqs))
-    valid = np.where((freqs >= 0.0) & (freqs <= max_freq_hz))[0]
-    if valid.size < 2:
-        raise ValueError("max_freq_hz too low for bispectrum grid.")
-    if n_bins > valid.size:
-        n_bins = valid.size
-    grid_idx = np.linspace(0, valid.size - 1, n_bins, dtype=int)
-    bins = valid[grid_idx]
-    f_axis = freqs[bins]
-    max_pos_idx = int(np.max(valid))
+    freq_step_hz, max_freq_hz, bin_to_raw, raw_bins, selected_bin_numbers, f_axis = _spectral_plane_grid(
+        fs,
+        fft_len,
+        max_freq_hz,
+        n_bins,
+    )
+    n_bins = f_axis.size
     B = np.zeros((n_bins, n_bins), dtype=complex)
     denom12 = np.zeros((n_bins, n_bins), dtype=float)
     denom3 = np.zeros((n_bins, n_bins), dtype=float)
+    segments_used = 0
 
-    for seg in range(n_segments):
-        start = seg * hop
+    for start in range(0, waveform.size - nperseg + 1, hop):
         segment = waveform[start : start + nperseg]
-        if segment.size < nperseg:
-            break
+        segment = segment - np.mean(segment)
         segment = segment * win
         X = np.fft.fft(segment, n=fft_len)
-        for i, k1 in enumerate(bins):
+        segments_used += 1
+        for i, (k1, k1_num) in enumerate(zip(raw_bins, selected_bin_numbers)):
             X1 = X[k1]
-            for j, k2 in enumerate(bins):
-                k3 = k1 + k2
-                if k3 >= X.size or k3 > max_pos_idx:
+            for j, (k2, k2_num) in enumerate(zip(raw_bins, selected_bin_numbers)):
+                k3_num = int(k1_num + k2_num)
+                if abs(k3_num * freq_step_hz) > max_freq_hz:
+                    continue
+                k3 = bin_to_raw.get(k3_num)
+                if k3 is None:
                     continue
                 X2 = X[k2]
                 X3 = X[k3]
@@ -419,14 +480,136 @@ def _estimate_bispectrum(
                 denom12[i, j] += np.abs(X1 * X2) ** 2
                 denom3[i, j] += np.abs(X3) ** 2
 
-    if n_segments > 0:
-        B = B / n_segments
-        denom12 = denom12 / n_segments
-        denom3 = denom3 / n_segments
+    if segments_used < 1:
+        raise ValueError("Not enough data for bispectrum.")
+    B = B / segments_used
+    denom12 = denom12 / segments_used
+    denom3 = denom3 / segments_used
+    B = _smooth_plane(B, smoothing_bins)
+    denom12 = _smooth_plane(denom12, smoothing_bins)
+    denom3 = _smooth_plane(denom3, smoothing_bins)
     bicoherence = np.zeros_like(denom12)
     mask = (denom12 > 0.0) & (denom3 > 0.0)
     bicoherence[mask] = (np.abs(B[mask]) ** 2) / (denom12[mask] * denom3[mask])
     return f_axis, B, bicoherence
+
+
+def _estimate_trispectrum_slice(
+    waveform: np.ndarray,
+    fs: float,
+    nperseg: int,
+    window: str,
+    max_freq_hz: float,
+    n_bins: int,
+    fixed_freq_hz: float = 0.0,
+    overlap: float = 0.5,
+    smoothing_bins: int = 1,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    nperseg, win, hop = _prepare_higher_order_estimation(
+        waveform,
+        nperseg,
+        window,
+        overlap,
+        "trispectrum",
+    )
+    fft_len = nperseg
+    freq_step_hz, max_freq_hz, bin_to_raw, raw_bins, selected_bin_numbers, f_axis = _spectral_plane_grid(
+        fs,
+        fft_len,
+        max_freq_hz,
+        n_bins,
+    )
+    n_bins = f_axis.size
+    fixed_bin_num = int(np.rint(fixed_freq_hz / freq_step_hz))
+    fixed_raw_bin = bin_to_raw.get(fixed_bin_num)
+    if fixed_raw_bin is None:
+        raise ValueError("fixed_freq_hz is outside the FFT grid.")
+
+    T_raw = np.zeros((n_bins, n_bins), dtype=complex)
+    denom123 = np.zeros((n_bins, n_bins), dtype=float)
+    denom4 = np.zeros((n_bins, n_bins), dtype=float)
+    m12 = np.zeros((n_bins, n_bins), dtype=complex)
+    c34 = np.zeros((n_bins, n_bins), dtype=complex)
+    c14 = np.zeros((n_bins, n_bins), dtype=complex)
+    c24 = np.zeros((n_bins, n_bins), dtype=complex)
+    m13 = np.zeros(n_bins, dtype=complex)
+    m23 = np.zeros(n_bins, dtype=complex)
+    segments_used = 0
+
+    for start in range(0, waveform.size - nperseg + 1, hop):
+        segment = waveform[start : start + nperseg]
+        segment = segment - np.mean(segment)
+        segment = segment * win
+        X = np.fft.fft(segment, n=fft_len)
+        segments_used += 1
+        X_fixed = X[fixed_raw_bin]
+        pair_with_fixed = X[raw_bins] * X_fixed
+        m13 += pair_with_fixed
+        m23 += pair_with_fixed
+        for i, (k1, k1_num) in enumerate(zip(raw_bins, selected_bin_numbers)):
+            X1 = X[k1]
+            for j, (k2, k2_num) in enumerate(zip(raw_bins, selected_bin_numbers)):
+                k4_num = int(k1_num + k2_num + fixed_bin_num)
+                if abs(k4_num * freq_step_hz) > max_freq_hz:
+                    continue
+                k4 = bin_to_raw.get(k4_num)
+                if k4 is None:
+                    continue
+                X2 = X[k2]
+                X4 = X[k4]
+                triple = X1 * X2 * X_fixed
+                T_raw[i, j] += triple * np.conj(X4)
+                denom123[i, j] += np.abs(triple) ** 2
+                denom4[i, j] += np.abs(X4) ** 2
+                m12[i, j] += X1 * X2
+                c34[i, j] += X_fixed * np.conj(X4)
+                c14[i, j] += X1 * np.conj(X4)
+                c24[i, j] += X2 * np.conj(X4)
+
+    if segments_used < 1:
+        raise ValueError("Not enough data for trispectrum.")
+    T_raw = T_raw / segments_used
+    denom123 = denom123 / segments_used
+    denom4 = denom4 / segments_used
+    m12 = m12 / segments_used
+    c34 = c34 / segments_used
+    c14 = c14 / segments_used
+    c24 = c24 / segments_used
+    m13 = m13 / segments_used
+    m23 = m23 / segments_used
+    T = T_raw - m12 * c34 - m13[:, None] * c24 - m23[None, :] * c14
+    T = _smooth_plane(T, smoothing_bins)
+    denom123 = _smooth_plane(denom123, smoothing_bins)
+    denom4 = _smooth_plane(denom4, smoothing_bins)
+    tricoherence = np.zeros_like(denom123)
+    mask = (denom123 > 0.0) & (denom4 > 0.0)
+    tricoherence[mask] = (np.abs(T[mask]) ** 2) / (denom123[mask] * denom4[mask])
+    return f_axis, T, tricoherence
+
+
+def _plot_frequency_plane(
+    f_axis_hz: np.ndarray,
+    plane: np.ndarray,
+    out_path: Path,
+    title: str,
+    colorbar_label: str,
+) -> None:
+    f_ghz = f_axis_hz / 1e9
+    fig, ax = plt.subplots()
+    im = ax.imshow(
+        plane,
+        origin="lower",
+        extent=[f_ghz[0], f_ghz[-1], f_ghz[0], f_ghz[-1]],
+        aspect="equal",
+        cmap="magma",
+    )
+    ax.set_xlabel(r"$f_1$ [GHz]")
+    ax.set_ylabel(r"$f_2$ [GHz]")
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax, label=colorbar_label)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
 
 
 def main() -> None:
@@ -452,12 +635,18 @@ def main() -> None:
     ap.add_argument("--method", choices=("welch", "periodogram"))
     ap.add_argument("--window", type=str)
     ap.add_argument("--nperseg", type=int)
+    ap.add_argument("--higher-order-overlap", type=float)
+    ap.add_argument("--higher-order-smoothing-bins", type=int)
     ap.add_argument("--db", action="store_true")
     ap.add_argument("--linear", dest="db", action="store_false")
     ap.add_argument("--bispectrum", action="store_true")
     ap.add_argument("--bispectrum-max-ghz", type=float)
     ap.add_argument("--bispectrum-bins", type=int)
     ap.add_argument("--bispectrum-out", type=str)
+    ap.add_argument("--trispectrum", action="store_true")
+    ap.add_argument("--trispectrum-max-ghz", type=float)
+    ap.add_argument("--trispectrum-bins", type=int)
+    ap.add_argument("--trispectrum-out", type=str)
     ap.add_argument("--include-gaussian", action="store_true")
     ap.add_argument("--fourth-order-proxy", action="store_true")
     ap.add_argument("--fourth-out", type=str)
@@ -609,23 +798,16 @@ def main() -> None:
                 args.window,
                 args.bispectrum_max_ghz * 1e9,
                 args.bispectrum_bins,
+                overlap=args.higher_order_overlap,
+                smoothing_bins=args.higher_order_smoothing_bins,
             )
-            f_ghz = f_axis / 1e9
-            fig_bi, ax_bi = plt.subplots()
-            im = ax_bi.imshow(
+            _plot_frequency_plane(
+                f_axis,
                 bicoherence,
-                origin="lower",
-                extent=[f_ghz[0], f_ghz[-1], f_ghz[0], f_ghz[-1]],
-                aspect="equal",
-                cmap="magma",
+                out_path,
+                f"Bicoherence ({tag})",
+                "Bicoherence (normalized)",
             )
-            ax_bi.set_xlabel(r"$f_1$ [GHz]")
-            ax_bi.set_ylabel(r"$f_2$ [GHz]")
-            ax_bi.set_title(f"Bicoherence ({tag})")
-            fig_bi.colorbar(im, ax=ax_bi, label="Bicoherence (normalized)")
-            fig_bi.tight_layout()
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            fig_bi.savefig(out_path, dpi=200, bbox_inches="tight")
             lg.info("Saved bispectrum plot to {}", out_path)
 
         out_bi = Path(args.bispectrum_out)
@@ -643,6 +825,44 @@ def main() -> None:
             waveform = _pulse_train(seq, pulse_map[0][1], samples_per_symbol)
             out_gauss = out_bi.with_name(out_bi.stem + "_gaussian" + out_bi.suffix)
             _plot_bicoherence(f"Gaussian, Tp/Ts={pulse_map[0][0]:g}", waveform, out_gauss)
+
+    if args.trispectrum:
+        def _plot_tricoherence(tag: str, waveform: np.ndarray, out_path: Path) -> None:
+            f_axis, _, tricoherence = _estimate_trispectrum_slice(
+                waveform,
+                fs,
+                args.nperseg,
+                args.window,
+                args.trispectrum_max_ghz * 1e9,
+                args.trispectrum_bins,
+                fixed_freq_hz=0.0,
+                overlap=args.higher_order_overlap,
+                smoothing_bins=args.higher_order_smoothing_bins,
+            )
+            _plot_frequency_plane(
+                f_axis,
+                tricoherence,
+                out_path,
+                f"Cumulant Tricoherence Slice ({tag}, $f_3=0$)",
+                "Cumulant Tricoherence (normalized)",
+            )
+            lg.info("Saved trispectrum plot to {}", out_path)
+
+        out_tri = Path(args.trispectrum_out)
+        m_sel = qam_orders[0]
+        lg.info("Computing trispectrum slice for {}-QAM.", m_sel)
+        qam = QAM(m_sel)
+        symbols = qam.symbols()
+        seq = _generate_symbols(symbols, args.train_symbols, rng)
+        waveform = _pulse_train(seq, pulse_map[0][1], samples_per_symbol)
+        _plot_tricoherence(f"{m_sel}-QAM, Tp/Ts={pulse_map[0][0]:g}", waveform, out_tri)
+
+        if args.include_gaussian:
+            lg.info("Computing trispectrum slice for Gaussian modulation.")
+            seq = _generate_gaussian_symbols(args.train_symbols, rng)
+            waveform = _pulse_train(seq, pulse_map[0][1], samples_per_symbol)
+            out_gauss = out_tri.with_name(out_tri.stem + "_gaussian" + out_tri.suffix)
+            _plot_tricoherence(f"Gaussian, Tp/Ts={pulse_map[0][0]:g}", waveform, out_gauss)
 
 
 if __name__ == "__main__":
