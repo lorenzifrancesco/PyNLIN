@@ -391,31 +391,36 @@ def run_pcfm_workflow(
         nlin_pcfm_xci[label] = nlin_pcfm_xci_flat
 
         if pcfm_eq18_xci:
-            if flat_profiles:
-                eq18_path = (
-                    Path("results")
-                    / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_pcfm_{label}_xci_eq18.npy"
+            if not flat_profiles:
+                lg.info(
+                    "PCFM Eq. 18 XCI requested with non-flat power profiles: "
+                    "adding the flat-analytic Eq. 18 reference curve to the plot/output."
                 )
-                nlin_pcfm_eq18_xci_flat = np.asarray(
-                    _load_or_compute_flat_analytic_xci(
-                        system,
-                        launch_powers_w=launch_powers,
-                        output_path=eq18_path,
-                        xci_model="eq18",
-                        recompute=recompute_pcfm,
-                    ),
-                    dtype=float,
-                ).reshape(-1)
-                _save_nlin_csv(
-                    Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}_xci_eq18.csv",
-                    freqs,
-                    nlin_pcfm_eq18_xci_flat,
-                    signal_power,
-                )
-                eq18_label = "eq18" if label == "no_loss" else f"{label} eq18"
-                nlin_pcfm_xci[eq18_label] = nlin_pcfm_eq18_xci_flat
-            else:
-                lg.info("Skipping PCFM Eq. 18 XCI: enabled only for flat power profile mode.")
+            eq18_path = (
+                Path("results")
+                / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_pcfm_{label}_xci_eq18.npy"
+            )
+            nlin_pcfm_eq18_xci_flat = np.asarray(
+                _load_or_compute_flat_analytic_xci(
+                    system,
+                    launch_powers_w=launch_powers,
+                    output_path=eq18_path,
+                    profile_path=profile_path,
+                    degree=cfg.degree,
+                    lumped_losses=losses,
+                    xci_model="eq18",
+                    recompute=recompute_pcfm,
+                ),
+                dtype=float,
+            ).reshape(-1)
+            _save_nlin_csv(
+                Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}_xci_eq18.csv",
+                freqs,
+                nlin_pcfm_eq18_xci_flat,
+                signal_power,
+            )
+            eq18_label = "eq18" if label == "no_loss" else f"{label} eq18"
+            nlin_pcfm_xci[eq18_label] = nlin_pcfm_eq18_xci_flat
 
         if compute_gn:
             gn_path = (
