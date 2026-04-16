@@ -28,6 +28,7 @@ from analysis.pcfm.analytics import flat_profile_pcfm_xci_channel_power
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
 from analysis.pcfm.models import _load_or_compute_pcfm
+from analysis.pcfm.ssfm_interface import compute_ssfm_center_nli, prepare_ssfm_runtime
 from analysis.pcfm.td import _td_modulation_components
 from analysis.uwb_nlin import _nlin_cache_path
 
@@ -99,10 +100,27 @@ def _scaling_series(
     }
     if rows and "pcfm_eq18_xci_channel_w" in rows[0]:
         series["PCFM XCI Eq18"] = np.array([row["pcfm_eq18_xci_channel_w"] for row in rows], dtype=float)
+    if any("ssfm_channel_w" in row for row in rows):
+        series["SSFM"] = np.array([row.get("ssfm_channel_w", np.nan) for row in rows], dtype=float)
     if plot_pcfm_total_and_sci:
         series["PCFM total"] = np.array([row["pcfm_channel_w"] for row in rows], dtype=float)
         series["PCFM SCI"] = np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float)
     return series
+
+
+def _build_constant_launch_vector(system: System, launch_dbm: float | None) -> np.ndarray:
+    if launch_dbm is not None:
+        launch_w = float(dBm2watt(launch_dbm))
+    else:
+        launch_w = float(
+            _resolve_launch_powers(
+                system,
+                profile_path=None,
+                launch_csv_path=None,
+                use_profile=False,
+            )[0]
+        )
+    return np.full(system.n_channels, launch_w, dtype=float)
 
 
 def _center_channel_analytic_limit(system: System, launch_channel_w: float, channel_idx: int) -> float:
@@ -150,8 +168,10 @@ def _plot_scaling(
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
     freqs_thz = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
-    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
-    for (label, values), color in zip(series.items(), colors):
+    colors = plt.rcParams.get("axes.prop_cycle", None)
+    palette = colors.by_key().get("color", []) if colors is not None else []
+    for idx, (label, values) in enumerate(series.items()):
+        color = palette[idx % len(palette)] if palette else None
         ax.plot(
             spacing_ghz,
             watt2dBm(np.maximum(np.asarray(values, dtype=float), 1e-18)),
@@ -209,8 +229,10 @@ def _plot_normalized_scaling(
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
     freqs_thz = np.array([row["channel_freq_thz"] for row in rows], dtype=float)
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
-    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange", "tab:purple"]
-    for (label, values), color in zip(series.items(), colors):
+    colors = plt.rcParams.get("axes.prop_cycle", None)
+    palette = colors.by_key().get("color", []) if colors is not None else []
+    for idx, (label, values) in enumerate(series.items()):
+        color = palette[idx % len(palette)] if palette else None
         ref = float(values[0]) if values.size else 1.0
         normalized = values / ref if ref > 0.0 else values
         ax.plot(
@@ -254,6 +276,7 @@ def run_spacing_sweep(
     recompute_td: bool | None,
     recompute_pcfm: bool | None,
     exclude_self_channel: bool | None = None,
+    run_ssfm_when_standalone: bool = False,
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
@@ -279,12 +302,7 @@ def run_spacing_sweep(
     if launch_dbm is not None:
         title_launch_vec = np.full(base_system.n_channels, float(dBm2watt(launch_dbm)), dtype=float)
     else:
-        title_launch_vec = _resolve_launch_powers(
-            base_system,
-            profile_path=None,
-            launch_csv_path=None,
-            use_profile=False,
-        )
+        title_launch_vec = _build_constant_launch_vector(base_system, None)
     min_spacing_nonoverlap_hz = _channel_nonoverlap_spacing_hz(base_system)
     min_spacing_nonoverlap_ghz = min_spacing_nonoverlap_hz * 1e-9
     max_spacing_nonoverlap_hz = _wdm_nonoverlap_max_spacing_hz(base_system)
@@ -300,6 +318,8 @@ def run_spacing_sweep(
             else f"{max_spacing_nonoverlap_ghz:.3f}",
         )
     )
+
+    ssfm_ctx = prepare_ssfm_runtime(out_dir) if run_ssfm_when_standalone else None
 
     for spacing_ghz in spacing_ghz_values:
         system = System.from_toml(cfg_path)
@@ -330,16 +350,7 @@ def run_spacing_sweep(
         freqs = system.wdm.frequency_grid()
         channel_freq_thz = float(freqs[center_idx] * 1e-12)
 
-        if launch_dbm is not None:
-            launch_w = float(dBm2watt(launch_dbm))
-            launch_vec = np.full(system.n_channels, launch_w, dtype=float)
-        else:
-            launch_vec = _resolve_launch_powers(
-                system,
-                profile_path=None,
-                launch_csv_path=None,
-                use_profile=False,
-            )
+        launch_vec = _build_constant_launch_vector(system, launch_dbm)
 
         spacing_tag = f"S{_safe_tag(spacing_ghz)}GHz"
         profile_path = out_dir / f"flat_profile_{spacing_tag}.npy"
@@ -423,6 +434,21 @@ def run_spacing_sweep(
             row["pcfm_eq18_xci_channel_w"] = _center_channel_eq18_xci(
                 system, float(launch_vec[center_idx]), center_idx
             )
+        if ssfm_ctx is not None:
+            try:
+                ssfm_val = compute_ssfm_center_nli(
+                    ssfm_ctx,
+                    system=system,
+                    launch_channel_w=float(launch_vec[center_idx]),
+                    channel_idx=center_idx,
+                    sweep_tag=spacing_tag,
+                )
+                if ssfm_val is not None:
+                    row["ssfm_channel_w"] = float(ssfm_val)
+                else:
+                    lg.warning("SSFM returned no finite center-channel NLI for {}", spacing_tag)
+            except Exception as exc:
+                lg.warning("SSFM run failed for {}: {}", spacing_tag, exc)
         rows.append(row)
         msg = (
             "S={:.2f} GHz -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
@@ -438,6 +464,8 @@ def run_spacing_sweep(
         )
         if pcfm_eq18_xci:
             msg += ", PCFM_XCI_Eq18={:.3e} W".format(row["pcfm_eq18_xci_channel_w"])
+        if "ssfm_channel_w" in row:
+            msg += ", SSFM={:.3e} W".format(row["ssfm_channel_w"])
         lg.info(msg)
 
     rows.sort(key=lambda item: item["channel_spacing_ghz"])
@@ -462,6 +490,11 @@ def run_spacing_sweep(
         )
         for row in rows:
             row["pcfm_eq18_xci_channel_w_scaling_exp"] = exponent
+    if any("ssfm_channel_w" in row for row in rows):
+        exponent = _fit_exponent(spacing_hz, np.array([row.get("ssfm_channel_w", np.nan) for row in rows], dtype=float))
+        for row in rows:
+            if "ssfm_channel_w" in row:
+                row["ssfm_channel_w_scaling_exp"] = exponent
 
     csv_path = out_dir / "center_channel_spacing_scaling.csv"
     header = [
@@ -490,7 +523,14 @@ def run_spacing_sweep(
                 "pcfm_eq18_xci_channel_w_scaling_exp",
             ]
         )
-    data = np.column_stack([[row[name] for row in rows] for name in header])
+    if any("ssfm_channel_w" in row for row in rows):
+        header.extend(
+            [
+                "ssfm_channel_w",
+                "ssfm_channel_w_scaling_exp",
+            ]
+        )
+    data = np.column_stack([[row.get(name, np.nan) for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
     plot_path = Path("media") / "PCFM" / "center_channel_spacing_scaling.pdf"
@@ -523,6 +563,10 @@ def run_spacing_sweep(
     if pcfm_eq18_xci:
         summary_lines.append(
             f"PCFM XCI Eq18 exponent: {_fit_exponent(spacing_hz, np.array([row['pcfm_eq18_xci_channel_w'] for row in rows], dtype=float)):.6f}"
+        )
+    if any("ssfm_channel_w" in row for row in rows):
+        summary_lines.append(
+            f"SSFM exponent: {_fit_exponent(spacing_hz, np.array([row.get('ssfm_channel_w', np.nan) for row in rows], dtype=float)):.6f}"
         )
     if skipped_spacings:
         summary_lines.append("Skipped spacing points:")
@@ -599,6 +643,7 @@ def main() -> None:
         recompute_td=args.recompute_td,
         recompute_pcfm=args.recompute_pcfm,
         exclude_self_channel=args.exclude_self_channel,
+        run_ssfm_when_standalone=True,
     )
     lg.success(f"Saved scaling CSV to {csv_path}")
     lg.success(f"Saved scaling summary to {summary_path}")

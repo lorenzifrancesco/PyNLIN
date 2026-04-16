@@ -25,6 +25,10 @@ from analysis.pcfm.analytics import flat_profile_pcfm_xci_channel_power
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
 from analysis.pcfm.models import _load_or_compute_pcfm
+from analysis.pcfm.ssfm_interface import (
+    compute_ssfm_center_nli,
+    prepare_ssfm_runtime_with_template,
+)
 from analysis.pcfm.td import _td_modulation_components
 from analysis.uwb_nlin import _nlin_cache_path
 
@@ -66,10 +70,27 @@ def _scaling_series(
     }
     if rows and "pcfm_eq18_xci_channel_w" in rows[0]:
         series["PCFM XCI Eq18"] = np.array([row["pcfm_eq18_xci_channel_w"] for row in rows], dtype=float)
+    if any("ssfm_channel_w" in row for row in rows):
+        series["SSFM"] = np.array([row.get("ssfm_channel_w", np.nan) for row in rows], dtype=float)
     if plot_pcfm_total_and_sci:
         series["PCFM total"] = np.array([row["pcfm_channel_w"] for row in rows], dtype=float)
         series["PCFM SCI"] = np.array([row["pcfm_sci_channel_w"] for row in rows], dtype=float)
     return series
+
+
+def _build_constant_launch_vector(system: System, launch_dbm: float | None) -> np.ndarray:
+    if launch_dbm is not None:
+        launch_w = float(dBm2watt(launch_dbm))
+    else:
+        launch_w = float(
+            _resolve_launch_powers(
+                system,
+                profile_path=None,
+                launch_csv_path=None,
+                use_profile=False,
+            )[0]
+        )
+    return np.full(system.n_channels, launch_w, dtype=float)
 
 
 def _center_channel_eq18_xci(system: System, launch_channel_w: float, channel_idx: int) -> float:
@@ -90,6 +111,33 @@ def _save_figure(fig: plt.Figure, out_path: Path) -> None:
     lg.success("Plot saved: {}", out_path.resolve())
 
 
+def _uses_dar2014_template(ssfm_template_path: Path | None) -> bool:
+    if ssfm_template_path is None:
+        return False
+    return ssfm_template_path.name.lower() == "ssfm_dar_2014.toml"
+
+
+def _load_dar2014_literature_points(
+    csv_path: Path,
+    reference_signal_dbm: float = -2.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    lengths_km: list[float] = []
+    nli_w: list[float] = []
+    for raw_line in csv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if ";" not in line:
+            continue
+        left, right = line.split(";", 1)
+        length_km = float(left.strip().replace(",", "."))
+        normalized_db = float(right.strip().replace(",", "."))
+        denorm_dbm = reference_signal_dbm + normalized_db
+        lengths_km.append(length_km)
+        nli_w.append(float(dBm2watt(denorm_dbm)))
+    return np.asarray(lengths_km, dtype=float), np.asarray(nli_w, dtype=float)
+
+
 def _plot_scaling(
     rows: list[dict],
     out_path: Path,
@@ -99,12 +147,15 @@ def _plot_scaling(
     channel_freq_thz: float,
     launch_powers_w: np.ndarray,
     plot_pcfm_total_and_sci: bool,
+    literature_points: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> None:
     lengths_km = np.array([row["length_km"] for row in rows], dtype=float)
     series = _scaling_series(rows, plot_pcfm_total_and_sci)
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(5.2, 3.4))
-    colors = ["black", "tab:red", "tab:blue", "tab:green", "tab:orange"]
-    for (label, values), color in zip(series.items(), colors):
+    colors = plt.rcParams.get("axes.prop_cycle", None)
+    palette = colors.by_key().get("color", []) if colors is not None else []
+    for idx, (label, values) in enumerate(series.items()):
+        color = palette[idx % len(palette)] if palette else None
         ax.plot(
             lengths_km,
             watt2dBm(np.maximum(np.asarray(values, dtype=float), 1e-18)),
@@ -128,6 +179,19 @@ def _plot_scaling(
         color="gray",
         label="Linear scaling (p=1.000)",
     )
+    if literature_points is not None:
+        lit_len_km, lit_nli_w = literature_points
+        if lit_len_km.size and lit_nli_w.size:
+            ax.plot(
+                lit_len_km,
+                watt2dBm(np.maximum(np.asarray(lit_nli_w, dtype=float), 1e-18)),
+                linestyle="None",
+                marker="x",
+                markersize=6,
+                markeredgewidth=1.0,
+                color="black",
+                label="Dar 2014 (digitized)",
+            )
     ax.set_xscale("log")
     ax.set_xlabel("Fiber length [km]")
     ax.set_ylabel("Center-channel NLI power [dBm]")
@@ -160,11 +224,40 @@ def run_length_sweep(
     recompute_td: bool | None,
     recompute_pcfm: bool | None,
     exclude_self_channel: bool | None = None,
+    run_ssfm_when_standalone: bool = False,
+    ssfm_template_path: Path | None = None,
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
 
-    base_system = System.from_toml(cfg_path)
+    effective_cfg_path = cfg_path
+    effective_ssfm_template_path = ssfm_template_path
+    if ssfm_template_path is not None:
+        tpl_text = str(ssfm_template_path).lower()
+        if "struct" in tpl_text:
+            if Path(ssfm_template_path).exists():
+                effective_cfg_path = Path(ssfm_template_path)
+                effective_ssfm_template_path = None
+                lg.warning(
+                    "--ssfm-template points to a system struct TOML; using it as --config and falling back to default gnlse SSFM template: {}",
+                    ssfm_template_path,
+                )
+            else:
+                lg.warning(
+                    "Provided struct-like path in --ssfm-template does not exist: {}. Falling back to --config={} and default gnlse SSFM template.",
+                    ssfm_template_path,
+                    cfg_path,
+                )
+                effective_ssfm_template_path = None
+        elif not Path(ssfm_template_path).exists():
+            lg.warning(
+                "SSFM template not found: {}. Falling back to default gnlse SSFM template.",
+                ssfm_template_path,
+            )
+            effective_ssfm_template_path = None
+
+    base_system = System.from_toml(effective_cfg_path)
+    sweep_template_system = base_system
     runtime_cfg = _load_pcfm_runtime_config(base_system)
     run_flags = _resolve_scaling_run_flags(
         base_system,
@@ -180,37 +273,39 @@ def run_length_sweep(
     recompute_pcfm = run_flags["recompute_pcfm"]
     exclude_self_channel = run_flags["exclude_self_channel"]
     plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
-    center_idx, band_label = _select_scaling_channel(base_system)
-    freqs = base_system.wdm.frequency_grid()
+    center_idx, band_label = _select_scaling_channel(sweep_template_system)
+    freqs = sweep_template_system.wdm.frequency_grid()
     channel_freq_thz = float(freqs[center_idx] * 1e-12)
     if launch_dbm is not None:
-        title_launch_vec = np.full(base_system.n_channels, float(dBm2watt(launch_dbm)), dtype=float)
+        title_launch_vec = np.full(sweep_template_system.n_channels, float(dBm2watt(launch_dbm)), dtype=float)
     else:
-        title_launch_vec = _resolve_launch_powers(
-            base_system,
-            profile_path=None,
-            launch_csv_path=None,
-            use_profile=False,
-        )
+        title_launch_vec = _build_constant_launch_vector(sweep_template_system, None)
     lg.info(
         "Selected center channel idx={} in band={} at {:.6f} THz.".format(
             center_idx, band_label, channel_freq_thz
         )
     )
 
+    ssfm_ctx = (
+        prepare_ssfm_runtime_with_template(out_dir, template_path=effective_ssfm_template_path)
+        if run_ssfm_when_standalone
+        else None
+    )
+    literature_points: tuple[np.ndarray, np.ndarray] | None = None
+    lit_csv = Path("input") / "literature_comparison" / "dar2014points.csv"
+    if lit_csv.exists():
+        try:
+            literature_points = _load_dar2014_literature_points(lit_csv)
+            lg.info("Loaded {} literature points from {}", len(literature_points[0]), lit_csv)
+        except Exception as exc:
+            lg.warning("Could not load literature comparison points from {}: {}", lit_csv, exc)
+    else:
+        lg.warning("Literature comparison CSV not found: {}", lit_csv)
+
     for length_km in lengths_km:
-        system = System.from_toml(cfg_path)
+        system = System.from_toml(effective_cfg_path)
         system.fiber.length = float(length_km) * 1e3
-        if launch_dbm is not None:
-            launch_w = float(dBm2watt(launch_dbm))
-            launch_vec = np.full(system.n_channels, launch_w, dtype=float)
-        else:
-            launch_vec = _resolve_launch_powers(
-                system,
-                profile_path=None,
-                launch_csv_path=None,
-                use_profile=False,
-            )
+        launch_vec = _build_constant_launch_vector(system, launch_dbm)
 
         profile_tag = f"L{_safe_tag(length_km)}km"
         profile_path = out_dir / f"flat_profile_{profile_tag}.npy"
@@ -291,6 +386,21 @@ def run_length_sweep(
             row["pcfm_eq18_xci_channel_w"] = _center_channel_eq18_xci(
                 system, float(launch_vec[center_idx]), center_idx
             )
+        if ssfm_ctx is not None:
+            try:
+                ssfm_val = compute_ssfm_center_nli(
+                    ssfm_ctx,
+                    system=system,
+                    launch_channel_w=float(launch_vec[center_idx]),
+                    channel_idx=center_idx,
+                    sweep_tag=profile_tag,
+                )
+                if ssfm_val is not None:
+                    row["ssfm_channel_w"] = float(ssfm_val)
+                else:
+                    lg.warning("SSFM returned no finite center-channel NLI for {}", profile_tag)
+            except Exception as exc:
+                lg.warning("SSFM run failed for {}: {}", profile_tag, exc)
         rows.append(row)
         msg = (
             "L={:.1f} km -> TD={:.3e} W, TD(Gauss)={:.3e} W, PCFM={:.3e} W, "
@@ -305,6 +415,8 @@ def run_length_sweep(
         )
         if pcfm_eq18_xci:
             msg += ", PCFM_XCI_Eq18={:.3e} W".format(row["pcfm_eq18_xci_channel_w"])
+        if "ssfm_channel_w" in row:
+            msg += ", SSFM={:.3e} W".format(row["ssfm_channel_w"])
         lg.info(msg)
 
     rows.sort(key=lambda item: item["length_km"])
@@ -323,6 +435,11 @@ def run_length_sweep(
         exponent = _fit_exponent(lengths_m, np.array([row["pcfm_eq18_xci_channel_w"] for row in rows], dtype=float))
         for row in rows:
             row["pcfm_eq18_xci_channel_w_scaling_exp"] = exponent
+    if any("ssfm_channel_w" in row for row in rows):
+        exponent = _fit_exponent(lengths_m, np.array([row.get("ssfm_channel_w", np.nan) for row in rows], dtype=float))
+        for row in rows:
+            if "ssfm_channel_w" in row:
+                row["ssfm_channel_w_scaling_exp"] = exponent
 
     csv_path = out_dir / "center_channel_length_scaling.csv"
     header = [
@@ -347,7 +464,12 @@ def run_length_sweep(
             "pcfm_eq18_xci_channel_w",
             "pcfm_eq18_xci_channel_w_scaling_exp",
         ])
-    data = np.column_stack([[row[name] for row in rows] for name in header])
+    if any("ssfm_channel_w" in row for row in rows):
+        header.extend([
+            "ssfm_channel_w",
+            "ssfm_channel_w_scaling_exp",
+        ])
+    data = np.column_stack([[row.get(name, np.nan) for row in rows] for name in header])
     np.savetxt(csv_path, data, delimiter=",", header=",".join(header), comments="", fmt="%s")
 
     plot_path = Path("media") / "PCFM" / "center_channel_length_scaling.pdf"
@@ -360,6 +482,7 @@ def run_length_sweep(
         channel_freq_thz,
         title_launch_vec,
         plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
+        literature_points=literature_points,
     )
 
     summary_lines = [
@@ -375,6 +498,12 @@ def run_length_sweep(
         summary_lines.append(
             f"PCFM XCI Eq18 exponent: {_fit_exponent(lengths_m, np.array([row['pcfm_eq18_xci_channel_w'] for row in rows], dtype=float)):.6f}"
         )
+    if any("ssfm_channel_w" in row for row in rows):
+        summary_lines.append(
+            f"SSFM exponent: {_fit_exponent(lengths_m, np.array([row.get('ssfm_channel_w', np.nan) for row in rows], dtype=float)):.6f}"
+        )
+    if literature_points is not None:
+        summary_lines.append(f"Literature points loaded: {int(literature_points[0].size)}")
     summary_path = out_dir / "center_channel_length_scaling_summary.txt"
     summary_path.write_text("\n".join(summary_lines) + "\n")
     return csv_path, summary_path
@@ -432,6 +561,15 @@ def main() -> None:
         default="results/debug/pcfm_length_scaling",
         help="Output directory for generated profiles, caches, and reports.",
     )
+    parser.add_argument(
+        "--ssfm-template",
+        type=str,
+        default=None,
+        help=(
+            "Optional SSFM template TOML path (e.g., input/ssfm_dar_2014.toml). "
+            "If omitted, uses the default gnlse wdm_nli_config.toml."
+        ),
+    )
     args = parser.parse_args()
 
     csv_path, summary_path = run_length_sweep(
@@ -444,6 +582,8 @@ def main() -> None:
         recompute_td=args.recompute_td,
         recompute_pcfm=args.recompute_pcfm,
         exclude_self_channel=args.exclude_self_channel,
+        run_ssfm_when_standalone=True,
+        ssfm_template_path=(Path(args.ssfm_template) if args.ssfm_template else None),
     )
     lg.success(f"Saved scaling CSV to {csv_path}")
     lg.success(f"Saved scaling summary to {summary_path}")
