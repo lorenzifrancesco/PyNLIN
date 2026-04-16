@@ -5,7 +5,7 @@ from functools import lru_cache
 
 import numpy as np
 from scipy.constants import c
-from scipy.integrate import quad
+from scipy.integrate import cumulative_trapezoid
 from scipy.special import sici
 
 from pynlin.nlin import pcfm_gn
@@ -58,32 +58,70 @@ def flat_profile_xci_kernel(
     return float(length_m / (2.0 * math.pi * beta2_eff) * log_term * float(poly_sum))
 
 
+_J_SERIES_CUTOFF = 1e-3
+_J_GRID_STEP_TARGET = 0.05
+_J_GRID_MIN_POINTS = 2049
+_J_GRID_MAX_POINTS = 250_001
+
+
+def _j_bucket_upper(x_abs: float) -> float:
+    x_abs = float(abs(x_abs))
+    if x_abs <= 1.0:
+        return 1.0
+    return float(2.0 ** math.ceil(math.log2(x_abs)))
+
+
 @lru_cache(maxsize=None)
-def _j_of_x_scalar(x_value: float) -> float:
-    if np.isclose(x_value, 0.0):
-        return 0.0
-    sign = 1.0 if x_value >= 0.0 else -1.0
-    x_abs = abs(x_value)
+def _j_lookup_grid(x_upper: float) -> tuple[np.ndarray, np.ndarray]:
+    x_upper = float(max(abs(x_upper), 1.0))
+    n_points = int(math.ceil(x_upper / _J_GRID_STEP_TARGET)) + 1
+    n_points = min(max(n_points, _J_GRID_MIN_POINTS), _J_GRID_MAX_POINTS)
+    x_grid = np.linspace(0.0, x_upper, n_points, dtype=float)
+    si_grid, _ = sici(x_grid)
+    integrand = np.empty_like(x_grid)
+    integrand[0] = 1.0
+    integrand[1:] = si_grid[1:] / x_grid[1:]
+    # Older calculation kept here as trace: this primitive used to be evaluated
+    # point-by-point with `quad(lambda t: Si(t)/t, 0, x_abs, ...)`, which was
+    # accurate but too slow and fragile for the full PCFM Eq. 18 channel sweep.
+    j_grid = cumulative_trapezoid(integrand, x_grid, initial=0.0)
+    return x_grid, j_grid
 
-    def integrand(t: float) -> float:
-        if np.isclose(t, 0.0):
-            return 1.0
-        si_value, _ = sici(t)
-        return si_value / t
 
-    value, _ = quad(integrand, 0.0, x_abs, limit=300, epsabs=1e-11, epsrel=1e-11)
-    return sign * value
+def _j_series(x_value: np.ndarray) -> np.ndarray:
+    x_value = np.asarray(x_value, dtype=float)
+    x2 = x_value * x_value
+    return x_value * (1.0 - x2 / 54.0 + (x2 * x2) / 3000.0)
+
+
+def _j_of_x(values: np.ndarray) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    out = np.empty_like(values)
+    abs_values = np.abs(values)
+
+    zero_mask = np.isclose(values, 0.0)
+    out[zero_mask] = 0.0
+
+    small_mask = (~zero_mask) & (abs_values < _J_SERIES_CUTOFF)
+    if np.any(small_mask):
+        out[small_mask] = _j_series(values[small_mask])
+
+    large_mask = ~(zero_mask | small_mask)
+    if np.any(large_mask):
+        x_grid, j_grid = _j_lookup_grid(_j_bucket_upper(float(np.max(abs_values[large_mask]))))
+        interp = np.interp(abs_values[large_mask], x_grid, j_grid)
+        out[large_mask] = np.copysign(interp, values[large_mask])
+
+    return out
 
 
 def _g_kernel(z: np.ndarray) -> np.ndarray:
     z = np.asarray(z, dtype=float)
-    out = np.empty_like(z)
-    for idx, zi in np.ndenumerate(z):
-        if np.isclose(zi, 0.0):
-            out[idx] = 0.0
-            continue
-        si_value, _ = sici(float(zi))
-        out[idx] = _j_of_x_scalar(float(zi)) - si_value + (1.0 - np.cos(zi)) / zi
+    out = np.zeros_like(z)
+    si_value, _ = sici(z)
+    out[:] = _j_of_x(z) - si_value
+    nonzero_mask = ~np.isclose(z, 0.0)
+    out[nonzero_mask] += (1.0 - np.cos(z[nonzero_mask])) / z[nonzero_mask]
     return out
 
 
@@ -121,11 +159,53 @@ def flat_profile_xci_kernel_eq18(
     return float(k_normalized * (float(length_m) * bandwidth_hz) ** 2)
 
 
+def _flat_profile_xci_kernel_eq18_vectorized(
+    *,
+    length_m: float,
+    beta2_eff_s2_per_m: np.ndarray,
+    bandwidth_hz: float,
+    delta_f_hz: np.ndarray,
+) -> np.ndarray:
+    delta_abs_hz = np.abs(np.asarray(delta_f_hz, dtype=float))
+    bandwidth_hz = float(abs(bandwidth_hz))
+    if np.any(delta_abs_hz <= bandwidth_hz / 2.0):
+        raise ValueError("Eq. 18 flat-profile XCI requires |Delta f| > B/2.")
+
+    beta2_eff = np.maximum(np.abs(np.asarray(beta2_eff_s2_per_m, dtype=float)), pcfm_gn.MIN_BETA2)
+    x = delta_abs_hz / bandwidth_hz
+    l_over_ld = beta2_eff * float(length_m) * (bandwidth_hz**2)
+    z_plus = np.pi * l_over_ld * (x + 0.5)
+    z_minus = np.pi * l_over_ld * (x - 0.5)
+    k_normalized = (_g_kernel(z_plus) - _g_kernel(z_minus)) / (np.pi**2 * l_over_ld)
+    return k_normalized * (float(length_m) * bandwidth_hz) ** 2
+
+
+def _pcfm_xci_poly_sums(
+    system: System,
+    *,
+    profile_path: str | None,
+    degree: int,
+    lumped_losses: list[tuple[float, float]] | None = None,
+) -> np.ndarray:
+    """Return the same per-interferer polynomial sums used by PCFM XCI."""
+    n_channels = system.wdm.frequency_grid().size
+    if profile_path is None:
+        return np.ones(n_channels, dtype=float)
+
+    signal_power_ch_z, z = pcfm_gn.load_signal_profiles(profile_path, system)
+    spp = pcfm_gn.normalize_spp(signal_power_ch_z, z, lumped_losses=lumped_losses)
+    coeffs = pcfm_gn.fit_spp_polynomials(z, spp, degree=int(degree))
+    return np.array([pcfm_gn.poly_sum(coeffs[i]) for i in range(n_channels)], dtype=float)
+
+
 def flat_profile_pcfm_xci_channel_power(
     system: System,
     *,
     channel_idx: int,
     launch_powers_w: np.ndarray,
+    profile_path: str | None = None,
+    degree: int = 9,
+    lumped_losses: list[tuple[float, float]] | None = None,
     use_beta2_eff: bool = True,
     log_order: int | None = None,
     xci_model: str = "closed_form",
@@ -152,10 +232,60 @@ def flat_profile_pcfm_xci_channel_power(
     aeff = pcfm_gn._aeff_array(system, freqs)
     fc_hz = float(system.center_frequency) if system.center_frequency is not None else float(np.mean(freqs))
     beta_coeffs = pcfm_gn._beta_coeffs_from_profile(system, fc_hz) if use_beta2_eff else None
+    poly_sums = _pcfm_xci_poly_sums(
+        system,
+        profile_path=profile_path,
+        degree=int(degree),
+        lumped_losses=lumped_losses,
+    )
 
     # Mirror compute_pcfm_nlin exactly.
     g_ch = launch / bandwidth_hz * 2.0
     total_psd = 0.0
+    if xci_model == "eq18":
+        valid = np.ones(n_channels, dtype=bool)
+        valid[idx] = False
+        delta_f_all = np.asarray(freqs - freqs[idx], dtype=float)
+        valid &= np.abs(delta_f_all) > bandwidth_hz / 2.0
+        if not np.any(valid):
+            return 0.0
+
+        if beta_coeffs:
+            beta2_xci = np.array(
+                [pcfm_gn._beta2_eff(float(freqs[idx]), float(freqs[j]), beta_coeffs) for j in np.flatnonzero(valid)],
+                dtype=float,
+            )
+        else:
+            beta2_xci = np.asarray(beta2[valid], dtype=float)
+        delta_f_valid = delta_f_all[valid]
+        aeff_valid = np.asarray(aeff[valid], dtype=float)
+        gamma_xci = (
+            2.0
+            * math.pi
+            * float(freqs[idx])
+            / c
+            * (2.0 * pcfm_gn.N2_SIO2 / (float(aeff[idx]) + aeff_valid))
+        )
+        k_xci = _flat_profile_xci_kernel_eq18_vectorized(
+            length_m=length_m,
+            beta2_eff_s2_per_m=beta2_xci,
+            bandwidth_hz=bandwidth_hz,
+            delta_f_hz=delta_f_valid,
+        )
+        poly_sum_valid = np.asarray(poly_sums[valid], dtype=float)
+        g_j = np.asarray(g_ch[valid], dtype=float)
+        total_psd = float(
+            np.sum(
+                (32.0 / 27.0)
+                * float(g_ch[idx])
+                * (g_j**2)
+                * (gamma_xci**2)
+                * k_xci
+                * poly_sum_valid
+            )
+        )
+        return float(pcfm_gn._to_per_polarization_power(total_psd * bandwidth_hz))
+
     for j in range(n_channels):
         if j == idx:
             continue
@@ -173,17 +303,10 @@ def flat_profile_pcfm_xci_channel_power(
                 beta2_eff_s2_per_m=beta2_xci,
                 bandwidth_hz=bandwidth_hz,
                 delta_f_hz=delta_f,
-                poly_sum=1.0,
+                poly_sum=float(poly_sums[j]),
                 log_order=log_order,
             )
-        elif xci_model == "eq18":
-            k_xci = flat_profile_xci_kernel_eq18(
-                length_m=length_m,
-                beta2_eff_s2_per_m=beta2_xci,
-                bandwidth_hz=bandwidth_hz,
-                delta_f_hz=delta_f,
-            )
-        else:
+        elif xci_model != "closed_form":
             raise ValueError(f"Unsupported xci_model={xci_model!r}.")
         gamma_xci = (
             2.0
