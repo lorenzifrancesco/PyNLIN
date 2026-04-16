@@ -13,6 +13,36 @@ from pynlin.utils import watt2dBm
 
 from .figure_size import scale_figsize_to_ieee_column
 
+GNUPLOT_RED = "#C00000"
+GNUPLOT_GREEN = "#008A2E"
+GNUPLOT_BLUE = "#0057D8"
+GNUPLOT_ORANGE = "#D97706"
+GNUPLOT_GRAY = "#202020"
+GNUPLOT_MAGENTA = "#B000B0"
+MARKER_TD = "o"
+MARKER_TD_BY_LABEL = {
+    "16-QAM": "s",
+    "256-QAM": "^",
+    "Gaussian": "X",
+}
+MARKER_PCFM = "^"
+MARKER_PCFM_XCI = "s"
+MARKER_PCFM_XCI_EQ18 = "D"
+MARKER_GN = "x"
+MARKER_GN_XCI = "+"
+MARKER_GN_DIRECT = "v"
+MARKER_GN_DIRECT_XCI = "P"
+NLIN_MARKER_SIZE = 2.3
+NLIN_MARKER_SIZE_KXCI = 3.2
+NLIN_SCATTER_SIZE = 26
+NLIN_MARKER_EDGE_WIDTH = 0.25
+SAVEFIG_PAD_INCHES = 0.04
+AXIS_LABEL_SIZE = 9.5
+LEGEND_SIZE = 8.5
+
+plt.rcParams["xtick.labelsize"] = 8
+plt.rcParams["ytick.labelsize"] = 8
+
 
 def _disable_dbm_axis_grouping(ax: plt.Axes, which: str = "y") -> None:
     """Force plain tick labels on dBm axes without offset/scientific grouping."""
@@ -21,6 +51,48 @@ def _disable_dbm_axis_grouping(ax: plt.Axes, which: str = "y") -> None:
     formatter.set_scientific(False)
     axis.set_major_formatter(formatter)
     axis.offsetText.set_visible(False)
+
+
+def _save_figure(fig: plt.Figure, out_path: Path, *, dpi: int = 300) -> None:
+    """Save figure with explicit padding to avoid clipped borders."""
+    fig.tight_layout(pad=0.45)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", pad_inches=SAVEFIG_PAD_INCHES)
+
+
+def _is_eq18_label(label: str) -> bool:
+    return "eq18" in str(label).lower()
+
+
+def _safe_histogram_bins(values: np.ndarray, n_bins: int, *, log_scale: bool) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        raise ValueError("Histogram bin builder received no finite values.")
+
+    vmin = float(np.min(values))
+    vmax = float(np.max(values))
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        raise ValueError("Histogram bin builder received non-finite extrema.")
+
+    if np.isclose(vmin, vmax):
+        if log_scale:
+            lower = vmin / 1.05
+            upper = vmax * 1.05
+            if lower <= 0.0:
+                lower = np.nextafter(vmin, 0.0)
+            if not upper > lower:
+                upper = np.nextafter(vmax, np.inf)
+            return np.geomspace(lower, upper, max(int(n_bins), 3))
+        half_width = max(abs(vmin) * 0.05, 1e-12)
+        return np.linspace(vmin - half_width, vmax + half_width, max(int(n_bins), 3))
+
+    if log_scale:
+        bins = np.geomspace(vmin, vmax, int(n_bins))
+    else:
+        bins = np.linspace(vmin, vmax, int(n_bins))
+    if not np.all(np.diff(bins) > 0.0):
+        bins = np.linspace(vmin, np.nextafter(vmax, np.inf), max(int(n_bins), 3))
+    return bins
 
 
 def plot_pcfm_gsnr(
@@ -42,7 +114,7 @@ def plot_pcfm_gsnr(
     ax.plot(
         freqs_hz * 1e-12,
         gsnr_td,
-        color="black",
+        color=GNUPLOT_RED,
         lw=0.45,
         marker="o",
         markersize=1.2,
@@ -51,16 +123,14 @@ def plot_pcfm_gsnr(
         label="TD",
     )
 
-    colors = ["tab:blue", "tab:orange", "tab:green"]
     if plot_pcfm_total_and_sci:
-        for idx, (label, gsnr) in enumerate(gsnr_pcfm.items()):
+        for label, gsnr in gsnr_pcfm.items():
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
             ax.plot(
                 freqs_hz * 1e-12,
                 gsnr,
-                color=color,
+                color=GNUPLOT_ORANGE,
                 lw=0.45,
                 marker="o",
                 markersize=1.2,
@@ -70,44 +140,41 @@ def plot_pcfm_gsnr(
             )
 
     if gsnr_gn:
-        for idx, (label, gsnr) in enumerate(gsnr_gn.items()):
+        for label, gsnr in gsnr_gn.items():
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
             ax.scatter(
                 freqs_hz * 1e-12,
                 gsnr,
                 s=8,
                 marker="o",
                 facecolors="none",
-                edgecolors=color,
+                edgecolors=GNUPLOT_GRAY,
                 linewidths=marker_lw,
                 label=f"GN{suffix}",
             )
 
     if gsnr_gn_direct:
-        for idx, (label, gsnr) in enumerate(gsnr_gn_direct.items()):
+        for label, gsnr in gsnr_gn_direct.items():
             display = "" if label == "no_loss" else label
             suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
             ax.scatter(
                 freqs_hz * 1e-12,
                 gsnr,
                 s=8,
                 marker="o",
                 facecolors="none",
-                edgecolors=color,
+                edgecolors=GNUPLOT_MAGENTA,
                 linewidths=marker_lw,
                 label=f"GN dir{suffix}",
             )
 
-    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax.set_ylabel(r"$GSNR_{NLI} \; [\mathrm{dB}]$")
+    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"$\mathnormal{GSNR_{NLI} \; [\mathrm{dB}]}$", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
-    ax.legend(loc="best", fontsize=7)
-    fig.tight_layout()
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=dpi)
+    _save_figure(fig, out_path, dpi=dpi)
     lg.success(f"Saved GSNR plot to {out_path}")
 
 
@@ -127,177 +194,203 @@ def plot_pcfm_nlin_power(
     gn_direct_xci_is_ratio: bool = False,
     plot_pcfm_total_and_sci: bool = False,
 ) -> None:
-    """Plot per-channel NLIN power in dBm."""
+    """Plot NLIN absolute power (dBm) and normalized-to-output power (dB)."""
     dpi = 300
-    marker_lw = 0.45
+    marker_lw = NLIN_MARKER_EDGE_WIDTH
     signal_power_w = np.asarray(signal_power_w, dtype=float).reshape(-1)
     if signal_power_w.size != freqs_hz.size:
         raise ValueError(
             f"signal_power_w size {signal_power_w.size} != freq size {freqs_hz.size}"
         )
 
+    def _as_flat(nlin: np.ndarray) -> np.ndarray:
+        arr = np.asarray(nlin, dtype=float).reshape(-1)
+        if arr.size != signal_power_w.size:
+            raise ValueError(f"NLIN size {arr.size} != signal power size {signal_power_w.size}")
+        return arr
+
     def _power_dbm(nlin: np.ndarray, already_ratio: bool = False) -> np.ndarray:
-        nlin = np.asarray(nlin, dtype=float).reshape(-1)
-        if nlin.size != signal_power_w.size:
-            raise ValueError(f"NLIN size {nlin.size} != signal power size {signal_power_w.size}")
         if already_ratio:
             raise ValueError("plot_pcfm_nlin_power expects absolute powers in W, not ratios.")
-        return watt2dBm(np.maximum(nlin, 1e-18))
+        arr = _as_flat(nlin)
+        return watt2dBm(np.maximum(arr, 1e-18))
 
-    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
-    if nlin_td_mod_w:
-        styles = ["-", "--", ":"]
-        style_idx = 0
-        for label, nlin in nlin_td_mod_w.items():
-            power_dbm = _power_dbm(nlin)
-            is_gaussian = "gauss" in str(label).lower()
-            color = "tab:red" if is_gaussian else "black"
-            if is_gaussian:
-                linestyle = "-"
-            else:
-                linestyle = styles[style_idx % len(styles)]
-                style_idx += 1
+    def _over_pout_db(nlin: np.ndarray, already_ratio: bool = False) -> np.ndarray:
+        arr = _as_flat(nlin)
+        if already_ratio:
+            ratio = arr
+        else:
+            ratio = arr / np.maximum(signal_power_w, 1e-18)
+        return 10.0 * np.log10(np.maximum(ratio, 1e-18))
+
+    def _plot_metric(
+        metric_fn,
+        *,
+        ylabel: str,
+        target_path: Path,
+        success_msg: str,
+    ) -> None:
+        fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
+
+        if nlin_td_mod_w:
+            for label, nlin in nlin_td_mod_w.items():
+                if str(label).strip() == "64-QAM":
+                    continue
+                values = metric_fn(nlin)
+                label_str = str(label).strip()
+                marker = MARKER_TD_BY_LABEL.get(label_str, MARKER_TD)
+                color = GNUPLOT_RED if label_str.lower() == "gaussian" else "black"
+                markerfacecolor = GNUPLOT_RED if label_str.lower() == "gaussian" else "none"
+                ax.plot(
+                    freqs_hz * 1e-12,
+                    values,
+                    color=color,
+                    lw=0.0,
+                    ls="None",
+                    marker=marker,
+                    markersize=NLIN_MARKER_SIZE,
+                    markerfacecolor=markerfacecolor,
+                    markeredgewidth=marker_lw,
+                    label=f"TD {label}",
+                )
+        else:
+            values = metric_fn(nlin_td_w)
             ax.plot(
                 freqs_hz * 1e-12,
-                power_dbm,
-                color=color,
-                lw=0.45,
-                ls=linestyle,
-                marker="o",
-                markersize=1.2,
-                markerfacecolor="none",
+                values,
+                color=GNUPLOT_RED,
+                lw=0.0,
+                ls="None",
+                marker=MARKER_TD,
+                markersize=NLIN_MARKER_SIZE,
+                markerfacecolor=GNUPLOT_RED,
                 markeredgewidth=marker_lw,
-                label=f"TD {label}",
-            )
-    else:
-        power_dbm = _power_dbm(nlin_td_w)
-        ax.plot(
-            freqs_hz * 1e-12,
-            power_dbm,
-            color="black",
-            lw=0.45,
-            marker="o",
-            markersize=1.2,
-            markerfacecolor="none",
-            markeredgewidth=marker_lw,
-            label="TD",
-        )
-
-    colors = ["tab:blue", "tab:orange", "tab:green"]
-    if plot_pcfm_total_and_sci:
-        for idx, (label, nlin) in enumerate(nlin_pcfm_w.items()):
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
-            power_dbm = _power_dbm(nlin)
-            ax.plot(
-                freqs_hz * 1e-12,
-                power_dbm,
-                color=color,
-                lw=0.45,
-                marker="o",
-                markersize=1.2,
-                markerfacecolor="none",
-                markeredgewidth=marker_lw,
-                label=f"PCFM{suffix}",
+                label="TD",
             )
 
-    if nlin_pcfm_xci_w:
-        for idx, (label, nlin) in enumerate(nlin_pcfm_xci_w.items()):
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
-            power_dbm = _power_dbm(nlin)
-            ax.plot(
-                freqs_hz * 1e-12,
-                power_dbm,
-                color=color,
-                lw=0.45,
-                ls="--",
-                marker="o",
-                markersize=1.2,
-                markerfacecolor="none",
-                markeredgewidth=marker_lw,
-                label=f"PCFM XCI{suffix}",
-            )
+        if plot_pcfm_total_and_sci:
+            for label, nlin in nlin_pcfm_w.items():
+                display = "" if label == "no_loss" else label
+                suffix = f" {display}" if display else ""
+                values = metric_fn(nlin)
+                ax.plot(
+                    freqs_hz * 1e-12,
+                    values,
+                    color=GNUPLOT_ORANGE,
+                    lw=0.0,
+                    ls="None",
+                    marker=MARKER_PCFM,
+                    markersize=NLIN_MARKER_SIZE,
+                    markerfacecolor=GNUPLOT_ORANGE,
+                    markeredgewidth=marker_lw,
+                    label=f"PCFM{suffix}",
+                )
 
-    if nlin_gn_w:
-        for idx, (label, nlin) in enumerate(nlin_gn_w.items()):
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
-            power_dbm = _power_dbm(nlin)
-            ax.scatter(
-                freqs_hz * 1e-12,
-                power_dbm,
-                s=8,
-                marker="o",
-                facecolors="none",
-                edgecolors=color,
-                linewidths=marker_lw,
-                label=f"GN{suffix}",
-            )
+        if nlin_pcfm_xci_w:
+            for label, nlin in nlin_pcfm_xci_w.items():
+                display = "" if label == "no_loss" else label
+                suffix = f" {display}" if display else ""
+                is_eq18 = _is_eq18_label(label)
+                values = metric_fn(nlin)
+                ax.plot(
+                    freqs_hz * 1e-12,
+                    values,
+                    color=GNUPLOT_BLUE if is_eq18 else GNUPLOT_GREEN,
+                    lw=0.0,
+                    ls="None",
+                    marker=MARKER_PCFM_XCI_EQ18 if is_eq18 else MARKER_PCFM_XCI,
+                    markersize=NLIN_MARKER_SIZE if is_eq18 else NLIN_MARKER_SIZE_KXCI,
+                    markerfacecolor="white" if is_eq18 else GNUPLOT_GREEN,
+                    markeredgewidth=marker_lw,
+                    label=f"PCFM XCI{suffix}",
+                )
 
-    if nlin_gn_direct_w:
-        for idx, (label, nlin) in enumerate(nlin_gn_direct_w.items()):
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
-            power_dbm = _power_dbm(nlin, already_ratio=gn_direct_is_ratio)
-            ax.scatter(
-                freqs_hz * 1e-12,
-                power_dbm,
-                s=8,
-                marker="o",
-                facecolors="none",
-                edgecolors=color,
-                linewidths=marker_lw,
-                label=f"GN dir{suffix}",
-            )
+        if nlin_gn_w:
+            for label, nlin in nlin_gn_w.items():
+                display = "" if label == "no_loss" else label
+                suffix = f" {display}" if display else ""
+                values = metric_fn(nlin)
+                ax.scatter(
+                    freqs_hz * 1e-12,
+                    values,
+                    s=NLIN_SCATTER_SIZE,
+                    marker=MARKER_GN,
+                    facecolors=GNUPLOT_GRAY,
+                    edgecolors=GNUPLOT_GRAY,
+                    linewidths=marker_lw,
+                    label=f"GN{suffix}",
+                )
 
-    if nlin_gn_xci_w:
-        for idx, (label, nlin) in enumerate(nlin_gn_xci_w.items()):
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
-            power_dbm = _power_dbm(nlin)
-            ax.scatter(
-                freqs_hz * 1e-12,
-                power_dbm,
-                s=8,
-                marker="o",
-                facecolors="none",
-                edgecolors=color,
-                linewidths=marker_lw,
-                label=f"GN XCI{suffix}",
-            )
+        if nlin_gn_direct_w:
+            for label, nlin in nlin_gn_direct_w.items():
+                display = "" if label == "no_loss" else label
+                suffix = f" {display}" if display else ""
+                values = metric_fn(nlin, already_ratio=gn_direct_is_ratio)
+                ax.scatter(
+                    freqs_hz * 1e-12,
+                    values,
+                    s=NLIN_SCATTER_SIZE,
+                    marker=MARKER_GN_DIRECT,
+                    facecolors=GNUPLOT_MAGENTA,
+                    edgecolors=GNUPLOT_MAGENTA,
+                    linewidths=marker_lw,
+                    label=f"GN dir{suffix}",
+                )
 
-    if nlin_gn_direct_xci_w:
-        for idx, (label, nlin) in enumerate(nlin_gn_direct_xci_w.items()):
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            color = colors[idx % len(colors)]
-            power_dbm = _power_dbm(nlin, already_ratio=gn_direct_xci_is_ratio)
-            ax.scatter(
-                freqs_hz * 1e-12,
-                power_dbm,
-                s=8,
-                marker="o",
-                facecolors="none",
-                edgecolors=color,
-                linewidths=marker_lw,
-                label=f"GN dir XCI{suffix}",
-            )
+        if nlin_gn_xci_w:
+            for label, nlin in nlin_gn_xci_w.items():
+                display = "" if label == "no_loss" else label
+                suffix = f" {display}" if display else ""
+                values = metric_fn(nlin)
+                ax.scatter(
+                    freqs_hz * 1e-12,
+                    values,
+                    s=NLIN_SCATTER_SIZE,
+                    marker=MARKER_GN_XCI,
+                    facecolors="none",
+                    edgecolors=GNUPLOT_GRAY,
+                    linewidths=marker_lw,
+                    label=f"GN XCI{suffix}",
+                )
 
-    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax.set_ylabel(r"$P_{NLI}\;[\mathrm{dBm}]$")
-    _disable_dbm_axis_grouping(ax)
-    ax.grid(False)
-    ax.legend(loc="best", fontsize=7)
-    fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=dpi)
-    lg.success(f"Saved NLIN ratio plot to {out_path}")
+        if nlin_gn_direct_xci_w:
+            for label, nlin in nlin_gn_direct_xci_w.items():
+                display = "" if label == "no_loss" else label
+                suffix = f" {display}" if display else ""
+                values = metric_fn(nlin, already_ratio=gn_direct_xci_is_ratio)
+                ax.scatter(
+                    freqs_hz * 1e-12,
+                    values,
+                    s=NLIN_SCATTER_SIZE,
+                    marker=MARKER_GN_DIRECT_XCI,
+                    facecolors="none",
+                    edgecolors=GNUPLOT_MAGENTA,
+                    linewidths=marker_lw,
+                    label=f"GN dir XCI{suffix}",
+                )
+
+        ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+        ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_SIZE)
+        _disable_dbm_axis_grouping(ax)
+        ax.grid(False)
+        ax.legend(loc="best", fontsize=LEGEND_SIZE)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        _save_figure(fig, target_path, dpi=dpi)
+        lg.success(success_msg.format(path=target_path))
+        plt.close(fig)
+
+    _plot_metric(
+        _power_dbm,
+        ylabel=r"$P_{NLI}\;[\mathrm{dBm}]$",
+        target_path=out_path,
+        success_msg="Saved NLIN power plot to {path}",
+    )
+    _plot_metric(
+        _over_pout_db,
+        ylabel=r"$10\log_{10}(P_{NLI}/P_{out})\;[\mathrm{dB}]$",
+        target_path=out_path.with_name(f"{out_path.stem}_over_pout_db{out_path.suffix}"),
+        success_msg="Saved normalized NLIN plot to {path}",
+    )
 
 
 def plot_pcfm_diagnostics(
@@ -316,12 +409,11 @@ def plot_pcfm_diagnostics(
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, launch_dbm, lw=0.8, color="black")
-    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax.set_ylabel(r"$P_\mathrm{launch}\;[\mathrm{dBm}]$")
+    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"$\mathnormal{P_\mathrm{launch}\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
-    fig.tight_layout()
-    fig.savefig(out_dir / "launch_power.pdf", dpi=300)
+    _save_figure(fig, out_dir / "launch_power.pdf", dpi=300)
     lg.success(f"Saved launch power plot to {out_dir / 'launch_power.pdf'}")
     plt.close(fig)
 
@@ -351,16 +443,13 @@ def plot_pcfm_diagnostics(
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.6))
     if l_over_lw_pairs.size:
-        bins = np.geomspace(float(np.min(l_over_lw_pairs)), float(np.max(l_over_lw_pairs)), 40)
-        if np.unique(bins).size < 2:
-            bins = np.linspace(float(np.min(l_over_lw_pairs)), float(np.max(l_over_lw_pairs)) + 1e-12, 10)
+        bins = _safe_histogram_bins(l_over_lw_pairs, 40, log_scale=True)
         ax.hist(l_over_lw_pairs, bins=bins, color="tab:blue", edgecolor="black", linewidth=0.5)
         ax.set_xscale("log")
-    ax.set_xlabel(r"$L/L_W$")
-    ax.set_ylabel("channel-pair count")
+    ax.set_xlabel(r"$\mathnormal{L/L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel("channel-pair count", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
-    fig.tight_layout()
-    fig.savefig(out_dir / "l_over_lw_histogram.pdf", dpi=300)
+    _save_figure(fig, out_dir / "l_over_lw_histogram.pdf", dpi=300)
     lg.success(f"Saved L/LW histogram to {out_dir / 'l_over_lw_histogram.pdf'}")
     plt.close(fig)
 
@@ -380,16 +469,13 @@ def plot_pcfm_diagnostics(
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.6))
     if l_over_ld.size:
-        bins = np.geomspace(float(np.min(l_over_ld)), float(np.max(l_over_ld)), 30)
-        if np.unique(bins).size < 2:
-            bins = np.linspace(float(np.min(l_over_ld)), float(np.max(l_over_ld)) + 1e-18, 10)
+        bins = _safe_histogram_bins(l_over_ld, 30, log_scale=True)
         ax.hist(l_over_ld, bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
         ax.set_xscale("log")
-    ax.set_xlabel(r"$L/L_D$")
-    ax.set_ylabel("channel count")
+    ax.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel("channel count", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
-    fig.tight_layout()
-    fig.savefig(out_dir / "l_over_ld_histogram.pdf", dpi=300)
+    _save_figure(fig, out_dir / "l_over_ld_histogram.pdf", dpi=300)
     lg.success(f"Saved L/LD histogram to {out_dir / 'l_over_ld_histogram.pdf'}")
     plt.close(fig)
 
@@ -403,13 +489,12 @@ def plot_pcfm_diagnostics(
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, avg_dbm, lw=0.8, color="tab:blue", label="avg")
     ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
-    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
+    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"$\mathnormal{P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
-    ax.legend(loc="best", fontsize=7)
-    fig.tight_layout()
-    fig.savefig(out_dir / "profile_power.pdf", dpi=300)
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
+    _save_figure(fig, out_dir / "profile_power.pdf", dpi=300)
     lg.success(f"Saved profile power plot to {out_dir / 'profile_power.pdf'}")
     plt.close(fig)
 
@@ -466,12 +551,11 @@ def plot_pcfm_diagnostics(
             arrowprops=dict(arrowstyle="->", lw=0.6),
         )
         first = False
-    ax.set_xlabel(r"$z\;[\mathrm{km}]$")
-    ax.set_ylabel(r"normalized power")
+    ax.set_xlabel(r"$\mathnormal{z\;[\mathrm{km}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"normalized power", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
-    ax.legend(loc="best", fontsize=7)
-    fig.tight_layout()
-    fig.savefig(out_dir / "spp_fit.pdf", dpi=300)
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
+    _save_figure(fig, out_dir / "spp_fit.pdf", dpi=300)
     lg.success(f"Saved SPP fit plot to {out_dir / 'spp_fit.pdf'}")
     plt.close(fig)
 
@@ -485,14 +569,17 @@ def plot_pcfm_diagnostics(
     )
     fig, ax1 = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax1.plot(freqs_thz, p_l, lw=0.8, color="tab:blue")
-    ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax1.set_ylabel(r"$p(L)$", color="tab:blue")
+    ax1.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax1.set_ylabel(r"$\mathnormal{p(L)}$", color="tab:blue", fontsize=AXIS_LABEL_SIZE)
     ax2 = ax1.twinx()
     ax2.plot(freqs_thz, poly_sum, lw=0.8, color="tab:orange")
-    ax2.set_ylabel(r"$\\sum a_n a_k/(n+k+1)$", color="tab:orange")
+    ax2.set_ylabel(
+        r"$\mathnormal{\sum a_n a_k/(n+k+1)}$",
+        color="tab:orange",
+        fontsize=AXIS_LABEL_SIZE,
+    )
     ax1.grid(False)
-    fig.tight_layout()
-    fig.savefig(out_dir / "pcfm_terms.pdf", dpi=300)
+    _save_figure(fig, out_dir / "pcfm_terms.pdf", dpi=300)
     lg.success(f"Saved PCFM terms plot to {out_dir / 'pcfm_terms.pdf'}")
     plt.close(fig)
 
@@ -523,13 +610,12 @@ def plot_pcfm_diagnostics(
             color="tab:red",
             label="pumps",
         )
-    ax.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax.set_ylabel(r"$P\;[\mathrm{dBm}]$")
+    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"$\mathnormal{P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
-    ax.legend(loc="best", fontsize=7)
-    fig.tight_layout()
-    fig.savefig(out_dir / "launch_spectrum.pdf", dpi=300)
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
+    _save_figure(fig, out_dir / "launch_spectrum.pdf", dpi=300)
     lg.success(f"Saved launch spectrum plot to {out_dir / 'launch_spectrum.pdf'}")
     plt.close(fig)
 
@@ -538,13 +624,20 @@ def plot_pcfm_diagnostics(
     aeff = np.array([system.fiber.effective_area_at(float(w)) for w in wl], dtype=float)
     fig, ax1 = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax1.plot(freqs_thz, beta2 * 1e24, lw=0.8, color="tab:blue")
-    ax1.set_xlabel(r"$f \; [\mathrm{THz}]$")
-    ax1.set_ylabel(r"$\\beta_2\\;[10^{-24}\\,s^2/m]$", color="tab:blue")
+    ax1.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax1.set_ylabel(
+        r"$\mathnormal{\beta_2\;[10^{-24}\,s^2/m]}$",
+        color="tab:blue",
+        fontsize=AXIS_LABEL_SIZE,
+    )
     ax2 = ax1.twinx()
     ax2.plot(freqs_thz, aeff * 1e12, lw=0.8, color="tab:orange")
-    ax2.set_ylabel(r"$A_{eff}\\;[\\mu m^2]$", color="tab:orange")
+    ax2.set_ylabel(
+        r"$\mathnormal{A_{eff}\;[\mu m^2]}$",
+        color="tab:orange",
+        fontsize=AXIS_LABEL_SIZE,
+    )
     ax1.grid(False)
-    fig.tight_layout()
-    fig.savefig(out_dir / "fiber_params.pdf", dpi=300)
+    _save_figure(fig, out_dir / "fiber_params.pdf", dpi=300)
     lg.success(f"Saved fiber parameters plot to {out_dir / 'fiber_params.pdf'}")
     plt.close(fig)

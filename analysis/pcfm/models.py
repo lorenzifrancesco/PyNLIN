@@ -82,6 +82,9 @@ def _load_or_compute_flat_analytic_xci(
     launch_powers_w: np.ndarray,
     output_path: Path,
     *,
+    profile_path: Path | str | None = None,
+    degree: int = 9,
+    lumped_losses: list[tuple[float, float]] | None = None,
     xci_model: str,
     recompute: bool = False,
 ) -> np.ndarray:
@@ -91,12 +94,19 @@ def _load_or_compute_flat_analytic_xci(
         return np.load(output_path)
 
     lg.info(f"Computing flat analytic XCI (model={xci_model})")
+    if xci_model == "eq18":
+        lg.warning("Eq. 18 flat analytic XCI requested.")
+        lg.warning("This path evaluates the special-function kernel for all channels.")
+        lg.warning("Use cached results when possible; recomputation is still heavier than closed-form XCI.")
     values = np.array(
         [
             flat_profile_pcfm_xci_channel_power(
                 system,
                 channel_idx=idx,
                 launch_powers_w=launch_powers_w,
+                profile_path=str(profile_path) if profile_path is not None else None,
+                degree=int(degree),
+                lumped_losses=lumped_losses,
                 xci_model=xci_model,
             )
             for idx in range(system.wdm.frequency_grid().size)
