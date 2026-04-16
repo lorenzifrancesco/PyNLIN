@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from analysis.pcfm.analytics import _g_kernel as _g_kernel_fast
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _write_flat_profile
 from pynlin.nlin.cache_names import s2a_lo_timeint_path, s2b_lo_extrema_path
@@ -56,17 +57,24 @@ DEFAULT_SYSTEM_CONFIG_PATH = REPO_ROOT / "input" / "pcfm_struct.toml"
 DEFAULT_MPLRC_PATH = Path.home() / ".config" / "matplotlib" / "matplotlibrc"
 DPI = 300
 CONFIG_SECTION = "analytical_n_vs_kxci"
-LINE_LW = 0.75
-GNUPLOT_RED = "#A00000"
-GNUPLOT_GREEN = "#00A000"
-GNUPLOT_BLUE = "#5060D0"
-GNUPLOT_ORANGE = "#B06000"
+LINE_LW = 1.25
+AXIS_LABEL_SIZE = 9.5
+LEGEND_SIZE = 8.5
+GNUPLOT_RED = "#E00000"
+GNUPLOT_GREEN = "#00C000"
+GNUPLOT_BLUE = "#5060F0"
+GNUPLOT_ORANGE = "#B0B000"
 GNUPLOT_GRAY = "#606060"
 
 COLOR_N = GNUPLOT_RED
 COLOR_N_REFERENCE = GNUPLOT_GRAY
 COLOR_KXCI = GNUPLOT_GREEN
 COLOR_KXCI_EQ18 = GNUPLOT_BLUE
+COLOR_PRE_UNITY_SHADE = "#F0F0F0"
+DEFAULT_LLD_SWEEP_X = 1.0
+DEFAULT_LLD_SWEEP_MIN = 1e-2
+DEFAULT_LLD_SWEEP_MAX = 20.0
+DEFAULT_LLD_SWEEP_NPTS = 400
 
 
 def _configure_matplotlib() -> None:
@@ -76,6 +84,8 @@ def _configure_matplotlib() -> None:
     if DEFAULT_MPLRC_PATH.exists():
         matplotlib.rc_file(str(DEFAULT_MPLRC_PATH))
     plt.rcParams["lines.linewidth"] = LINE_LW
+    plt.rcParams["xtick.labelsize"] = 8
+    plt.rcParams["ytick.labelsize"] = 8
 
 
 def n_eq18(x: np.ndarray, lam: float, l_over_leff: float, eta: float) -> np.ndarray:
@@ -97,9 +107,12 @@ def n_softplus_scaled(
 def k_xci(x: np.ndarray, leff_over_l: float) -> np.ndarray:
     """Closed-form XCI kernel over the non-overlapping region x > 1/2."""
     out = np.full_like(x, np.nan, dtype=float)
+    x = np.asarray(x, dtype=float)
+    leff_over_l = np.asarray(leff_over_l, dtype=float)
     mask = x > 0.5
     if np.any(mask):
-        out[mask] = (float(leff_over_l) / (2.0 * np.pi)) * np.abs(
+        scale = np.broadcast_to(leff_over_l, x.shape)
+        out[mask] = (scale[mask] / (2.0 * np.pi)) * np.abs(
             np.log((x[mask] + 0.5) / (x[mask] - 0.5))
         )
     return out
@@ -136,17 +149,20 @@ def _g_kernel(z: np.ndarray) -> np.ndarray:
 
 def k_xci_eq18_normalized(x: np.ndarray, l_over_leff: float) -> np.ndarray:
     """Notebook Eq. (18) flat-Raman kernel in normalized variables."""
-    if l_over_leff <= 0.0:
+    x = np.asarray(x, dtype=float)
+    l_over_leff = np.asarray(l_over_leff, dtype=float)
+    if np.any(l_over_leff <= 0.0):
         raise ValueError("L/Leff must be strictly positive.")
     out = np.full_like(x, np.nan, dtype=float)
     # mask = x > 0.5
     mask = np.ones_like(x, dtype=bool)# FIXME
     if not np.any(mask):
         return out
-    z_plus = np.pi * l_over_leff * (x[mask] + 0.5)
-    z_minus = np.pi * l_over_leff * (x[mask] - 0.5)
+    scale = np.broadcast_to(l_over_leff, x.shape)
+    z_plus = np.pi * scale[mask] * (x[mask] + 0.5)
+    z_minus = np.pi * scale[mask] * (x[mask] - 0.5)
     out[mask] = (
-        (2.0 / (np.pi * l_over_leff)) * (_g_kernel(z_plus) - _g_kernel(z_minus))
+        (2.0 / (np.pi * scale[mask])) * (_g_kernel_fast(z_plus) - _g_kernel_fast(z_minus))
     ) / (2.0 * np.pi)
     return out
 
@@ -221,25 +237,24 @@ def _plot_pcfm_style_line(
 
     x_f = x[finite]
     y_f = y[finite]
+    ax.plot(x_f, y_f, color=color, lw=LINE_LW, ls=linestyle, label=label)
 
-    if x_f[0] >= 1.0:
-        ax.plot(x_f, y_f, color=color, lw=LINE_LW, ls=linestyle, label=label)
+
+def _shade_pre_unity_region(ax: plt.Axes, x: np.ndarray) -> None:
+    x = np.asarray(x, dtype=float)
+    finite = np.isfinite(x)
+    if not np.any(finite):
         return
-    if x_f[-1] <= 1.0:
-        ax.plot(x_f, y_f, color=color, lw=LINE_LW, ls="--", label=label)
+    x_min = float(np.min(x[finite]))
+    if x_min >= 1.0:
         return
-
-    y_split = float(np.interp(1.0, x_f, y_f))
-    left_mask = x_f < 1.0
-    right_mask = x_f > 1.0
-
-    x_left = np.concatenate([x_f[left_mask], np.array([1.0])])
-    y_left = np.concatenate([y_f[left_mask], np.array([y_split])])
-    x_right = np.concatenate([np.array([1.0]), x_f[right_mask]])
-    y_right = np.concatenate([np.array([y_split]), y_f[right_mask]])
-
-    ax.plot(x_left, y_left, color=color, lw=LINE_LW, ls="--", label=label)
-    ax.plot(x_right, y_right, color=color, lw=LINE_LW, ls=linestyle)
+    ax.axvspan(
+        x_min,
+        1.0,
+        facecolor=COLOR_PRE_UNITY_SHADE,
+        alpha=0.5,
+        zorder=-10,
+    )
 
 
 def _add_reference_y_ticks(ax: plt.Axes) -> tuple[float, float]:
@@ -286,6 +301,7 @@ def _comparison_figure(
     n_reference_label: str | None,
 ) -> tuple[plt.Figure, float | None]:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
+    _shade_pre_unity_region(ax, x)
     _plot_pcfm_style_line(ax, x, y_n, color=COLOR_N, label=n_label)
     if y_n_reference is not None and n_reference_label is not None:
         _plot_pcfm_style_line(
@@ -301,6 +317,7 @@ def _comparison_figure(
         x,
         y_k,
         color=COLOR_KXCI,
+        linestyle="--",
         label=r"$\mathnormal K_{\mathrm{XCI}}(x)\,T^2L^{-2}$",
     )
     if show_kxci_alternative:
@@ -309,6 +326,7 @@ def _comparison_figure(
             x,
             y_k_eq18,
             color=COLOR_KXCI_EQ18,
+            linestyle="-.",
             label=r"$\mathnormal K_{\mathrm{XCI}}^{\mathrm{Eq.18}}(x)\,T^2L^{-2}$",
         )
     ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
@@ -329,11 +347,12 @@ def _comparison_figure(
 
     _add_reference_y_ticks(ax)
 
-    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$")
-    ax.set_ylabel("Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$")
-    ax.legend(loc="best", 
-            #   fontsize=7
-              )
+    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(
+        "Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$",
+        fontsize=AXIS_LABEL_SIZE,
+    )
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
 
     crossover = None
     if show_crossover:
@@ -367,23 +386,72 @@ def _ratio_figure(
     crossover: float | None,
 ) -> plt.Figure:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
-    _plot_pcfm_style_line(ax, x, ratio, color=COLOR_KXCI, label=r"$\mathnormal{ K_{\mathrm{XCI}}/\mathcal{N}}$")
+    _shade_pre_unity_region(ax, x)
+    _plot_pcfm_style_line(
+        ax,
+        x,
+        ratio,
+        color=COLOR_KXCI,
+        linestyle="--",
+        label=r"$\mathnormal{ K_{\mathrm{XCI}}/\mathcal{N}}$",
+    )
     if ratio_eq18 is not None:
         _plot_pcfm_style_line(
             ax,
             x,
             ratio_eq18,
             color=COLOR_KXCI_EQ18,
+            linestyle="-.",
             label=r"$K_{\mathrm{XCI}}^{\mathrm{Eq.18}}/\mathcal{N}$",
         )
     if crossover is not None and np.isfinite(crossover):
         ax.axvline(crossover, color="0.35", linestyle="--", linewidth=LINE_LW)
     _style_axes(ax, loglog=loglog)
-    ax.set_xlabel(r"$\Delta f / B$")
-    ax.set_ylabel(r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$")
-    ax.legend(loc="best", 
-            #   fontsize=7
-              )
+    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(
+        r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$",
+        fontsize=AXIS_LABEL_SIZE,
+    )
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
+    fig.tight_layout()
+    return fig
+
+
+def _lld_sweep_figure(
+    l_over_ld: np.ndarray,
+    y_n: np.ndarray,
+    y_k: np.ndarray,
+    *,
+    y_k_eq18: np.ndarray,
+    x_fixed: float,
+    loglog: bool,
+    n_label: str,
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
+    _plot_pcfm_style_line(ax, l_over_ld, y_n * 1.0, color=COLOR_N, label=n_label) # FIXME manual rescaling
+    _plot_pcfm_style_line(
+        ax,
+        l_over_ld,
+        y_k,
+        color=COLOR_KXCI,
+        linestyle="--",
+        label=rf"$\mathnormal K_{{\mathrm{{XCI}}}}(x={x_fixed:g})\,T^2L^{{-2}}$",
+    )
+    _plot_pcfm_style_line(
+        ax,
+        l_over_ld,
+        y_k_eq18,
+        color=COLOR_KXCI_EQ18,
+        linestyle="-.",
+        label=rf"$\mathnormal K_{{\mathrm{{XCI}}}}^{{\mathrm{{Eq.18}}}}(x={x_fixed:g})\,T^2L^{{-2}}$",
+    )
+    ax.set_xscale("log")
+    if loglog:
+        ax.set_yscale("log")
+    ax.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"$\mathnormal{T^2L^{-2}}$", fontsize=AXIS_LABEL_SIZE)
+    ax.grid(False)
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
     fig.tight_layout()
     return fig
 
@@ -398,22 +466,28 @@ def _combined_comparison_figure(
 ) -> plt.Figure:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.9))
     arrays: list[np.ndarray | float] = []
+    _shade_pre_unity_region(ax, x)
 
-    for case in cases:
-        tag = case["case_label"]
+    for idx, case in enumerate(cases):
+        label_n = r"$\mathcal{N}$" if idx == 0 else "_nolegend_"
+        label_k = r"$K_{\mathrm{XCI}}$" if idx == 0 else "_nolegend_"
+        label_k_eq18 = (
+            r"$K_{\mathrm{XCI}}^{\mathrm{Eq.18}}$" if idx == 0 else "_nolegend_"
+        )
         _plot_pcfm_style_line(
             ax,
             x,
             case["y_n"],
             color=COLOR_N,
-            label=rf"$\mathcal{{N}}$, {tag}",
+            label=label_n,
         )
-        _plot_pcfm_style_line( # FIXME
+        _plot_pcfm_style_line(
             ax,
             x,
             case["y_k"],
             color=COLOR_KXCI,
-            label=rf"$K_{{\mathrm{{XCI}}}}$, {tag}",
+            linestyle="--",
+            label=label_k,
         )
         arrays.extend([case["y_n"], case["y_k"]])
         if show_kxci_alternative:
@@ -422,7 +496,8 @@ def _combined_comparison_figure(
                 x,
                 case["y_k_eq18"],
                 color=COLOR_KXCI_EQ18,
-                label=rf"$K_{{\mathrm{{XCI}}}}^{{\mathrm{{Eq.18}}}}$, {tag}",
+                linestyle="-.",
+                label=label_k_eq18,
             )
             arrays.append(case["y_k_eq18"])
 
@@ -434,9 +509,12 @@ def _combined_comparison_figure(
         pad = 0.06 * (ymax - ymin) if ymax > ymin else 0.1
         ax.set_ylim(ymin - pad, ymax + pad)
 
-    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$")
-    ax.set_ylabel("Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$")
-    ax.legend(loc="best")
+    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(
+        "Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$",
+        fontsize=AXIS_LABEL_SIZE,
+    )
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
     fig.tight_layout()
     return fig
 
@@ -448,6 +526,7 @@ def _combined_ratio_figure(
     loglog: bool,
 ) -> plt.Figure:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.5))
+    _shade_pre_unity_region(ax, x)
 
     for case in cases:
         _plot_pcfm_style_line(
@@ -455,6 +534,7 @@ def _combined_ratio_figure(
             x,
             case["ratio"],
             color=COLOR_KXCI,
+            linestyle="--",
             label=rf"$K_{{\mathrm{{XCI}}}}/\mathcal{{N}}$, {case['case_label']}",
         )
         crossover = case["crossover"]
@@ -462,9 +542,12 @@ def _combined_ratio_figure(
             ax.axvline(crossover, color=COLOR_N_REFERENCE, linestyle="--", linewidth=LINE_LW)
 
     _style_axes(ax, loglog=loglog)
-    ax.set_xlabel(r"$\Delta f / B$")
-    ax.set_ylabel(r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$")
-    ax.legend(loc="best")
+    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(
+        r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$",
+        fontsize=AXIS_LABEL_SIZE,
+    )
+    ax.legend(loc="best", fontsize=LEGEND_SIZE)
     fig.tight_layout()
     return fig
 
@@ -557,6 +640,7 @@ def _prepare_flat_td_corrections(
     )
     rmax_lookup, rmin_lookup = build_lookup_integral_table_with_raman(
         system,
+        m_lo_truncation=m_lo_truncation,
         ipulse=ipulse,
         recompute=recompute,
         profile_path=profile_path,
@@ -601,25 +685,28 @@ def _prepare_flat_td_corrections(
 def _td_corrected_softplus_params_flat(
     l_over_ld: float,
     td_ctx: dict[str, Any],
+    *,
+    verbose: bool = True,
 ) -> tuple[float, float, float]:
     lo_value = float(td_ctx["rmin_lookup"](float(l_over_ld), float(l_over_ld)))
     ps_ideal = tuple(float(v) for v in td_ctx["ps_ideal"])
     ps_corrected = tuple(float(v) for v in apply_plateau_correction(ps_ideal, lo_value))
-    lg.info(
-        "TD flat-profile correction from cache {} at L/LD={:.6g}: "
-        "using rmin_lookup(L/LD,L/LD)={:.6e}; ideal (a,Lambda,eta)=({:.6e},{:.6e},{:.6e}) "
-        "-> corrected (a,Lambda,eta)=({:.6e},{:.6e},{:.6e})".format(
-            td_ctx["s2b_cache"],
-            float(l_over_ld),
-            lo_value,
-            ps_ideal[0],
-            ps_ideal[1],
-            ps_ideal[2],
-            ps_corrected[0],
-            ps_corrected[1],
-            ps_corrected[2],
+    if verbose:
+        lg.info(
+            "TD flat-profile correction from cache {} at L/LD={:.6g}: "
+            "using rmin_lookup(L/LD,L/LD)={:.6e}; ideal (a,Lambda,eta)=({:.6e},{:.6e},{:.6e}) "
+            "-> corrected (a,Lambda,eta)=({:.6e},{:.6e},{:.6e})".format(
+                td_ctx["s2b_cache"],
+                float(l_over_ld),
+                lo_value,
+                ps_ideal[0],
+                ps_ideal[1],
+                ps_ideal[2],
+                ps_corrected[0],
+                ps_corrected[1],
+                ps_corrected[2],
+            )
         )
-    )
     return ps_corrected
 
 
@@ -688,6 +775,8 @@ def _config_key_map() -> dict[str, str]:
         "flat_profile": "flat_profile",
         "flat-profile": "flat_profile",
         "ipulse": "ipulse",
+        "m_lo_truncation": "m_lo_truncation",
+        "m-lo-truncation": "m_lo_truncation",
     }
 
 
@@ -841,6 +930,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Pulse selector for the TD ideal fit and lookup caches: 0=Gaussian, 1=Nyquist.",
     )
+    parser.add_argument(
+        "--m-lo-truncation",
+        type=int,
+        default=2,
+        help="Highest m_lo order included when building/loading TD correction lookups.",
+    )
     return parser
 
 
@@ -860,6 +955,8 @@ def main() -> None:
 
     if args.lam <= 0.0 or args.l_over_leff <= 0.0 or args.eta <= 0.0:
         raise ValueError("lambda, L/Leff, and eta must be strictly positive.")
+    if int(args.m_lo_truncation) < 0:
+        raise ValueError("m_lo_truncation must be non-negative.")
     l_over_leff_values = _as_float_list(args.l_over_leff_values) or [float(args.l_over_leff)]
     if any(value <= 0.0 for value in l_over_leff_values):
         raise ValueError("All L/Leff values must be strictly positive.")
@@ -885,9 +982,18 @@ def main() -> None:
             profile_path=Path(profile_path),
             ipulse=int(args.ipulse),
             recompute=bool(args.recompute_corrections),
-            max_l_over_ld=max(l_over_leff_values),
+            max_l_over_ld=max(max(l_over_leff_values), DEFAULT_LLD_SWEEP_MAX),
             eta_override=float(args.eta),
+            m_lo_truncation=int(args.m_lo_truncation),
         )
+        lld_target = 1e1
+        ps_lld_target = _td_corrected_softplus_params_flat(
+            float(lld_target),
+            td_ctx,
+            verbose=False,
+        )
+        td_ctx["lld_target"] = float(lld_target)
+        td_ctx["ps_lld_target"] = tuple(float(v) for v in ps_lld_target)
 
     suffixes = [".pdf", ".png"] if args.format == "both" else [f".{args.format}"]
     multi_case = len(l_over_leff_values) > 1
@@ -998,7 +1104,7 @@ def main() -> None:
         case_results.append(
             {
                 "l_over_leff": float(l_over_leff),
-                "case_label": rf"$L/L_D={l_over_leff:g}$",
+                "case_label": rf"$L/L_D$",#={l_over_leff:g}$",
                 "y_n": np.asarray(y_n, dtype=float).copy(),
                 "y_k": np.asarray(y_k, dtype=float).copy(),
                 "y_k_eq18": np.asarray(y_k_eq18, dtype=float).copy(),
@@ -1030,6 +1136,113 @@ def main() -> None:
             for suffix in suffixes:
                 _save_figure(fig_combined_ratio, args.out_dir / f"{args.stem}_combined_ratio{suffix}")
             plt.close(fig_combined_ratio)
+
+    lld_sweep = np.geomspace(
+        DEFAULT_LLD_SWEEP_MIN,
+        DEFAULT_LLD_SWEEP_MAX,
+        DEFAULT_LLD_SWEEP_NPTS,
+    )
+    x_fixed_grid = np.full_like(lld_sweep, DEFAULT_LLD_SWEEP_X)
+    if td_ctx is not None:
+        y_n_lld = np.array(
+            [
+                n_softplus_scaled(
+                    np.array([DEFAULT_LLD_SWEEP_X], dtype=float),
+                    l_over_ld=float(value),
+                    ps=_td_corrected_softplus_params_flat(float(value), td_ctx, verbose=False),
+                )[0]
+                for value in lld_sweep
+            ],
+            dtype=float,
+        )
+        n_lld_label = (
+            rf"$\mathnormal \mathcal{{N}}_{{\mathrm{{TD,corr}}}}(x={DEFAULT_LLD_SWEEP_X:g})\,T^2L^{{-2}}$"
+        )
+    else:
+        y_n_lld = n_eq18(
+            x_fixed_grid,
+            lam=args.lam,
+            l_over_leff=lld_sweep,
+            eta=args.eta,
+        )
+        n_lld_label = rf"$\mathnormal \mathcal{{N}}(x={DEFAULT_LLD_SWEEP_X:g})\,T^2L^{{-2}}$"
+    y_k_lld = k_xci(x_fixed_grid, leff_over_l=1.0 / lld_sweep)
+    y_k_eq18_lld = k_xci_eq18_normalized(x_fixed_grid, l_over_leff=lld_sweep)
+
+    final_idx = -1
+    final_lld = float(lld_sweep[final_idx])
+    final_x = float(DEFAULT_LLD_SWEEP_X)
+    final_n = float(y_n_lld[final_idx])
+    final_k = float(y_k_lld[final_idx])
+    final_k_eq18 = float(y_k_eq18_lld[final_idx])
+    final_ratio = float(final_k / final_n) if np.isfinite(final_n) and abs(final_n) > 1e-14 else float("nan")
+    final_ratio_eq18 = (
+        float(final_k_eq18 / final_n)
+        if np.isfinite(final_n) and abs(final_n) > 1e-14 and np.isfinite(final_k_eq18)
+        else float("nan")
+    )
+
+    table_rows: list[tuple[str, float]] = [
+        ("N(x=1)", final_n),
+        ("K_XCI(x=1)", final_k),
+        ("K_XCI_Eq18(x=1)", final_k_eq18),
+        ("K_XCI/N", final_ratio),
+        ("K_XCI_Eq18/N", final_ratio_eq18),
+    ]
+
+    if td_ctx is not None:
+        final_n_eq18 = float(
+            n_eq18(
+                np.array([final_x], dtype=float),
+                lam=args.lam,
+                l_over_leff=final_lld,
+                eta=args.eta,
+            )[0]
+        )
+        table_rows.insert(1, ("N_Eq18(x=1)", final_n_eq18))
+
+        ps_lld_target = tuple(float(v) for v in td_ctx["ps_lld_target"])
+        n0_lambda_lld_target = float(ps_lld_target[0] * ps_lld_target[1])
+        table_rows.extend(
+            [
+                ("a", ps_lld_target[0]),
+                ("Lambda", ps_lld_target[1]),
+                ("eta", ps_lld_target[2]),
+                ("a*Lambda", n0_lambda_lld_target),
+            ]
+        )
+
+    name_width = max(len(name) for name, _ in table_rows)
+    value_col = "Value"
+    header = f"{'Line/parameter':<{name_width}}  {value_col}"
+    separator = f"{'-' * name_width}  {'-' * len(value_col)}"
+    body = "\n".join(
+        f"{name:<{name_width}}  {value:.12e}" if np.isfinite(value) else f"{name:<{name_width}}  nan"
+        for name, value in table_rows
+    )
+    lg.info(
+        "Final values table at x={:.6g}, L/LD={:.6g}:\n{}\n{}\n{}".format(
+            final_x,
+            final_lld,
+            header,
+            separator,
+            body,
+        )
+    )
+
+    fig_lld = _lld_sweep_figure(
+        lld_sweep,
+        y_n_lld,
+        y_k_lld,
+        y_k_eq18=y_k_eq18_lld,
+        x_fixed=DEFAULT_LLD_SWEEP_X,
+        loglog=args.loglog,
+        n_label=n_lld_label,
+    )
+    for suffix in suffixes:
+        _save_figure(fig_lld, args.out_dir / f"{args.stem}_x1_vs_lld{suffix}")
+    plt.close(fig_lld)
+
     if td_ctx is not None:
         print(f"TD lookup system: {args.system_config}")
         print(f"TD flat profile: {td_ctx['profile_path']}")
