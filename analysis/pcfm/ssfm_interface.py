@@ -149,20 +149,17 @@ def _build_ssfm_runtime_config(
     wdm["n_channels"] = 5
     spacing = float(system.channel_spacing) if system.channel_spacing is not None else float(np.mean(np.diff(system.wdm.frequency_grid())))
     wdm["channel_spacing_thz"] = float(spacing * 1e-12)
-    
-    # Apply power scaling for SSFM convention:
-    # Input launch_channel_w is power per channel (single polarization)
-    # Multiply by 2 to convert to power per channel for dual-polarization (both polarizations combined)
-    power_scaled_up = float(launch_channel_w) * 2.0
+
+    power_single_pol_w = float(launch_channel_w)
+    power_dual_pol_w = power_single_pol_w * 2.0
     lg.warning(
-        "SSFM power scaling: input power_per_channel_w={:.6e} W (single polarization) × 2 = {:.6e} W (dual-polarization combined)",
-        float(launch_channel_w),
-        power_scaled_up,
+        "SSFM power conversion: single-pol {:.6e} W -> dual-pol {:.6e} W",
+        power_single_pol_w,
+        power_dual_pol_w,
     )
-    
-    # Preserve power_per_channel_w from template if available; otherwise use scaled launch_channel_w
+
     if "power_per_channel_w" not in wdm:
-        wdm["power_per_channel_w"] = power_scaled_up
+        wdm["power_per_channel_w"] = power_dual_pol_w
 
     mod["samples_per_symbol"] = _compute_min_samples_per_symbol_for_nyquist(
         symbol_rate_gbd=float(mod["symbol_rate_gbd"]),
@@ -177,17 +174,16 @@ def _build_ssfm_runtime_config(
     fiber = cfg.setdefault("fiber", {})
     fiber["wavelength_nm"] = float((c0 / center_freq) * 1e9)
     fiber["fiber_length_m"] = float(system.fiber_length)
-    
-    # Apply gamma scaling: multiply by 8/9 (convert from single-polarization to dual-polarization convention)
+
     gamma_raw = float(getattr(system.fiber, "gamma", 1.3e-3))
     gamma_scaled = gamma_raw * (8.0 / 9.0)
     fiber["nonlinearity"] = gamma_scaled
     lg.warning(
-        "SSFM gamma scaling: PyNLIN gamma={:.6e} W⁻¹m⁻¹ × (8/9) = {:.6e} W⁻¹m⁻¹ (dual-polarization convention)",
+        "SSFM gamma conversion: single-pol {:.6e} -> dual-pol {:.6e} W⁻¹m⁻¹",
         gamma_raw,
         gamma_scaled,
     )
-    
+
     fiber["loss_db_per_m"] = 0.0
     fiber["betas"] = [float(_safe_beta2_ps2_per_m(system, channel_idx))]
 
@@ -218,17 +214,16 @@ def _extract_ssfm_center_nli_w(payload: dict) -> float | None:
         value = payload["power_report"]["center_channel"]["nli_power_avg_w"]
         if value is None:
             return None
-        out = float(value)
-        if not np.isfinite(out):
+        out_dual_pol = float(value)
+        if not np.isfinite(out_dual_pol):
             return None
-        # Divide by 2 to convert from dual-polarization (both) back to single polarization
-        out_scaled = out / 2.0
+        out_single_pol = out_dual_pol / 2.0
         lg.warning(
-            "SSFM output power scaling: SSFM nli_power={:.6e} W (dual-polarization combined) / 2 = {:.6e} W (single polarization)",
-            out,
-            out_scaled,
+            "SSFM output conversion: dual-pol {:.6e} W -> single-pol {:.6e} W",
+            out_dual_pol,
+            out_single_pol,
         )
-        return out_scaled
+        return out_single_pol
     except Exception:
         return None
 
