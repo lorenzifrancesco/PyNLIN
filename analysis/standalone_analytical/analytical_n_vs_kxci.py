@@ -60,9 +60,9 @@ CONFIG_SECTION = "analytical_n_vs_kxci"
 LINE_LW = 1.25
 AXIS_LABEL_SIZE = 9.5
 LEGEND_SIZE = 8.5
-GNUPLOT_RED = "#E00000"
-GNUPLOT_GREEN = "#00C000"
-GNUPLOT_BLUE = "#5060F0"
+GNUPLOT_RED = "#e00000ff"
+GNUPLOT_GREEN = "#00a500ff"
+GNUPLOT_BLUE = "#0c22f0ff"
 GNUPLOT_ORANGE = "#B0B000"
 GNUPLOT_GRAY = "#606060"
 
@@ -299,9 +299,11 @@ def _comparison_figure(
     show_kxci_alternative: bool,
     n_label: str,
     n_reference_label: str | None,
+    show_unity_guides: bool = True,
 ) -> tuple[plt.Figure, float | None]:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
-    _shade_pre_unity_region(ax, x)
+    if show_unity_guides:
+        _shade_pre_unity_region(ax, x)
     _plot_pcfm_style_line(ax, x, y_n, color=COLOR_N, label=n_label)
     if y_n_reference is not None and n_reference_label is not None:
         _plot_pcfm_style_line(
@@ -318,7 +320,7 @@ def _comparison_figure(
         y_k,
         color=COLOR_KXCI,
         linestyle="--",
-        label=r"$\mathnormal K_{\mathrm{XCI}}(x)\,T^2L^{-2}$",
+        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$",
     )
     if show_kxci_alternative:
         _plot_pcfm_style_line(
@@ -327,9 +329,10 @@ def _comparison_figure(
             y_k_eq18,
             color=COLOR_KXCI_EQ18,
             linestyle="-.",
-            label=r"$\mathnormal K_{\mathrm{XCI}}^{\mathrm{Eq.18}}(x)\,T^2L^{-2}$",
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$",
         )
-    ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
+    if show_unity_guides:
+        ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
 
     y_ln3 = float(np.log(3.0))
     y_four_ninths = 4.0 / 9.0
@@ -349,7 +352,7 @@ def _comparison_figure(
 
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        "Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$",
+        r"$\mathcal{N}$ (normalized)" if normalize else r"$\mathcal{N}\,\mathnormal{T^2L^{-2}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -377,6 +380,22 @@ def _comparison_figure(
     return fig, crossover
 
 
+def _slice_from_unity(
+    x: np.ndarray,
+    y_n: np.ndarray,
+    y_k: np.ndarray,
+    y_k_eq18: np.ndarray,
+    y_n_reference: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    mask = np.isfinite(x) & (x >= 1.0)
+    x_sel = np.asarray(x, dtype=float)[mask]
+    y_n_sel = np.asarray(y_n, dtype=float)[mask]
+    y_k_sel = np.asarray(y_k, dtype=float)[mask]
+    y_k_eq18_sel = np.asarray(y_k_eq18, dtype=float)[mask]
+    y_n_reference_sel = None if y_n_reference is None else np.asarray(y_n_reference, dtype=float)[mask]
+    return x_sel, y_n_sel, y_k_sel, y_k_eq18_sel, y_n_reference_sel
+
+
 def _ratio_figure(
     x: np.ndarray,
     ratio: np.ndarray,
@@ -393,7 +412,7 @@ def _ratio_figure(
         ratio,
         color=COLOR_KXCI,
         linestyle="--",
-        label=r"$\mathnormal{ K_{\mathrm{XCI}}/\mathcal{N}}$",
+        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$",
     )
     if ratio_eq18 is not None:
         _plot_pcfm_style_line(
@@ -402,14 +421,14 @@ def _ratio_figure(
             ratio_eq18,
             color=COLOR_KXCI_EQ18,
             linestyle="-.",
-            label=r"$K_{\mathrm{XCI}}^{\mathrm{Eq.18}}/\mathcal{N}$",
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$",
         )
     if crossover is not None and np.isfinite(crossover):
         ax.axvline(crossover, color="0.35", linestyle="--", linewidth=LINE_LW)
     _style_axes(ax, loglog=loglog)
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$",
+        r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM})}/\mathcal{N}^{(\mathrm{TD})}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -435,7 +454,7 @@ def _lld_sweep_figure(
         y_k,
         color=COLOR_KXCI,
         linestyle="--",
-        label=rf"$\mathnormal K_{{\mathrm{{XCI}}}}(x={x_fixed:g})\,T^2L^{{-2}}$",
+        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$",
     )
     _plot_pcfm_style_line(
         ax,
@@ -443,13 +462,13 @@ def _lld_sweep_figure(
         y_k_eq18,
         color=COLOR_KXCI_EQ18,
         linestyle="-.",
-        label=rf"$\mathnormal K_{{\mathrm{{XCI}}}}^{{\mathrm{{Eq.18}}}}(x={x_fixed:g})\,T^2L^{{-2}}$",
+        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$",
     )
     ax.set_xscale("log")
     if loglog:
         ax.set_yscale("log")
     ax.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
-    ax.set_ylabel(r"$\mathnormal{T^2L^{-2}}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"$\mathnormal{\mathcal{N}\,T^2L^{-2}}$", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
     fig.tight_layout()
@@ -463,16 +482,18 @@ def _combined_comparison_figure(
     loglog: bool,
     normalize: bool,
     show_kxci_alternative: bool,
+    show_unity_guides: bool = True,
 ) -> plt.Figure:
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.9))
     arrays: list[np.ndarray | float] = []
-    _shade_pre_unity_region(ax, x)
+    if show_unity_guides:
+        _shade_pre_unity_region(ax, x)
 
     for idx, case in enumerate(cases):
-        label_n = r"$\mathcal{N}$" if idx == 0 else "_nolegend_"
-        label_k = r"$K_{\mathrm{XCI}}$" if idx == 0 else "_nolegend_"
+        label_n = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$" if idx == 0 else "_nolegend_"
+        label_k = r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$" if idx == 0 else "_nolegend_"
         label_k_eq18 = (
-            r"$K_{\mathrm{XCI}}^{\mathrm{Eq.18}}$" if idx == 0 else "_nolegend_"
+            r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$" if idx == 0 else "_nolegend_"
         )
         _plot_pcfm_style_line(
             ax,
@@ -501,7 +522,8 @@ def _combined_comparison_figure(
             )
             arrays.append(case["y_k_eq18"])
 
-    ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
+    if show_unity_guides:
+        ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
     _style_axes(ax, loglog=loglog)
 
     if not loglog:
@@ -511,7 +533,7 @@ def _combined_comparison_figure(
 
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        "Normalized value" if normalize else r"$\mathnormal{T^2L^{-2}}$",
+        r"$\mathcal{N}$ (normalized)" if normalize else r"$\mathcal{N}\,\mathnormal{T^2L^{-2}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -535,7 +557,7 @@ def _combined_ratio_figure(
             case["ratio"],
             color=COLOR_KXCI,
             linestyle="--",
-            label=rf"$K_{{\mathrm{{XCI}}}}/\mathcal{{N}}$, {case['case_label']}",
+            label=rf"$\mathnormal{{\mathcal{{N}}^{{(\mathrm{{PCFM-I}})}}/\mathcal{{N}}^{{(\mathrm{{TD}})}}}}$, {case['case_label']}",
         )
         crossover = case["crossover"]
         if crossover is not None and np.isfinite(crossover):
@@ -544,7 +566,7 @@ def _combined_ratio_figure(
     _style_axes(ax, loglog=loglog)
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        r"$\mathnormal{K_{\mathrm{XCI}} / \mathcal{N}}$",
+        r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -1008,7 +1030,7 @@ def main() -> None:
 
         y_n = y_n_paper
         y_n_reference = None
-        n_label = r"$\mathnormal \mathcal{N}(x)\,T^2L^{-2}$"
+        n_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
         n_reference_label = None
         plateau_ideal = float("nan")
         lambda_ideal = float("nan")
@@ -1022,7 +1044,7 @@ def main() -> None:
             ps_corrected = _td_corrected_softplus_params_flat(l_over_leff, td_ctx)
             y_n = n_softplus_scaled(x, l_over_ld=l_over_leff, ps=ps_corrected)
             y_n_reference = y_n_paper
-            n_label = r"$\mathnormal \mathcal{N}_{\mathrm{TD,corr}}(x)\,T^2L^{-2}$"
+            n_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
             n_reference_label = r"$\mathnormal \mathcal{N}_{\mathrm{Eq.18}}(x)\,T^2L^{-2}$"
             plateau_ideal, lambda_ideal, eta_ideal = ps_ideal
             plateau_corrected, lambda_corrected, eta_corrected = ps_corrected
@@ -1057,6 +1079,34 @@ def main() -> None:
         for suffix in suffixes:
             _save_figure(fig_cmp, args.out_dir / f"{case_stem}{suffix}")
         plt.close(fig_cmp)
+
+        x_x1, y_n_x1, y_k_x1, y_k_eq18_x1, y_n_ref_x1 = _slice_from_unity(
+            x,
+            y_n,
+            y_k,
+            y_k_eq18,
+            y_n_reference,
+        )
+        if x_x1.size >= 2:
+            fig_cmp_x1, _ = _comparison_figure(
+                x_x1,
+                y_n_x1,
+                y_k_x1,
+                y_k_eq18=y_k_eq18_x1,
+                y_n_reference=y_n_ref_x1,
+                loglog=args.loglog,
+                normalize=args.normalize,
+                show_crossover=args.show_crossover,
+                show_kxci_alternative=args.show_kxci_alternative,
+                n_label=n_label,
+                n_reference_label=n_reference_label,
+                show_unity_guides=False,
+            )
+            for suffix in suffixes:
+                _save_figure(fig_cmp_x1, args.out_dir / f"{case_stem}_xge1{suffix}")
+            plt.close(fig_cmp_x1)
+        else:
+            lg.warning("Skipping x>=1 comparison plot for {}: not enough points in selected range.", case_stem)
 
         if args.show_ratio:
             ratio = safe_ratio(y_k, y_n)
@@ -1127,6 +1177,37 @@ def main() -> None:
             _save_figure(fig_combined, args.out_dir / f"{args.stem}_combined{suffix}")
         plt.close(fig_combined)
 
+        mask_xge1 = np.isfinite(x) & (x >= 1.0)
+        x_xge1 = np.asarray(x, dtype=float)[mask_xge1]
+        if x_xge1.size >= 2:
+            case_results_xge1: list[dict[str, Any]] = []
+            for case in case_results:
+                case_results_xge1.append(
+                    {
+                        "l_over_leff": case["l_over_leff"],
+                        "case_label": case["case_label"],
+                        "y_n": np.asarray(case["y_n"], dtype=float)[mask_xge1],
+                        "y_k": np.asarray(case["y_k"], dtype=float)[mask_xge1],
+                        "y_k_eq18": np.asarray(case["y_k_eq18"], dtype=float)[mask_xge1],
+                        "ratio": np.asarray(case["ratio"], dtype=float)[mask_xge1],
+                        "crossover": case["crossover"],
+                    }
+                )
+
+            fig_combined_xge1 = _combined_comparison_figure(
+                x_xge1,
+                case_results_xge1,
+                loglog=args.loglog,
+                normalize=args.normalize,
+                show_kxci_alternative=args.show_kxci_alternative,
+                show_unity_guides=False,
+            )
+            for suffix in suffixes:
+                _save_figure(fig_combined_xge1, args.out_dir / f"{args.stem}_combined_xge1{suffix}")
+            plt.close(fig_combined_xge1)
+        else:
+            lg.warning("Skipping combined x>=1 comparison plot: not enough points in selected range.")
+
         if args.show_ratio:
             fig_combined_ratio = _combined_ratio_figure(
                 x,
@@ -1155,9 +1236,7 @@ def main() -> None:
             ],
             dtype=float,
         )
-        n_lld_label = (
-            rf"$\mathnormal \mathcal{{N}}_{{\mathrm{{TD,corr}}}}(x={DEFAULT_LLD_SWEEP_X:g})\,T^2L^{{-2}}$"
-        )
+        n_lld_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
     else:
         y_n_lld = n_eq18(
             x_fixed_grid,
@@ -1165,7 +1244,7 @@ def main() -> None:
             l_over_leff=lld_sweep,
             eta=args.eta,
         )
-        n_lld_label = rf"$\mathnormal \mathcal{{N}}(x={DEFAULT_LLD_SWEEP_X:g})\,T^2L^{{-2}}$"
+        n_lld_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
     y_k_lld = k_xci(x_fixed_grid, leff_over_l=1.0 / lld_sweep)
     y_k_eq18_lld = k_xci_eq18_normalized(x_fixed_grid, l_over_leff=lld_sweep)
 
