@@ -26,7 +26,7 @@ from analysis.pcfm.config import (
 )
 from analysis.pcfm.analytics import flat_profile_pcfm_xci_channel_power
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
-from analysis.pcfm.io import _resolve_launch_powers, _write_flat_profile
+from analysis.pcfm.io import _end_over_launch_power_ratio, _resolve_launch_powers, _write_flat_profile
 from analysis.pcfm.models import _load_or_compute_pcfm
 from analysis.pcfm.ssfm_interface import compute_ssfm_center_nli, prepare_ssfm_runtime
 from analysis.pcfm.td import _td_modulation_components
@@ -326,6 +326,11 @@ def run_spacing_sweep(
         spacing_tag = f"S{_safe_tag(spacing_ghz)}GHz"
         profile_path = out_dir / f"flat_profile_{spacing_tag}.npy"
         _write_flat_profile(profile_path, system, launch_powers_w=launch_vec)
+        nlin_power_scale = _end_over_launch_power_ratio(
+            system=system,
+            profile_path=profile_path,
+            launch_powers_w=launch_vec,
+        )
 
         ccfs = collision_coeffs_system_uwb(
             system,
@@ -350,7 +355,7 @@ def run_spacing_sweep(
             cache_path=td_cache,
             recompute=recompute_td,
         )
-        td_vec = np.asarray(nlin_td, dtype=float).reshape(-1)
+        td_vec = np.asarray(nlin_td, dtype=float).reshape(-1) * nlin_power_scale
 
         const_pref, sum_a, sum_b = _td_modulation_components(
             system,
@@ -363,7 +368,7 @@ def run_spacing_sweep(
         td_gaussian_vec = np.asarray(
             const_pref * (gaussian_mu0() * sum_a + sum_b),
             dtype=float,
-        ).reshape(-1)
+        ).reshape(-1) * nlin_power_scale
 
         pcfm_cfg = PcfmConfig(
             degree=9,
@@ -382,9 +387,9 @@ def run_spacing_sweep(
             recompute=recompute_pcfm,
             return_components=True,
         )
-        pcfm_total = np.asarray(pcfm_total, dtype=float).reshape(-1)
-        pcfm_sci = np.asarray(pcfm_sci, dtype=float).reshape(-1)
-        pcfm_xci = np.asarray(pcfm_xci, dtype=float).reshape(-1)
+        pcfm_total = np.asarray(pcfm_total, dtype=float).reshape(-1) * nlin_power_scale
+        pcfm_sci = np.asarray(pcfm_sci, dtype=float).reshape(-1) * nlin_power_scale
+        pcfm_xci = np.asarray(pcfm_xci, dtype=float).reshape(-1) * nlin_power_scale
 
         row = {
             "channel_spacing_ghz": float(spacing_ghz),
@@ -401,7 +406,7 @@ def run_spacing_sweep(
         if pcfm_eq18_xci:
             row["pcfm_eq18_xci_channel_w"] = _center_channel_eq18_xci(
                 system, float(launch_vec[center_idx]), center_idx
-            )
+            ) * float(nlin_power_scale[center_idx])
         if ssfm_ctx is not None:
             try:
                 ssfm_val = compute_ssfm_center_nli(

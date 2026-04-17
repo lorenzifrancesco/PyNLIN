@@ -94,7 +94,7 @@ def _resolve_launch_powers(
         for name, slc in system.wdm._band_slices.items():
             spec = system.wdm.band_specs.get(name)
             power_dbm = spec.launch_power_dbm if spec else system.launch_power
-            launch[slc] = dBm2watt(power_dbm if power_dbm is not None else -5.0)
+            launch[slc] = dBm2watt(power_dbm if power_dbm is not None else -5.0) # FIXME do not use hardcoded default here.
         return launch
 
     power_dbm = system.launch_power if system.launch_power is not None else -5.0
@@ -115,6 +115,23 @@ def _resolve_signal_power(
         return np.asarray(launch_override, dtype=float).reshape(-1)
     power_dbm = system.launch_power if system.launch_power is not None else -5.0
     return np.full_like(freqs, dBm2watt(power_dbm), dtype=float)
+
+
+def _end_over_launch_power_ratio(
+    system: System,
+    profile_path: Path | str | None,
+    launch_powers_w: np.ndarray,
+) -> np.ndarray:
+    """Return per-channel factor $P_\mathrm{end}/P_\mathrm{launch}$.
+
+    TD/PCFM-style NLIN routines often return an equivalent NLIN power at input,
+    i.e. referenced to $P_\mathrm{launch}$.
+    Multiplying by this ratio converts it to end-of-fiber NLIN power.
+    """
+    launch = np.asarray(launch_powers_w, dtype=float).reshape(-1)
+    end_power = _resolve_signal_power(system, profile_path, launch_override=launch)
+    ratio = end_power / np.maximum(launch, 1e-18)
+    return np.asarray(ratio, dtype=float).reshape(-1)
 
 
 def _save_nlin_csv(

@@ -76,7 +76,9 @@ DEFAULT_LLD_SWEEP_MIN = 1e-2
 DEFAULT_LLD_SWEEP_MAX = 20.0
 DEFAULT_LLD_SWEEP_NPTS = 400
 
-
+###########
+# Graphical
+###########
 def _configure_matplotlib() -> None:
     # Load the user's matplotlibrc explicitly because MPLCONFIGDIR is set to a
     # writable local directory for sandboxed runs, which would otherwise bypass
@@ -87,9 +89,28 @@ def _configure_matplotlib() -> None:
     plt.rcParams["xtick.labelsize"] = 8
     plt.rcParams["ytick.labelsize"] = 8
 
+def _style_axes(ax: plt.Axes, *, loglog: bool) -> None:
+    if loglog:
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+    ax.grid(False)
 
-def n_eq18(x: np.ndarray, lam: float, l_over_leff: float, eta: float) -> np.ndarray:
-    """Eq. (18) curve used in the original comparison."""
+def _make_x_grid(x_min: float, x_max: float, npts: int, loglog: bool) -> np.ndarray:
+    if npts < 2:
+        raise ValueError("npts must be at least 2.")
+    if x_max <= x_min:
+        raise ValueError("x_max must be greater than x_min.")
+    if loglog:
+        if x_min <= 0.0:
+            raise ValueError("log-log plots require x_min > 0.")
+        return np.geomspace(x_min, x_max, int(npts))
+    return np.linspace(x_min, x_max, int(npts))
+
+###########
+# Physical
+###########
+def n_time_domain(x: np.ndarray, lam: float, l_over_leff: float, eta: float) -> np.ndarray:
+    """TD curve with rescaling used in the original comparison."""
     scale = (2.0 * np.pi) * float(l_over_leff) / float(lam)
     return (4.0 / 9.0) * (1.0 + (scale * x) ** (1.0 / eta)) ** (-eta)
 
@@ -166,7 +187,9 @@ def k_xci_eq18_normalized(x: np.ndarray, l_over_leff: float) -> np.ndarray:
     ) / (2.0 * np.pi)
     return out
 
-
+################
+# Parsing and IO
+################
 def safe_ratio(num: np.ndarray, den: np.ndarray) -> np.ndarray:
     out = np.full_like(num, np.nan, dtype=float)
     mask = np.isfinite(num) & np.isfinite(den) & (np.abs(den) > 1e-14)
@@ -199,26 +222,6 @@ def finite_min_max(*arrays: np.ndarray | float) -> tuple[float, float]:
         raise ValueError("No finite values available for plotting.")
     merged = np.concatenate(finite_values)
     return float(np.min(merged)), float(np.max(merged))
-
-
-def _make_x_grid(x_min: float, x_max: float, npts: int, loglog: bool) -> np.ndarray:
-    if npts < 2:
-        raise ValueError("npts must be at least 2.")
-    if x_max <= x_min:
-        raise ValueError("x_max must be greater than x_min.")
-    if loglog:
-        if x_min <= 0.0:
-            raise ValueError("log-log plots require x_min > 0.")
-        return np.geomspace(x_min, x_max, int(npts))
-    return np.linspace(x_min, x_max, int(npts))
-
-
-def _style_axes(ax: plt.Axes, *, loglog: bool) -> None:
-    if loglog:
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-    ax.grid(False)
-
 
 def _plot_pcfm_style_line(
     ax: plt.Axes,
@@ -1024,7 +1027,7 @@ def main() -> None:
 
     for l_over_leff in l_over_leff_values:
         leff_over_l = 1.0 / l_over_leff
-        y_n_paper = n_eq18(x, lam=args.lam, l_over_leff=l_over_leff, eta=args.eta)
+        y_n_paper = n_time_domain(x, lam=args.lam, l_over_leff=l_over_leff, eta=args.eta)
         y_k = k_xci(x, leff_over_l=leff_over_l)
         y_k_eq18 = k_xci_eq18_normalized(x, l_over_leff=l_over_leff)
 
@@ -1238,7 +1241,7 @@ def main() -> None:
         )
         n_lld_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
     else:
-        y_n_lld = n_eq18(
+        y_n_lld = n_time_domain(
             x_fixed_grid,
             lam=args.lam,
             l_over_leff=lld_sweep,
@@ -1271,7 +1274,7 @@ def main() -> None:
 
     if td_ctx is not None:
         final_n_eq18 = float(
-            n_eq18(
+            n_time_domain(
                 np.array([final_x], dtype=float),
                 lam=args.lam,
                 l_over_leff=final_lld,

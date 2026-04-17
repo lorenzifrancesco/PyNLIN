@@ -19,6 +19,7 @@ from .config import (
     _to_optional_path,
 )
 from .io import (
+    _end_over_launch_power_ratio,
     _resolve_launch_powers,
     _resolve_signal_power,
     _save_nlin_csv,
@@ -278,6 +279,21 @@ def run_pcfm_workflow(
             )
 
     signal_power = _resolve_signal_power(system, profile_path, launch_powers)
+    nlin_power_scale = _end_over_launch_power_ratio(
+        system=system,
+        profile_path=profile_path,
+        launch_powers_w=launch_powers,
+    )
+    lg.info(
+        "Raw TD/PCFM/GN NLIN outputs are interpreted as equivalent input-referenced NLIN power; "
+        "applying P_end/P_launch to obtain end-of-fiber NLIN power."
+    )
+    lg.info(
+        "NLIN end/launch scaling summary [-]: min/med/max = "
+        f"{float(np.min(nlin_power_scale)):.3e} / "
+        f"{float(np.median(nlin_power_scale)):.3e} / "
+        f"{float(np.max(nlin_power_scale)):.3e}"
+    )
     _log_td_pcfm_parameters(
         system=system,
         launch_powers_w=launch_powers,
@@ -308,6 +324,7 @@ def run_pcfm_workflow(
     )
     # nlin_td_flat = _apply_pcfm_manakov_scaling(nlin_td).reshape(-1) 
     nlin_td_flat = np.asarray(nlin_td, dtype=float).reshape(-1)
+    nlin_td_flat = nlin_td_flat * nlin_power_scale
     
     qam_orders = [16, 64, 256]
     const_pref, sum_a, sum_b = _td_modulation_components(
@@ -324,10 +341,14 @@ def run_pcfm_workflow(
     for order in qam_orders:
         mu0 = _qam_mu0(order)
         nlin_mod = const_pref * (mu0 * sum_a + sum_b)
-        td_modulations[f"{order}-QAM"] = np.asarray(nlin_mod, dtype=float).reshape(-1)
+        td_modulations[f"{order}-QAM"] = (
+            np.asarray(nlin_mod, dtype=float).reshape(-1) * nlin_power_scale
+        )
     mu0_gaussian = gaussian_mu0()
     nlin_gaussian = const_pref * (mu0_gaussian * sum_a + sum_b)
-    td_modulations["Gaussian"] = np.asarray(nlin_gaussian, dtype=float).reshape(-1)
+    td_modulations["Gaussian"] = (
+        np.asarray(nlin_gaussian, dtype=float).reshape(-1) * nlin_power_scale
+    )
 
     _save_nlin_csv(
         Path("results") / f"s3_chan_nlin_td_{Path(profile_path).stem}_k1_x1.csv",
@@ -372,8 +393,8 @@ def run_pcfm_workflow(
             recompute=recompute_pcfm,
             return_components=True,
         )
-        nlin_pcfm_flat = np.asarray(nlin_pcfm_arr, dtype=float).reshape(-1)
-        nlin_pcfm_xci_flat = np.asarray(nlin_pcfm_xci_arr, dtype=float).reshape(-1)
+        nlin_pcfm_flat = np.asarray(nlin_pcfm_arr, dtype=float).reshape(-1) * nlin_power_scale
+        nlin_pcfm_xci_flat = np.asarray(nlin_pcfm_xci_arr, dtype=float).reshape(-1) * nlin_power_scale
         _save_nlin_csv(
             Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}.csv",
             freqs,
@@ -396,6 +417,7 @@ def run_pcfm_workflow(
                     "PCFM Eq. 18 XCI requested with non-flat power profiles: "
                     "adding the flat-analytic Eq. 18 reference curve to the plot/output."
                 )
+                lg.warning("This multiplication for a SPP function is heuristic.")
             eq18_path = (
                 Path("results")
                 / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_pcfm_{label}_xci_eq18.npy"
@@ -413,6 +435,7 @@ def run_pcfm_workflow(
                 ),
                 dtype=float,
             ).reshape(-1)
+            nlin_pcfm_eq18_xci_flat = nlin_pcfm_eq18_xci_flat * nlin_power_scale
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}_xci_eq18.csv",
                 freqs,
@@ -436,8 +459,8 @@ def run_pcfm_workflow(
                 recompute=recompute_gn,
                 return_components=True,
             )
-            nlin_gn_flat = np.asarray(nlin_gn_arr, dtype=float).reshape(-1)
-            nlin_gn_xci_flat = np.asarray(nlin_gn_xci_arr, dtype=float).reshape(-1)
+            nlin_gn_flat = np.asarray(nlin_gn_arr, dtype=float).reshape(-1) * nlin_power_scale
+            nlin_gn_xci_flat = np.asarray(nlin_gn_xci_arr, dtype=float).reshape(-1) * nlin_power_scale
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_gn_{label}.csv",
                 freqs,
@@ -471,8 +494,12 @@ def run_pcfm_workflow(
                 recompute=recompute_gn_direct,
                 return_components=True,
             )
-            nlin_gn_direct_flat = np.asarray(nlin_gn_direct_arr, dtype=float).reshape(-1)
-            nlin_gn_direct_xci_flat = np.asarray(nlin_gn_direct_xci_arr, dtype=float).reshape(-1)
+            nlin_gn_direct_flat = (
+                np.asarray(nlin_gn_direct_arr, dtype=float).reshape(-1) * nlin_power_scale
+            )
+            nlin_gn_direct_xci_flat = (
+                np.asarray(nlin_gn_direct_xci_arr, dtype=float).reshape(-1) * nlin_power_scale
+            )
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_gn_direct_{label}.csv",
                 freqs,
