@@ -21,7 +21,7 @@ try:
         IEEE_DOUBLE_COLUMN_ONE_COLUMN_WIDTH_IN,
         scale_figsize_to_ieee_column,
     )
-    from analysis.pcfm.io import _resolve_signal_power, _write_flat_profile
+    from analysis.pcfm.io import _power_profile_hash, _resolve_signal_power, _write_flat_profile
     from analysis.pcfm.models import _load_or_compute_pcfm
     from analysis.pcfm.td import _td_modulation_components
     from analysis.uwb_nlin import _nlin_cache_path
@@ -31,7 +31,7 @@ except ModuleNotFoundError:
         IEEE_DOUBLE_COLUMN_ONE_COLUMN_WIDTH_IN,
         scale_figsize_to_ieee_column,
     )
-    from pcfm.io import _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
+    from pcfm.io import _power_profile_hash, _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
     from pcfm.models import _load_or_compute_pcfm  # type: ignore[no-redef]
     from pcfm.td import _td_modulation_components  # type: ignore[no-redef]
     from uwb_nlin import _nlin_cache_path  # type: ignore[no-redef]
@@ -369,6 +369,7 @@ def run_scan(
             p_tag = _safe_tag(launch_dbm)
             profile_path = out_dir / f"flat_profile_b{beta_tag}_p{p_tag}.npy"
             _write_flat_profile(profile_path, system, launch_powers_w=launch_vec)
+            profile_power_tag = _power_profile_hash(system, profile_path)
 
             signal_power = _resolve_signal_power(system, profile_path, launch_vec)
 
@@ -382,7 +383,7 @@ def run_scan(
                 profile_path=profile_path,
                 use_kappa=True,
                 use_x_mode=True,
-                extra_tag=f"disp{disp_tag}_p{p_tag}",
+                extra_tag=f"disp{disp_tag}_p{p_tag}_prof{profile_power_tag}",
             )
             nlin_td = total_nlin_uwb(
                 system,
@@ -425,14 +426,13 @@ def run_scan(
                 use_numeric_sci=True,
                 use_numeric_xci=bool(pcfm_numeric_xci),
             )
-            pcfm_path = out_dir / f"pcfm_b{beta_tag}_p{p_tag}_disp{disp_tag}.npy"
+            pcfm_path = out_dir / f"pcfm_b{beta_tag}_p{p_tag}_disp{disp_tag}_prof{profile_power_tag}.npy"
             nlin_pcfm, _, nlin_pcfm_xci = _load_or_compute_pcfm(
                 system=system,
                 profile_path=profile_path,
                 launch_powers_w=launch_vec,
                 output_path=pcfm_path,
                 cfg=pcfm_cfg,
-                lumped_losses=None,
                 recompute=recompute_pcfm,
                 return_components=True,
             )

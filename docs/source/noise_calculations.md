@@ -223,10 +223,9 @@ so the normalized signal-power profile is simply
 
 $$p_i(z)=1.$$
 
-With Raman profiles and optional lumped losses, the normalized profile
-used in the PCFM kernels is
+With Raman profiles, the normalized profile used in the PCFM kernels is
 
-$$p_i(z)=\frac{\widetilde{P}_i(z)}{\widetilde{P}_i(0)}.$$
+$$p_i(z)=\frac{P_i(z)}{P_i(0)}.$$
 
 This is the central PCFM input because the model tracks how nonlinear
 mixing accumulates along the fiber.
@@ -495,6 +494,10 @@ $$\mathrm{GSNR}_i
 \frac{P_{\mathrm{sig},i}(L)}
 {\max(P_{\mathrm{NLI},i},10^{-18})}
 \right).$$
+
+CSV exports also include the corresponding noise-to-signal ratio,
+$\mathrm{NSR}_{\mathrm{NLI},i}=10\log_{10}(P_{\mathrm{NLI},i}/P_{\mathrm{sig},i}(L))$,
+so the GSNR column is the sign-reversed dB quantity.
 
 For the specific TD-versus-PCFM(XCI) diagnostic, the workflow reports
 

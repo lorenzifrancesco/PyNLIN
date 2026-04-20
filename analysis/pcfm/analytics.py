@@ -185,7 +185,6 @@ def _pcfm_xci_poly_sums(
     *,
     profile_path: str | None,
     degree: int,
-    lumped_losses: list[tuple[float, float]] | None = None,
 ) -> np.ndarray:
     """Return the same per-interferer polynomial sums used by PCFM XCI."""
     n_channels = system.wdm.frequency_grid().size
@@ -193,7 +192,7 @@ def _pcfm_xci_poly_sums(
         return np.ones(n_channels, dtype=float)
 
     signal_power_ch_z, z = pcfm_gn.load_signal_profiles(profile_path, system)
-    spp = pcfm_gn.normalize_spp(signal_power_ch_z, z, lumped_losses=lumped_losses)
+    spp = pcfm_gn.normalize_spp(signal_power_ch_z, z)
     coeffs = pcfm_gn.fit_spp_polynomials(z, spp, degree=int(degree))
     return np.array([pcfm_gn.poly_sum(coeffs[i]) for i in range(n_channels)], dtype=float)
 
@@ -205,7 +204,6 @@ def flat_profile_pcfm_xci_channel_power(
     launch_powers_w: np.ndarray,
     profile_path: str | None = None,
     degree: int = 9,
-    lumped_losses: list[tuple[float, float]] | None = None,
     use_beta2_eff: bool = True,
     log_order: int | None = None,
     xci_model: str = "closed_form",
@@ -236,7 +234,6 @@ def flat_profile_pcfm_xci_channel_power(
         system,
         profile_path=profile_path,
         degree=int(degree),
-        lumped_losses=lumped_losses,
     )
 
     # Mirror compute_pcfm_nlin exactly.
@@ -321,7 +318,6 @@ def flat_profile_pcfm_xci_channel_power(
             * float(g_ch[j] ** 2)
             * (gamma_xci**2)
             * k_xci
-            # / 2.0 # FIXME this is too much and it is something from the past
         )
 
     return float(pcfm_gn._to_per_polarization_power(total_psd * bandwidth_hz))

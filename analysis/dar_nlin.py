@@ -283,7 +283,7 @@ def run_dar_workflow(cfg_path: Path | str = Path("input/dar_struct.toml"),
         signal_power,
     )
 
-    # PCFM NLIN (no lumped losses, no MCI)
+    # PCFM NLIN (MCI disabled)
     cfg = PcfmConfig(
         degree=9,
         include_mci=False,
@@ -300,7 +300,6 @@ def run_dar_workflow(cfg_path: Path | str = Path("input/dar_struct.toml"),
             profile_path=profile_path,
             launch_powers_w=launch_powers,
             config=cfg,
-            lumped_losses=None,
         )
         pcfm_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(pcfm_path, nlin_pcfm)

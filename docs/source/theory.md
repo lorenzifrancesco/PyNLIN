@@ -226,15 +226,9 @@ $$\max_i |P^{\mathrm{profile}}_{i,\mathrm{dBm}} - P^{\mathrm{expected}}_{i,\math
 tensors, the implementation sums one axis to obtain channel powers (this
 may aggregate polarization/mode components, depending on file layout).
 
-Optional lumped losses are applied as cumulative steps:
+The profiles are normalized directly to the launch sample:
 
-$$\widetilde{P}_i(z)
-=
-P_i(z)\prod_k 10^{-\ell_k/10\cdot H(z-z_k)},$$
-
-then normalized:
-
-$$p_i(z)=\frac{\widetilde{P}_i(z)}{\widetilde{P}_i(0)}.$$
+$$p_i(z)=\frac{P_i(z)}{P_i(0)}.$$
 
 This normalized SPP is the implementation counterpart of the paper
 definition in Poggiolini et al., Eq. (33).
@@ -357,11 +351,10 @@ This is the code-level specialization of Poggiolini et al., Eq. (50),
 with the implementation guard `max(|\beta_{2,\mathrm{eff}}|,10^{-30})`
 added for numerical robustness.
 
-The endpoint factor $p_i(L)$ is computed but currently not applied in
-the final PSD expression. The paper formulas for XCI and SCI include the
-endpoint factor explicitly, see Poggiolini et al., Eqs. (47) and (52).
-The current implementation intentionally omits it, with a FIXME note in
-code.
+The endpoint factor $p_i(L)$ is not applied inside the PCFM/GN PSD
+expressions. Those producers return launch-referenced NLIN powers, and
+the workflow applies the endpoint conversion once with
+$P_{\mathrm{sig},i}(L)/P_{\mathrm{sig},i}(0)$ before export and plotting.
 
 ### Per-polarization output correction (current implementation)
 
@@ -723,6 +716,11 @@ $$\mathrm{GSNR}_i
 \frac{P_{\mathrm{sig},i}(L)}
 {\max(P_{\mathrm{NLI},i},10^{-18})}
 \right).$$
+
+TD, PCFM, and GN producers use normalized profiles and return
+launch-referenced NLIN powers. Before this ratio is formed, the workflow
+converts them to output powers with
+$P_{\mathrm{sig},i}(L)/P_{\mathrm{sig},i}(0)$.
 
 The denominator $P_{\mathrm{sig},i}(L)$ is obtained from
 `_resolve_signal_power` and is not additionally divided by 2 in this

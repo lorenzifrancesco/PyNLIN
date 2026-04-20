@@ -51,7 +51,6 @@ def _load_or_compute_pcfm(
     launch_powers_w: np.ndarray,
     output_path: Path,
     cfg: PcfmConfig,
-    lumped_losses: list[tuple[float, float]] | None = None,
     recompute: bool = False,
     return_components: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -60,13 +59,12 @@ def _load_or_compute_pcfm(
         lg.info(f"Loading cached PCFM NLIN from {output_path}")
         return _load_cached(output_path, return_components)
 
-    lg.info(f"Computing PCFM NLIN (losses={lumped_losses})")
+    lg.info("Computing PCFM NLIN")
     out = compute_pcfm_nlin(
         system=system,
         profile_path=profile_path,
         launch_powers_w=launch_powers_w,
         config=cfg,
-        lumped_losses=lumped_losses,
         return_components=return_components,
     )
     if return_components:
@@ -84,7 +82,6 @@ def _load_or_compute_flat_analytic_xci(
     *,
     profile_path: Path | str | None = None,
     degree: int = 9,
-    lumped_losses: list[tuple[float, float]] | None = None,
     xci_model: str,
     recompute: bool = False,
 ) -> np.ndarray:
@@ -106,7 +103,6 @@ def _load_or_compute_flat_analytic_xci(
                 launch_powers_w=launch_powers_w,
                 profile_path=str(profile_path) if profile_path is not None else None,
                 degree=int(degree),
-                lumped_losses=lumped_losses,
                 xci_model=xci_model,
             )
             for idx in range(system.wdm.frequency_grid().size)
@@ -123,7 +119,6 @@ def _load_or_compute_gn(
     profile_path: Path | str,
     launch_powers_w: np.ndarray,
     output_path: Path,
-    lumped_losses: list[tuple[float, float]] | None = None,
     recompute: bool = False,
     n_f: int = 40,
     n_z: int = 200,
@@ -134,12 +129,11 @@ def _load_or_compute_gn(
         lg.info(f"Loading cached numeric GN NLIN from {output_path}")
         return _load_cached(output_path, return_components)
 
-    lg.info(f"Computing numeric GN NLIN (losses={lumped_losses})")
+    lg.info("Computing numeric GN NLIN")
     out = compute_gn_numeric(
         system=system,
         profile_path=profile_path,
         launch_powers_w=launch_powers_w,
-        lumped_losses=lumped_losses,
         n_f=n_f,
         n_z=n_z,
         return_components=return_components,
@@ -157,7 +151,6 @@ def _load_or_compute_gn_direct(
     profile_path: Path | str,
     launch_powers_w: np.ndarray,
     output_path: Path,
-    lumped_losses: list[tuple[float, float]] | None = None,
     recompute: bool = False,
     n_f: int = 40,
     return_components: bool = False,
@@ -167,12 +160,11 @@ def _load_or_compute_gn_direct(
         lg.info(f"Loading cached direct GN NLIN from {output_path}")
         return _load_cached(output_path, return_components)
 
-    lg.info(f"Computing direct GN NLIN (losses={lumped_losses})")
+    lg.info("Computing direct GN NLIN")
     out = compute_gn_direct(
         system=system,
         profile_path=profile_path,
         launch_powers_w=launch_powers_w,
-        lumped_losses=lumped_losses,
         n_f=n_f,
         return_components=return_components,
     )

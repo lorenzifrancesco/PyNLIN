@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import numpy as np
 from loguru import logger as lg
@@ -169,39 +169,8 @@ def load_signal_profiles(profile_path: Path | str, system: System) -> tuple[np.n
     return signal_power_ch_z, z
 
 
-def apply_lumped_losses(p_ch_z: np.ndarray, z: np.ndarray, lumped_losses: Optional[Iterable[tuple[float, float]]]):
-    """Apply stepwise lumped losses to channel power profiles.
-
-    Parameters
-    ----------
-    p_ch_z:
-        Channel power profiles with shape ``(n_channels, n_z)``.
-    z:
-        Longitudinal grid in meter, shape ``(n_z,)``.
-    lumped_losses:
-        Iterable of ``(z_location_m, loss_db)``. Each loss is cumulatively
-        applied from its location to the end of the span.
-
-    Returns
-    -------
-    np.ndarray
-        Adjusted profiles with the same shape as ``p_ch_z``.
-    """
-    if not lumped_losses:
-        return p_ch_z
-    p_adj = np.array(p_ch_z, dtype=float, copy=True)
-    for z_loc, loss_db in lumped_losses:
-        factor = 10 ** (-loss_db / 10)
-        mask = z >= float(z_loc)
-        p_adj[:, mask] *= factor
-    return p_adj
-
-
-def normalize_spp(signal_power_ch_z: np.ndarray, z: np.ndarray,
-                  lumped_losses: Optional[Iterable[tuple[float, float]]] = None) -> np.ndarray:
+def normalize_spp(signal_power_ch_z: np.ndarray, z: np.ndarray) -> np.ndarray:
     """Normalize signal power profiles to unit launch value per channel.
-
-    Optionally applies lumped-loss events before normalization.
 
     Parameters
     ----------
@@ -209,8 +178,6 @@ def normalize_spp(signal_power_ch_z: np.ndarray, z: np.ndarray,
         Absolute channel powers, shape ``(n_channels, n_z)`` in Watt.
     z:
         Longitudinal grid in meter.
-    lumped_losses:
-        Optional lumped-loss list passed to :func:`apply_lumped_losses`.
 
     Returns
     -------
@@ -219,8 +186,6 @@ def normalize_spp(signal_power_ch_z: np.ndarray, z: np.ndarray,
         Non-finite values are sanitized and values are clipped to ``[0, MAX_SPP]``.
     """
     p_ch_z = signal_power_ch_z
-    if lumped_losses:
-        p_ch_z = apply_lumped_losses(p_ch_z, z, lumped_losses)
     p0 = p_ch_z[:, 0].copy()
     p0[p0 <= MIN_POWER_W] = np.nan
     p = p_ch_z / p0[:, None]
@@ -637,7 +602,6 @@ def compute_pcfm_nlin(
     profile_path: Path | str,
     launch_powers_w: Optional[np.ndarray] = None,
     config: Optional[PcfmConfig] = None,
-    lumped_losses: Optional[Iterable[tuple[float, float]]] = None,
     return_components: bool = False,
 ) -> np.ndarray:
     """Compute per-channel PCFM NLIN power (SCI + XCI, MCI disabled).
@@ -656,9 +620,6 @@ def compute_pcfm_nlin(
         resolved from ``system``.
     config:
         Optional :class:`PcfmConfig` with integration and modeling settings.
-    lumped_losses:
-        Optional list of ``(z_location_m, loss_db)`` applied to profiles before
-        normalization.
     return_components:
         If ``True``, returns total power plus SCI and XCI components.
 
@@ -679,7 +640,7 @@ def compute_pcfm_nlin(
     L = float(system.fiber_length)
 
     signal_power_ch_z, z = load_signal_profiles(profile_path, system)
-    spp = normalize_spp(signal_power_ch_z, z, lumped_losses=lumped_losses)
+    spp = normalize_spp(signal_power_ch_z, z)
     coeffs = fit_spp_polynomials(z, spp, cfg.degree)
 
     poly_sums = np.array([poly_sum(coeffs[i]) for i in range(n_channels)], dtype=float)
@@ -736,7 +697,8 @@ def compute_pcfm_nlin(
             k_sci = compute_sci_numeric(
                 coeffs[i], L, beta2_sci, B_ch, cfg.n_f, cfg.n_z, cfg.phase_coeff
             )
-        # omit p(L) scaling in PCFM NLI PSD.
+        # The normalized profile already shapes the longitudinal kernel. Leave
+        # this launch-referenced; the workflow applies P_signal,out/P_launch.
         g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
@@ -777,7 +739,8 @@ def compute_pcfm_nlin(
             )
 
     nlin_psd = g_sci_psd + g_xci_psd
-    nlin_power = _to_per_polarization_power(nlin_psd * B_ch) # FIXME check the scale / per channel per polarization
+    # Return per-polarization channel NLIN power, still launch-referenced.
+    nlin_power = _to_per_polarization_power(nlin_psd * B_ch)
     if return_components:
         return (
             nlin_power,
@@ -791,7 +754,6 @@ def compute_gn_numeric(
     system: System,
     profile_path: Path | str,
     launch_powers_w: Optional[np.ndarray] = None,
-    lumped_losses: Optional[Iterable[tuple[float, float]]] = None,
     n_f: int = 40,
     n_z: int = 200,
     phase_coeff: float = 4.0 * np.pi ** 2,
@@ -809,9 +771,6 @@ def compute_gn_numeric(
     launch_powers_w:
         Optional per-channel launch powers in Watt. If ``None``, values are
         resolved from ``system``.
-    lumped_losses:
-        Optional list of ``(z_location_m, loss_db)`` applied before profile
-        normalization.
     n_f:
         Frequency samples per axis for 2D frequency integration.
     n_z:
@@ -836,7 +795,7 @@ def compute_gn_numeric(
     L = float(system.fiber_length)
 
     signal_power_ch_z, z = load_signal_profiles(profile_path, system)
-    spp = normalize_spp(signal_power_ch_z, z, lumped_losses=lumped_losses)
+    spp = normalize_spp(signal_power_ch_z, z)
     coeffs = fit_spp_polynomials(z, spp, degree=6)
 
     beta2 = _beta2_array(system, freqs)
@@ -865,7 +824,8 @@ def compute_gn_numeric(
         gamma_sci = 2.0 * np.pi * freqs[i] / c * (N2_SIO2 / aeff[i])
         beta2_sci = _beta2_eff(freqs[i], freqs[i], beta_coeffs) if beta_coeffs else beta2[i]
         k_sci = compute_sci_numeric(coeffs[i], L, beta2_sci, B_ch, n_f, n_z, phase_coeff)
-        # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+        # Keep launch-referenced output here; workflow applies the endpoint
+        # signal-power ratio consistently with TD and PCFM. # FIXME check
         g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
@@ -880,7 +840,8 @@ def compute_gn_numeric(
             k_xci = compute_xci_numeric(
                 coeffs[j], L, beta2_xci, B_ch, delta_f, B_ch, n_f, n_z, phase_coeff
             )
-            # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+            # Keep launch-referenced output here; workflow applies the endpoint
+            # signal-power ratio consistently with TD and PCFM.
             g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
             g_xci_sum += g_xci
 
@@ -902,7 +863,6 @@ def compute_gn_direct(
     system: System,
     profile_path: Path | str,
     launch_powers_w: Optional[np.ndarray] = None,
-    lumped_losses: Optional[Iterable[tuple[float, float]]] = None,
     n_f: int = 40,
     phase_coeff: float = 4.0 * np.pi ** 2,
     use_beta2_eff: bool = True,
@@ -922,9 +882,6 @@ def compute_gn_direct(
     launch_powers_w:
         Optional per-channel launch powers in Watt. If ``None``, values are
         resolved from ``system``.
-    lumped_losses:
-        Optional list of ``(z_location_m, loss_db)`` applied before profile
-        normalization.
     n_f:
         Frequency samples per axis for 2D frequency integration.
     phase_coeff:
@@ -946,7 +903,7 @@ def compute_gn_direct(
     B_ch = float(system.pulse.baud_rate)
 
     signal_power_ch_z, z = load_signal_profiles(profile_path, system)
-    spp = normalize_spp(signal_power_ch_z, z, lumped_losses=lumped_losses)
+    spp = normalize_spp(signal_power_ch_z, z)
 
     beta2 = _beta2_array(system, freqs)
     fc_hz = float(system.center_frequency) if system.center_frequency is not None else float(np.mean(freqs))
@@ -974,7 +931,8 @@ def compute_gn_direct(
         gamma_sci = 2.0 * np.pi * freqs[i] / c * (N2_SIO2 / aeff[i])
         beta2_sci = _beta2_eff(freqs[i], freqs[i], beta_coeffs) if beta_coeffs else beta2[i]
         k_sci = compute_sci_numeric_direct(spp[i], z, beta2_sci, B_ch, n_f, phase_coeff)
-        # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+        # Keep launch-referenced output here; workflow applies the endpoint
+        # signal-power ratio consistently with TD and PCFM.
         g_sci = (16.0 / 27.0) * (g_cut ** 3) * (gamma_sci ** 2) * k_sci
 
         g_xci_sum = 0.0
@@ -989,7 +947,8 @@ def compute_gn_direct(
             k_xci = compute_xci_numeric_direct(
                 spp[j], z, beta2_xci, B_ch, delta_f, B_ch, n_f, phase_coeff
             )
-            # NOTE: omit p(L) scaling; kernels already yield end-of-span NLIN.
+            # Keep launch-referenced output here; workflow applies the endpoint
+            # signal-power ratio consistently with TD and PCFM.
             g_xci = (32.0 / 27.0) * g_cut * (g_ch[j] ** 2) * (gamma_xci ** 2) * k_xci
             g_xci_sum += g_xci
 
