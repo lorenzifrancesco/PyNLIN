@@ -6,15 +6,18 @@ import scipy.constants
 try:
     import torch  # type: ignore
     _TORCH_AVAILABLE = True
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
+except Exception as exc:  # pragma: no cover - optional dependency
     _TORCH_AVAILABLE = False
+    _TORCH_IMPORT_ERROR = exc
 
     class _TorchStub:
         class Tensor:
             pass
 
         def __getattr__(self, name):
-            raise ModuleNotFoundError("torch is required for this operation.")
+            raise ImportError(
+                f"torch is required for this operation. Original import error: {_TORCH_IMPORT_ERROR}"
+            ) from _TORCH_IMPORT_ERROR
 
     torch = _TorchStub()  # type: ignore
 from scipy.constants import lambda2nu, nu2lambda

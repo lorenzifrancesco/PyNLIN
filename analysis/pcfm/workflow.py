@@ -19,7 +19,9 @@ from .config import (
     _to_optional_path,
 )
 from .io import (
-    _end_over_launch_power_ratio,
+    _launch_referenced_nlin_to_output_power,
+    _output_over_launch_signal_power_ratio,
+    _power_profile_hash,
     _resolve_launch_powers,
     _resolve_signal_power,
     _save_nlin_csv,
@@ -88,7 +90,6 @@ def run_pcfm_workflow(
     gn_direct_mode: str | None = None,
     pcfm_numeric_xci: bool | None = None,
     td_exclude_self_channel: bool | None = None,
-    include_lumped_losses: bool | None = None,
     plot_mode: str | None = None,
 ) -> None:
     """Run TD + PCFM (+ optional GN) workflow and plot GSNR overlays."""
@@ -159,16 +160,6 @@ def run_pcfm_workflow(
         if td_exclude_self_channel is None
         else bool(td_exclude_self_channel)
     )
-    include_lumped_losses = (
-        bool(runtime_cfg["include_lumped_losses"])
-        if include_lumped_losses is None
-        else bool(include_lumped_losses)
-    )
-    if pcfm_eq18_xci and include_lumped_losses:
-        raise ValueError(
-            "PCFM Eq. 18 XCI does not support lumped losses. "
-            "Disable [pcfm.run].include_lumped_losses or disable [pcfm.run].pcfm_eq18_xci."
-        )
     plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
     cfg = PcfmConfig(
         degree=9,
@@ -241,6 +232,10 @@ def run_pcfm_workflow(
             use_profile=use_profile_launch_powers,
         )
 
+    profile_power_tag = _power_profile_hash(system, profile_path)
+    model_cache_tag = f"disp{dispersion_tag}_prof{profile_power_tag}"
+    lg.info(f"Power-profile cache tag={profile_power_tag}.")
+
     sig_ch_z, z_axis = load_signal_profiles(profile_path, system)
     span = float(z_axis[-1] - z_axis[0]) if z_axis.size else 0.0
     avg_power = np.trapezoid(sig_ch_z, z_axis, axis=1) / max(span, 1.0)
@@ -278,21 +273,21 @@ def run_pcfm_workflow(
                 f"{float(np.median(band_dbm)):.2f} / {float(np.max(band_dbm)):.2f}"
             )
 
-    signal_power = _resolve_signal_power(system, profile_path, launch_powers)
-    nlin_power_scale = _end_over_launch_power_ratio(
+    output_signal_power_w = _resolve_signal_power(system, profile_path, launch_powers)
+    output_over_launch_signal_power_ratio = _output_over_launch_signal_power_ratio(
         system=system,
         profile_path=profile_path,
         launch_powers_w=launch_powers,
     )
     lg.info(
-        "Raw TD/PCFM/GN NLIN outputs are interpreted as equivalent input-referenced NLIN power; "
-        "applying P_end/P_launch to obtain end-of-fiber NLIN power."
+        "TD/PCFM/GN producers return launch-referenced NLIN powers; "
+        "applying P_signal,out/P_signal,launch to obtain output NLIN powers."
     )
     lg.info(
-        "NLIN end/launch scaling summary [-]: min/med/max = "
-        f"{float(np.min(nlin_power_scale)):.3e} / "
-        f"{float(np.median(nlin_power_scale)):.3e} / "
-        f"{float(np.max(nlin_power_scale)):.3e}"
+        "Output/launch signal-power ratio summary [-]: min/med/max = "
+        f"{float(np.min(output_over_launch_signal_power_ratio)):.3e} / "
+        f"{float(np.median(output_over_launch_signal_power_ratio)):.3e} / "
+        f"{float(np.max(output_over_launch_signal_power_ratio)):.3e}"
     )
     _log_td_pcfm_parameters(
         system=system,
@@ -318,14 +313,15 @@ def run_pcfm_workflow(
             profile_path,
             use_kappa=True,
             use_x_mode=True,
-            extra_tag=f"disp{dispersion_tag}_{'xci' if td_exclude_self_channel else 'all'}",
+            extra_tag=f"{model_cache_tag}_{'xci' if td_exclude_self_channel else 'all'}",
         ),
         recompute=recompute_td,
     )
-    # nlin_td_flat = _apply_pcfm_manakov_scaling(nlin_td).reshape(-1) 
-    nlin_td_flat = np.asarray(nlin_td, dtype=float).reshape(-1)
-    nlin_td_flat = nlin_td_flat * nlin_power_scale
-    
+    nlin_td_output_w = _launch_referenced_nlin_to_output_power(
+        nlin_td,
+        output_over_launch_signal_power_ratio,
+    )
+
     qam_orders = [16, 64, 256]
     const_pref, sum_a, sum_b = _td_modulation_components(
         system,
@@ -341,30 +337,23 @@ def run_pcfm_workflow(
     for order in qam_orders:
         mu0 = _qam_mu0(order)
         nlin_mod = const_pref * (mu0 * sum_a + sum_b)
-        td_modulations[f"{order}-QAM"] = (
-            np.asarray(nlin_mod, dtype=float).reshape(-1) * nlin_power_scale
+        td_modulations[f"{order}-QAM"] = _launch_referenced_nlin_to_output_power(
+            nlin_mod,
+            output_over_launch_signal_power_ratio,
         )
     mu0_gaussian = gaussian_mu0()
     nlin_gaussian = const_pref * (mu0_gaussian * sum_a + sum_b)
-    td_modulations["Gaussian"] = (
-        np.asarray(nlin_gaussian, dtype=float).reshape(-1) * nlin_power_scale
+    td_modulations["Gaussian"] = _launch_referenced_nlin_to_output_power(
+        nlin_gaussian,
+        output_over_launch_signal_power_ratio,
     )
 
     _save_nlin_csv(
         Path("results") / f"s3_chan_nlin_td_{Path(profile_path).stem}_k1_x1.csv",
         freqs,
-        nlin_td_flat,
-        signal_power,
+        nlin_td_output_w,
+        output_signal_power_w,
     )
-
-    if include_lumped_losses:
-        loss_cases = {
-            "no_loss": None,
-            "loss_1db_10km": [(10e3, 1.0)],
-            "loss_2db_5km_0p5db_97km": [(5e3, 2.0), (97e3, 0.5)],
-        }
-    else:
-        loss_cases = {"no_loss": None}
 
     gsnr_pcfm = {}
     gsnr_gn = {} if compute_gn else None
@@ -378,10 +367,10 @@ def run_pcfm_workflow(
     nlin_gn_direct_xci = {} if compute_gn_direct else None
     nlin_gn_direct_xci_ratio = {} if compute_gn_direct else None
 
-    for label, losses in loss_cases.items():
+    for label in ("no_loss",):
         pcfm_path = (
             Path("results")
-            / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_pcfm_{label}.npy"
+            / f"total_nlin_{Path(profile_path).stem}_{model_cache_tag}_pcfm_{label}.npy"
         )
         nlin_pcfm_arr, _, nlin_pcfm_xci_arr = _load_or_compute_pcfm(
             system,
@@ -389,27 +378,34 @@ def run_pcfm_workflow(
             launch_powers_w=launch_powers,
             output_path=pcfm_path,
             cfg=cfg,
-            lumped_losses=losses,
             recompute=recompute_pcfm,
             return_components=True,
         )
-        nlin_pcfm_flat = np.asarray(nlin_pcfm_arr, dtype=float).reshape(-1) * nlin_power_scale
-        nlin_pcfm_xci_flat = np.asarray(nlin_pcfm_xci_arr, dtype=float).reshape(-1) * nlin_power_scale
+        nlin_pcfm_output_w = _launch_referenced_nlin_to_output_power(
+            nlin_pcfm_arr,
+            output_over_launch_signal_power_ratio,
+        )
+        nlin_pcfm_xci_output_w = _launch_referenced_nlin_to_output_power(
+            nlin_pcfm_xci_arr,
+            output_over_launch_signal_power_ratio,
+        )
         _save_nlin_csv(
             Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}.csv",
             freqs,
-            nlin_pcfm_flat,
-            signal_power,
+            nlin_pcfm_output_w,
+            output_signal_power_w,
         )
         _save_nlin_csv(
             Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}_xci.csv",
             freqs,
-            nlin_pcfm_xci_flat,
-            signal_power,
+            nlin_pcfm_xci_output_w,
+            output_signal_power_w,
         )
-        gsnr_pcfm[label] = 10.0 * np.log10(signal_power / np.maximum(nlin_pcfm_flat, 1e-18))
-        nlin_pcfm[label] = nlin_pcfm_flat
-        nlin_pcfm_xci[label] = nlin_pcfm_xci_flat
+        gsnr_pcfm[label] = 10.0 * np.log10(
+            output_signal_power_w / np.maximum(nlin_pcfm_output_w, 1e-18)
+        )
+        nlin_pcfm[label] = nlin_pcfm_output_w
+        nlin_pcfm_xci[label] = nlin_pcfm_xci_output_w
 
         if pcfm_eq18_xci:
             if not flat_profiles:
@@ -420,116 +416,122 @@ def run_pcfm_workflow(
                 lg.warning("This multiplication for a SPP function is heuristic.")
             eq18_path = (
                 Path("results")
-                / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_pcfm_{label}_xci_eq18.npy"
+                / f"total_nlin_{Path(profile_path).stem}_{model_cache_tag}_pcfm_{label}_xci_eq18.npy"
             )
-            nlin_pcfm_eq18_xci_flat = np.asarray(
+            nlin_pcfm_eq18_xci_output_w = _launch_referenced_nlin_to_output_power(
                 _load_or_compute_flat_analytic_xci(
                     system,
                     launch_powers_w=launch_powers,
                     output_path=eq18_path,
                     profile_path=profile_path,
                     degree=cfg.degree,
-                    lumped_losses=losses,
                     xci_model="eq18",
                     recompute=recompute_pcfm,
                 ),
-                dtype=float,
-            ).reshape(-1)
-            nlin_pcfm_eq18_xci_flat = nlin_pcfm_eq18_xci_flat * nlin_power_scale
+                output_over_launch_signal_power_ratio,
+            )
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_pcfm_{label}_xci_eq18.csv",
                 freqs,
-                nlin_pcfm_eq18_xci_flat,
-                signal_power,
+                nlin_pcfm_eq18_xci_output_w,
+                output_signal_power_w,
             )
             eq18_label = "eq18" if label == "no_loss" else f"{label} eq18"
-            nlin_pcfm_xci[eq18_label] = nlin_pcfm_eq18_xci_flat
+            nlin_pcfm_xci[eq18_label] = nlin_pcfm_eq18_xci_output_w
 
         if compute_gn:
             gn_path = (
                 Path("results")
-                / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_gn_{label}.npy"
+                / f"total_nlin_{Path(profile_path).stem}_{model_cache_tag}_gn_{label}.npy"
             )
             nlin_gn_arr, _, nlin_gn_xci_arr = _load_or_compute_gn(
                 system,
                 profile_path=profile_path,
                 launch_powers_w=launch_powers,
                 output_path=gn_path,
-                lumped_losses=losses,
                 recompute=recompute_gn,
                 return_components=True,
             )
-            nlin_gn_flat = np.asarray(nlin_gn_arr, dtype=float).reshape(-1) * nlin_power_scale
-            nlin_gn_xci_flat = np.asarray(nlin_gn_xci_arr, dtype=float).reshape(-1) * nlin_power_scale
+            nlin_gn_output_w = _launch_referenced_nlin_to_output_power(
+                nlin_gn_arr,
+                output_over_launch_signal_power_ratio,
+            )
+            nlin_gn_xci_output_w = _launch_referenced_nlin_to_output_power(
+                nlin_gn_xci_arr,
+                output_over_launch_signal_power_ratio,
+            )
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_gn_{label}.csv",
                 freqs,
-                nlin_gn_flat,
-                signal_power,
+                nlin_gn_output_w,
+                output_signal_power_w,
             )
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_gn_{label}_xci.csv",
                 freqs,
-                nlin_gn_xci_flat,
-                signal_power,
+                nlin_gn_xci_output_w,
+                output_signal_power_w,
             )
             if gsnr_gn is not None:
-                gsnr_gn[label] = 10.0 * np.log10(signal_power / np.maximum(nlin_gn_flat, 1e-18))
+                gsnr_gn[label] = 10.0 * np.log10(
+                    output_signal_power_w / np.maximum(nlin_gn_output_w, 1e-18)
+                )
             if nlin_gn is not None:
-                nlin_gn[label] = nlin_gn_flat
+                nlin_gn[label] = nlin_gn_output_w
             if nlin_gn_xci is not None:
-                nlin_gn_xci[label] = nlin_gn_xci_flat
+                nlin_gn_xci[label] = nlin_gn_xci_output_w
 
         if compute_gn_direct:
             gn_direct_path = (
                 Path("results")
-                / f"total_nlin_{Path(profile_path).stem}_disp{dispersion_tag}_gn_direct_{label}.npy"
+                / f"total_nlin_{Path(profile_path).stem}_{model_cache_tag}_gn_direct_{label}.npy"
             )
             nlin_gn_direct_arr, _, nlin_gn_direct_xci_arr = _load_or_compute_gn_direct(
                 system,
                 profile_path=profile_path,
                 launch_powers_w=launch_powers,
                 output_path=gn_direct_path,
-                lumped_losses=losses,
                 recompute=recompute_gn_direct,
                 return_components=True,
             )
-            nlin_gn_direct_flat = (
-                np.asarray(nlin_gn_direct_arr, dtype=float).reshape(-1) * nlin_power_scale
+            nlin_gn_direct_output_w = _launch_referenced_nlin_to_output_power(
+                nlin_gn_direct_arr,
+                output_over_launch_signal_power_ratio,
             )
-            nlin_gn_direct_xci_flat = (
-                np.asarray(nlin_gn_direct_xci_arr, dtype=float).reshape(-1) * nlin_power_scale
+            nlin_gn_direct_xci_output_w = _launch_referenced_nlin_to_output_power(
+                nlin_gn_direct_xci_arr,
+                output_over_launch_signal_power_ratio,
             )
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_gn_direct_{label}.csv",
                 freqs,
-                nlin_gn_direct_flat,
-                signal_power,
+                nlin_gn_direct_output_w,
+                output_signal_power_w,
             )
             _save_nlin_csv(
                 Path("results") / f"total_nlin_{Path(profile_path).stem}_gn_direct_{label}_xci.csv",
                 freqs,
-                nlin_gn_direct_xci_flat,
-                signal_power,
+                nlin_gn_direct_xci_output_w,
+                output_signal_power_w,
             )
             if gsnr_gn_direct is not None:
                 gsnr_gn_direct[label] = 10.0 * np.log10(
-                    signal_power / np.maximum(nlin_gn_direct_flat, 1e-18)
+                    output_signal_power_w / np.maximum(nlin_gn_direct_output_w, 1e-18)
                 )
             if nlin_gn_direct is not None:
-                nlin_gn_direct[label] = nlin_gn_direct_flat
+                nlin_gn_direct[label] = nlin_gn_direct_output_w
             if nlin_gn_direct_xci is not None:
-                nlin_gn_direct_xci[label] = nlin_gn_direct_xci_flat
+                nlin_gn_direct_xci[label] = nlin_gn_direct_xci_output_w
             if nlin_gn_direct_ratio is not None:
-                denom = np.maximum(signal_power, 1e-18)
-                nlin_gn_direct_ratio[label] = nlin_gn_direct_flat / denom
+                denom = np.maximum(output_signal_power_w, 1e-18)
+                nlin_gn_direct_ratio[label] = nlin_gn_direct_output_w / denom
             if nlin_gn_direct_xci_ratio is not None:
-                denom = np.maximum(signal_power, 1e-18)
-                nlin_gn_direct_xci_ratio[label] = nlin_gn_direct_xci_flat / denom
+                denom = np.maximum(output_signal_power_w, 1e-18)
+                nlin_gn_direct_xci_ratio[label] = nlin_gn_direct_xci_output_w / denom
 
     _log_td_gn_vs_pcfm_xci_diff_stats(td_modulations=td_modulations, nlin_pcfm_xci=nlin_pcfm_xci)
 
-    gsnr_td = 10.0 * np.log10(signal_power / np.maximum(nlin_td_flat, 1e-18))
+    gsnr_td = 10.0 * np.log10(output_signal_power_w / np.maximum(nlin_td_output_w, 1e-18))
     if do_plot:
         plot_pcfm_gsnr(
             freqs_hz=freqs,
@@ -542,8 +544,8 @@ def run_pcfm_workflow(
         )
         plot_pcfm_nlin_power(
             freqs_hz=freqs,
-            signal_power_w=signal_power,
-            nlin_td_w=nlin_td_flat,
+            signal_power_w=output_signal_power_w,
+            nlin_td_w=nlin_td_output_w,
             nlin_pcfm_w=nlin_pcfm,
             nlin_gn_w=nlin_gn,
             nlin_td_mod_w=td_modulations,

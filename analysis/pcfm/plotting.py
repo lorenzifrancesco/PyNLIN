@@ -59,6 +59,14 @@ def _save_figure(fig: plt.Figure, out_path: Path, *, dpi: int = 300) -> None:
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight", pad_inches=SAVEFIG_PAD_INCHES)
 
 
+def _ordered_legend(ax: plt.Axes, labels: list[str], **kwargs) -> None:
+    handles, handle_labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(handle_labels, handles))
+    ordered_labels = [label for label in labels if label in by_label]
+    ordered_labels.extend(label for label in handle_labels if label not in ordered_labels)
+    ax.legend([by_label[label] for label in ordered_labels], ordered_labels, **kwargs)
+
+
 def _is_eq18_label(label: str) -> bool:
     return "eq18" in str(label).lower()
 
@@ -288,8 +296,6 @@ def plot_pcfm_nlin_power(
 
         if nlin_pcfm_xci_w:
             for label, nlin in nlin_pcfm_xci_w.items():
-                display = "" if label == "no_loss" else label
-                suffix = f" {display}" if display else ""
                 is_eq18 = _is_eq18_label(label)
                 values = metric_fn(nlin)
                 ax.plot(
@@ -302,7 +308,7 @@ def plot_pcfm_nlin_power(
                     markersize=NLIN_MARKER_SIZE if is_eq18 else NLIN_MARKER_SIZE_KXCI,
                     markerfacecolor="white" if is_eq18 else GNUPLOT_GREEN,
                     markeredgewidth=marker_lw,
-                    label=f"PCFM XCI{suffix}",
+                    label=f"PCFM {'II' if is_eq18 else 'I'}",
                 )
 
         if nlin_gn_w:
@@ -373,7 +379,12 @@ def plot_pcfm_nlin_power(
         ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_SIZE)
         _disable_dbm_axis_grouping(ax)
         ax.grid(False)
-        ax.legend(loc="best", fontsize=LEGEND_SIZE)
+        _ordered_legend(
+            ax,
+            ["PCFM I", "PCFM II", "TD Gaussian", "TD 16-QAM", "TD 256-QAM"],
+            loc="best",
+            fontsize=LEGEND_SIZE,
+        )
         target_path.parent.mkdir(parents=True, exist_ok=True)
         _save_figure(fig, target_path, dpi=dpi)
         lg.success(success_msg.format(path=target_path))
@@ -387,7 +398,7 @@ def plot_pcfm_nlin_power(
     )
     _plot_metric(
         _over_pout_db,
-        ylabel=r"$10\log_{10}(P_{NLI}/P_{out})\;[\mathrm{dB}]$",
+        ylabel=r"$P_{NLI}/P_{out}\;[\mathrm{dB}]$",
         target_path=out_path.with_name(f"{out_path.stem}_over_pout_db{out_path.suffix}"),
         success_msg="Saved normalized NLIN plot to {path}",
     )
