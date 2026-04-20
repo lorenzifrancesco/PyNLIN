@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 
 import numpy as np
 from loguru import logger as lg
@@ -106,7 +107,7 @@ def _resolve_signal_power(
     profile_path: Path | str | None,
     launch_override: np.ndarray | None,
 ) -> np.ndarray:
-    """Return per-channel end-of-fiber signal power (W) for GSNR/normalization."""
+    """Return per-channel output signal power (W) for GSNR/NSR normalization."""
     freqs = system.wdm.frequency_grid()
     if profile_path is not None:
         sig_ch_z, _ = load_signal_profiles(profile_path, system)
@@ -117,21 +118,54 @@ def _resolve_signal_power(
     return np.full_like(freqs, dBm2watt(power_dbm), dtype=float)
 
 
-def _end_over_launch_power_ratio(
+def _power_profile_hash(
+    system: System,
+    profile_path: Path | str | None,
+) -> str:
+    """Hash the numeric signal-power profile used by NLIN cache keys.
+
+    Hashing the parsed arrays avoids cache invalidation from unrelated file
+    container metadata while still changing when the power profile itself
+    changes.
+    """
+    if profile_path is None:
+        return "noprof"
+    signal_power_ch_z, z = load_signal_profiles(profile_path, system)
+    h = hashlib.sha1()
+    for values in (signal_power_ch_z, z):
+        arr = np.ascontiguousarray(np.asarray(values, dtype=np.float64))
+        h.update(str(arr.shape).encode("ascii"))
+        h.update(arr.view(np.uint8))
+    return h.hexdigest()[:12]
+
+
+def _output_over_launch_signal_power_ratio(
     system: System,
     profile_path: Path | str | None,
     launch_powers_w: np.ndarray,
 ) -> np.ndarray:
-    """Return per-channel factor $P_\mathrm{end}/P_\mathrm{launch}$.
+    """Return per-channel factor P_signal,out / P_signal,launch.
 
-    TD/PCFM-style NLIN routines often return an equivalent NLIN power at input,
-    i.e. referenced to $P_\mathrm{launch}$.
-    Multiplying by this ratio converts it to end-of-fiber NLIN power.
+    TD/PCFM/GN producers in this workflow return launch-referenced NLIN
+    powers because their kernels use normalized profiles p(z)=P(z)/P(0).
+    Multiplying by this ratio converts those powers to output-referenced
+    end-of-fiber NLIN powers.
     """
     launch = np.asarray(launch_powers_w, dtype=float).reshape(-1)
-    end_power = _resolve_signal_power(system, profile_path, launch_override=launch)
-    ratio = end_power / np.maximum(launch, 1e-18)
+    output_power = _resolve_signal_power(system, profile_path, launch_override=launch)
+    ratio = output_power / np.maximum(launch, 1e-18)
     return np.asarray(ratio, dtype=float).reshape(-1)
+
+
+def _launch_referenced_nlin_to_output_power(
+    launch_referenced_nlin_w: np.ndarray,
+    output_over_launch_signal_power_ratio: np.ndarray,
+) -> np.ndarray:
+    """Convert launch-referenced NLIN power to output NLIN power."""
+    return (
+        np.asarray(launch_referenced_nlin_w, dtype=float).reshape(-1)
+        * np.asarray(output_over_launch_signal_power_ratio, dtype=float).reshape(-1)
+    )
 
 
 def _save_nlin_csv(
@@ -140,14 +174,18 @@ def _save_nlin_csv(
     nlin_w: np.ndarray,
     signal_power_w: np.ndarray,
 ) -> None:
-    """Save NLIN + GSNR to CSV."""
+    """Save output NLIN power plus explicit NSR and GSNR columns."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     nlin_flat = np.asarray(nlin_w, dtype=float).reshape(-1)
     signal_power_w = np.asarray(signal_power_w, dtype=float).reshape(-1)
-    denom = np.maximum(nlin_flat, 1e-18)
-    gsnr_db = 10.0 * np.log10(signal_power_w / denom)
-    data = np.column_stack([freqs_hz * 1e-12, nlin_flat, gsnr_db])
-    header = "frequency_THz,nlin_W,gsnr_nli_dB"
+    safe_signal = np.maximum(signal_power_w, 1e-18)
+    safe_nlin = np.maximum(nlin_flat, 1e-18)
+    # NSR and GSNR are reciprocal ratios, so their dB values differ only by
+    # sign. Write both columns to make the convention explicit for consumers.
+    nsr_db = 10.0 * np.log10(safe_nlin / safe_signal)
+    gsnr_db = -nsr_db
+    data = np.column_stack([freqs_hz * 1e-12, nlin_flat, nsr_db, gsnr_db])
+    header = "frequency_THz,nlin_W,nsr_nli_dB,gsnr_nli_dB"
     np.savetxt(out, data, delimiter=",", header=header, comments="")
     lg.success(f"Saved NLIN CSV to {out}")
