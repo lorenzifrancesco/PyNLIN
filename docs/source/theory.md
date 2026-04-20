@@ -69,14 +69,16 @@ $$y_\mathrm{norm} = \frac{1}{(L R_s)^2}, \qquad
 \mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}
 = \frac{\mathcal{N}_{m_A,\nu_A,m_B,\nu_B}}{y_\mathrm{norm}}.$$
 
-With per-channel launch powers $P_{\nu}$ (broadcast across modes when
-needed), the channel-wise nonlinear coefficient is
+With per-channel launch powers $P_{m_A,\nu_A}$ (broadcast across modes
+when needed), TD uses the cubic prefactor
 
-$$\gamma_\nu = \frac{n_2\,2\pi f_\nu}{A_{\mathrm{eff},\nu} c},$$
+$$\mathcal{C}_{m_A,\nu_A}=\frac{P_{m_A,\nu_A}^3}{R_s^2},$$
 
-and the cubic prefactor used by TD is
+and applies Kerr scaling inside the interferer sum with the pairwise
+coefficient
 
-$$\mathcal{P}_\nu = \frac{P_\nu^3 \gamma_\nu^2}{R_s^2}.$$
+$$\gamma_{\nu_A,\nu_B}
+= \frac{2\pi f_{\nu_A}}{c}\frac{2n_2}{A_{\mathrm{eff},\nu_A}+A_{\mathrm{eff},\nu_B}}.$$
 
 The implementation constant is
 $n_2 = 2.6\times 10^{-20}\,\mathrm{m^2/W}$.
@@ -85,8 +87,10 @@ $n_2 = 2.6\times 10^{-20}\,\mathrm{m^2/W}$.
 
 For each pair $(m_A,m_B)$, the mode-coupling weight is
 $\kappa^2_{m_A,m_B}$ from `get_kappa2_matrix_uwb`. In the current
-workflow call, `use_kappa=False` and `use_x_mode=True`, therefore
-$\kappa^2_{m_A,m_B}=1$ for all mode pairs.
+workflow call, `use_kappa=True` and `use_x_mode=True`, so
+$\kappa^2_{m_A,m_B}$ is loaded from `input/fiber_data/kappa_uwb.csv`.
+In SMF this reduces to the validated CSV value
+$\kappa_{0,0}\approx 8/9$, hence $\kappa^2_{0,0}\approx (8/9)^2$.
 
 The multiplicity prefactor is
 
@@ -104,24 +108,18 @@ kurtosis factor. In `total_nlin_uwb` this $\mu_0$ is fixed to 64-QAM
 
 ### TD NLIN expression actually used in workflow
 
-The per-mode/per-channel TD NLIN before workflow scaling is
-
-$$P^{\mathrm{TD,raw}}_{m_A,\nu_A}
-=
-\mathcal{P}_{\nu_A}
-\sum_{m_B,\nu_B}
-\mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}
-\kappa^2_{m_A,m_B}
-\Theta(m_A,m_B).$$
-
-Then `analysis/pcfm/workflow.py` applies a manual factor
+The per-mode/per-channel TD NLIN computed in `total_nlin_uwb` is
 
 $$P^{\mathrm{TD}}_{m_A,\nu_A}
 =
-\frac{16}{9}\,P^{\mathrm{TD,raw}}_{m_A,\nu_A}.$$
+\mathcal{C}_{m_A,\nu_A}
+\sum_{m_B,\nu_B}
+\mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}
+\kappa^2_{m_A,m_B}
+\Theta(m_A,m_B)
+\gamma_{\nu_A,\nu_B}^2.$$
 
-This is implemented by `_apply_pcfm_manakov_scaling` and is currently
-active.
+No additional workflow-level $16/9$ scaling is applied.
 
 ### Modulation sweep path (TD decomposition)
 
@@ -132,14 +130,14 @@ $$\mathrm{sum\_a}_{m_A,\nu_A}
 =
 \sum_{m_B}
 \kappa^2_{m_A,m_B}
-\left(\sum_{\nu_B}\mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}\right)
+\left(\sum_{\nu_B}\mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}\gamma_{\nu_A,\nu_B}^2\right)
 a(m_A,m_B),$$
 
 $$\mathrm{sum\_b}_{m_A,\nu_A}
 =
 \sum_{m_B}
 \kappa^2_{m_A,m_B}
-\left(\sum_{\nu_B}\mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}\right)
+\left(\sum_{\nu_B}\mathcal{N}^{(\mathrm{SI})}_{m_A,\nu_A,m_B,\nu_B}\gamma_{\nu_A,\nu_B}^2\right)
 b(m_A,m_B),$$
 
 with
@@ -157,8 +155,7 @@ For a target modulation with kurtosis $\mu_0$, the TD estimate is
 
 $$P^{\mathrm{TD}}_{m_A,\nu_A}(\mu_0)
 =
-\frac{16}{9}\,
-\mathcal{P}_{\nu_A}
+\mathcal{C}_{m_A,\nu_A}
 \left(\mu_0\,\mathrm{sum\_a}_{m_A,\nu_A}
 + \mathrm{sum\_b}_{m_A,\nu_A}\right).$$
 
@@ -314,7 +311,7 @@ of polynomial fits.
 
 Let
 
-$$g_i = \frac{P_{i,\mathrm{launch}}}{B},$$
+$$g_i = \frac{2P_{i,\mathrm{launch}}}{B},$$
 
 $$\gamma_i = \frac{2\pi f_i}{c}\frac{n_2}{A_{\mathrm{eff},i}}, \qquad
 \gamma_{ij} = \frac{2\pi f_i}{c}\frac{2n_2}{A_{\mathrm{eff},i}+A_{\mathrm{eff},j}}.$$
@@ -367,9 +364,16 @@ $$P^{\mathrm{model}}_{\mathrm{NLI},i}
 The same $1/2$ factor is also applied to returned SCI and XCI power
 components.
 
-This correction is implemented as a final-formula conversion only
-(`POLARIZATION_COUNT = 2.0` in `pcfm_gn.py`), not as an input
-launch-power renormalization.
+Code-level logic is explicit:
+
+- the PSD prefactors use channel-level launch normalization
+  ($g_i=2P_i/B$ via `_to_per_channel_power`),
+- kernel accumulation builds channel-level NLIN PSD,
+- the returned NLIN power is converted to per-polarization values with
+  `_to_per_polarization_power(...)=.../2`.
+
+So the divide-by-2 is a final representation choice (per-polarization
+reporting), not a change to the kernel physics.
 
 ### Idealized flat-profile SMF comparison
 
@@ -585,7 +589,7 @@ For SMF, the TD modulation coefficient is $5\mu_0-4$ (because $S_0=1$),
 hence the current workflow gives
 
 $$P^{\mathrm{TD}}_{ij}(\mu_0)
-= \frac{16}{9}\frac{P^3\gamma^2}{B^2}(5\mu_0-4)\,(L B)^2F_{\mathrm{S1}}(x_{ij}).$$
+= \frac{P^3\gamma^2}{B^2}(5\mu_0-4)\,(L B)^2F_{\mathrm{S1}}(x_{ij}).$$
 
 For PCFM-XCI, the current implementation uses `g_ch = 2P/B`, the
 closed-form kernel with $S_j=1$ for $p(z)\equiv 1$, and then the final
@@ -605,7 +609,7 @@ Therefore the matched pairwise ratio is
 
 $$\frac{P^{\mathrm{PCFM,XCI}}_{ij}}{P^{\mathrm{TD}}_{ij}(\mu_0)}
 =
-\frac{4}{3(5\mu_0-4)}
+\frac{64}{27(5\mu_0-4)}
 \frac{
 r_{ij}\ln\!\left(\frac{r_{ij}+1/2}{r_{ij}-1/2}\right)
 }{
@@ -690,7 +694,7 @@ with $c_{\mathrm{N}}\approx 1$ for the current cached fit. Then
 
 $$\frac{P^{\mathrm{PCFM,XCI}}_{ij}}{P^{\mathrm{TD}}_{ij}(\mu_0)}
 \sim
-\frac{4}{3(5\mu_0-4)c_{\mathrm{N}}}
+\frac{64}{27(5\mu_0-4)c_{\mathrm{N}}}
 r_{ij}\ln\!\left(\frac{r_{ij}+1/2}{r_{ij}-1/2}\right).$$
 
 Since $r\ln((r+1/2)/(r-1/2))\to 1$ as $r\to\infty$, the asymptotic limit
@@ -698,11 +702,11 @@ becomes
 
 $$\frac{P^{\mathrm{PCFM,XCI}}}{P^{\mathrm{TD}}}
 \to
-\frac{4}{3(5\mu_0-4)c_{\mathrm{N}}}.$$
+\frac{64}{27(5\mu_0-4)c_{\mathrm{N}}}.$$
 
-For Gaussian modulation ($\mu_0=2$), this tends to about `0.22` when
+For Gaussian modulation ($\mu_0=2$), this tends to about `0.40` when
 $c_{\mathrm{N}}\approx 1$; for 64-QAM ($\mu_0\approx 1.381$), it is
-about `0.46`. So under the present implementation, the idealized
+about `0.82`. So under the present implementation, the idealized
 asymptotic trend is the opposite inequality: TD remains larger than
 PCFM-XCI.
 

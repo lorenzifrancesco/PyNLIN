@@ -815,7 +815,7 @@ def compute_gn_numeric(
             np.any(launch_powers_w <= 0) or np.any(launch_powers_w > MAX_POWER_W)):
         raise ValueError("Launch powers are unreasonable for GN numeric.")
 
-    g_ch = launch_powers_w / B_ch
+    g_ch = _to_per_channel_power(launch_powers_w) / B_ch
     g_sci_psd = np.zeros((1, n_channels), dtype=float)
     g_xci_psd = np.zeros((1, n_channels), dtype=float)
 
@@ -922,7 +922,7 @@ def compute_gn_direct(
             np.any(launch_powers_w <= 0) or np.any(launch_powers_w > MAX_POWER_W)):
         raise ValueError("Launch powers are unreasonable for GN direct.")
 
-    g_ch = launch_powers_w / B_ch
+    g_ch = _to_per_channel_power(launch_powers_w) / B_ch
     g_sci_psd = np.zeros((1, n_channels), dtype=float)
     g_xci_psd = np.zeros((1, n_channels), dtype=float)
 
