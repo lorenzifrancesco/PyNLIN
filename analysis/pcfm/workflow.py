@@ -5,7 +5,11 @@ import numpy as np
 from loguru import logger as lg
 
 from pynlin.constellation_stats import gaussian_mu0
-from pynlin.nlin.nlin_estimator_uwb import collision_coeffs_system_uwb, total_nlin_uwb
+from pynlin.nlin.nlin_estimator_uwb import (
+    UWB_M_LO_TRUNCATION_DEFAULT,
+    collision_coeffs_system_uwb,
+    total_nlin_uwb,
+)
 from pynlin.nlin.pcfm_gn import PcfmConfig, load_signal_profiles
 from pynlin.raman.solvers_jiang import JiangIterativeConfig
 from pynlin.system import System
@@ -27,8 +31,8 @@ from .io import (
     _save_nlin_csv,
     _write_flat_profile,
 )
-from .models import _load_or_compute_gn, _load_or_compute_gn_direct, _load_or_compute_pcfm
-from .models import _load_or_compute_flat_analytic_xci
+from .models import _load_or_compute_gn, _load_or_compute_gn_direct, _load_or_compute_pcfm_I
+from .models import _load_or_compute_pcfm_general
 from .plotting import (
     plot_pcfm_diagnostics,
     plot_pcfm_gsnr,
@@ -161,6 +165,9 @@ def run_pcfm_workflow(
         else bool(td_exclude_self_channel)
     )
     plot_pcfm_total_and_sci = bool(runtime_cfg["plot_pcfm_total_and_sci"])
+    td_m_lo_truncation = int(
+        runtime_cfg.get("td_m_lo_truncation", UWB_M_LO_TRUNCATION_DEFAULT)
+    )
     cfg = PcfmConfig(
         degree=9,
         include_mci=False,
@@ -301,7 +308,8 @@ def run_pcfm_workflow(
         ipulse=1,
         recompute=recompute_td,
         profile_path=profile_path,
-    )
+        m_lo_truncation=td_m_lo_truncation,
+    ) # heart of TD
     nlin_td = total_nlin_uwb(
         system,
         ccfs,
@@ -313,7 +321,10 @@ def run_pcfm_workflow(
             profile_path,
             use_kappa=True,
             use_x_mode=True,
-            extra_tag=f"{model_cache_tag}_{'xci' if td_exclude_self_channel else 'all'}",
+            extra_tag=(
+                f"{model_cache_tag}_mtrunc{td_m_lo_truncation}_"
+                f"{'xci' if td_exclude_self_channel else 'all'}"
+            ),
         ),
         recompute=recompute_td,
     )
@@ -372,7 +383,10 @@ def run_pcfm_workflow(
             Path("results")
             / f"total_nlin_{Path(profile_path).stem}_{model_cache_tag}_pcfm_{label}.npy"
         )
-        nlin_pcfm_arr, _, nlin_pcfm_xci_arr = _load_or_compute_pcfm(
+        ############
+        # PCFM-I
+        ############
+        nlin_pcfm_arr, _, nlin_pcfm_xci_arr = _load_or_compute_pcfm_I(
             system,
             profile_path=profile_path,
             launch_powers_w=launch_powers,
@@ -407,19 +421,21 @@ def run_pcfm_workflow(
         nlin_pcfm[label] = nlin_pcfm_output_w
         nlin_pcfm_xci[label] = nlin_pcfm_xci_output_w
 
+        ############
+        # PCFM-II
+        ############
         if pcfm_eq18_xci:
             if not flat_profiles:
                 lg.info(
-                    "PCFM Eq. 18 XCI requested with non-flat power profiles: "
-                    "adding the flat-analytic Eq. 18 reference curve to the plot/output."
+                    "PCFM-II XCI requested with non-flat power profiles: "
+                    "evaluating any_island.pdf Eq. 18 with fitted SPPs."
                 )
-                lg.warning("This multiplication for a SPP function is heuristic.")
             eq18_path = (
                 Path("results")
                 / f"total_nlin_{Path(profile_path).stem}_{model_cache_tag}_pcfm_{label}_xci_eq18.npy"
             )
             nlin_pcfm_eq18_xci_output_w = _launch_referenced_nlin_to_output_power(
-                _load_or_compute_flat_analytic_xci(
+                _load_or_compute_pcfm_general(
                     system,
                     launch_powers_w=launch_powers,
                     output_path=eq18_path,

@@ -38,7 +38,12 @@ import matplotlib.pyplot as plt
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from analysis.pcfm.analytics import _g_kernel as _g_kernel_fast
+from analysis.pcfm.analytics import (
+    _g_kernel as _g_kernel_fast,
+    _pcfm_I_poly_sums,
+    pcfm_II,
+)
+from analysis.pcfm.config import _load_pcfm_runtime_config, _select_scaling_channel
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import _write_flat_profile
 from pynlin.nlin.cache_names import s2a_lo_timeint_path, s2b_lo_extrema_path
@@ -46,7 +51,11 @@ from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, s
 from pynlin.nlin.nlin_estimation.lo_correction_uwb import (
     build_lookup_integral_table_with_raman,
 )
-from pynlin.nlin.nlin_estimator_uwb import apply_plateau_correction
+from pynlin.nlin.nlin_estimation.raman_integrals_uwb import load_fB, raman_integral
+from pynlin.nlin.nlin_estimator_uwb import (
+    apply_plateau_correction,
+    apply_turning_point_correction,
+)
 from pynlin.system import System
 from pynlin.utils import _toml_load
 
@@ -71,6 +80,7 @@ COLOR_N_REFERENCE = GNUPLOT_GRAY
 COLOR_KXCI = GNUPLOT_GREEN
 COLOR_KXCI_EQ18 = GNUPLOT_BLUE
 COLOR_PRE_UNITY_SHADE = "#F0F0F0"
+ATTENUATED_LINESTYLE = ":"
 DEFAULT_LLD_SWEEP_X = 1.0
 DEFAULT_LLD_SWEEP_MIN = 1e-2
 DEFAULT_LLD_SWEEP_MAX = 20.0
@@ -179,12 +189,42 @@ def k_xci_eq18_normalized(x: np.ndarray, l_over_leff: float) -> np.ndarray:
     mask = np.ones_like(x, dtype=bool)# FIXME
     if not np.any(mask):
         return out
-    scale = np.broadcast_to(l_over_leff, x.shape)
-    z_plus = np.pi * scale[mask] * (x[mask] + 0.5)
-    z_minus = np.pi * scale[mask] * (x[mask] - 0.5)
-    out[mask] = (
-        (2.0 / (np.pi * scale[mask])) * (_g_kernel_fast(z_plus) - _g_kernel_fast(z_minus))
-    ) / (2.0 * np.pi)
+    scale = np.broadcast_to(l_over_leff, x.shape)  # FIXME try to rescale L/LDeff into the PCFM Eq. 18 phase convention.
+    phase_scale = 2.0 * np.pi * scale  # FIXME try to rescale L/LDeff into 2*pi*L/LDeff for the g-kernel arguments.
+    z_plus = np.pi * phase_scale[mask] * (x[mask] + 0.5)  # FIXME try to rescale L/LDeff into PCFM-compatible z_plus.
+    z_minus = np.pi * phase_scale[mask] * (x[mask] - 0.5)  # FIXME try to rescale L/LDeff into PCFM-compatible z_minus.
+    out[mask] = 2.0 * np.pi * (  # FIXME try to rescale L/LDeff into PCFM-compatible kernel amplitude.
+        (2.0 / (np.pi * phase_scale[mask])) * (_g_kernel_fast(z_plus) - _g_kernel_fast(z_minus))  # FIXME try to rescale L/LDeff into the PCFM Eq. 18 prefactor.
+    ) / (2.0 * np.pi) # this is the flat profile  # FIXME try to rescale L/LDeff into the PCFM-normalized flat profile.
+    return out
+
+
+def pcfm_II_profile_normalized(
+    x: np.ndarray,
+    *,
+    l_over_ld: float,
+    system: System,
+    profile_path: Path,
+    profile_channel_idx: int,
+    degree: int,
+) -> np.ndarray:
+    """Evaluate profile-aware PCFM-II in the script's normalized variables."""
+    x = np.asarray(x, dtype=float)
+    out = np.full_like(x, np.nan, dtype=float)
+    mask = np.isfinite(x) & (x > 0.5)
+    if not np.any(mask):
+        return out
+    for idx in np.flatnonzero(mask):
+        out[idx] = pcfm_II(
+            system,
+            profile_path=str(profile_path),
+            interferer_idx=int(profile_channel_idx),
+            beta2_eff_s2_per_m=float(l_over_ld),
+            delta_f_hz=float(x[idx]),
+            bandwidth_hz=1.0,
+            length_m=1.0,
+            degree=int(degree),
+        )
     return out
 
 ################
@@ -296,6 +336,7 @@ def _comparison_figure(
     *,
     y_k_eq18: np.ndarray,
     y_n_reference: np.ndarray | None,
+    attenuation: dict[str, np.ndarray] | None = None,
     loglog: bool,
     normalize: bool,
     show_crossover: bool,
@@ -334,6 +375,32 @@ def _comparison_figure(
             linestyle="-.",
             label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$",
         )
+    if attenuation is not None:
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            attenuation["y_n"],
+            color=COLOR_N,
+            linestyle=ATTENUATED_LINESTYLE,
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$ att.",
+        )
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            attenuation["y_k"],
+            color=COLOR_KXCI,
+            linestyle=ATTENUATED_LINESTYLE,
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$ att.",
+        )
+        if show_kxci_alternative:
+            _plot_pcfm_style_line(
+                ax,
+                x,
+                attenuation["y_k_eq18"],
+                color=COLOR_KXCI_EQ18,
+                linestyle=ATTENUATED_LINESTYLE,
+                label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$ att.",
+            )
     if show_unity_guides:
         ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
 
@@ -347,6 +414,10 @@ def _comparison_figure(
             arrays.append(y_n_reference)
         if show_kxci_alternative:
             arrays.append(y_k_eq18)
+        if attenuation is not None:
+            arrays.extend([attenuation["y_n"], attenuation["y_k"]])
+            if show_kxci_alternative:
+                arrays.append(attenuation["y_k_eq18"])
         ymin, ymax = finite_min_max(*arrays)
         pad = 0.06 * (ymax - ymin) if ymax > ymin else 0.1
         ax.set_ylim(ymin - pad, ymax + pad)
@@ -404,6 +475,7 @@ def _ratio_figure(
     ratio: np.ndarray,
     *,
     ratio_eq18: np.ndarray | None,
+    attenuation: dict[str, np.ndarray] | None,
     loglog: bool,
     crossover: float | None,
 ) -> plt.Figure:
@@ -426,6 +498,24 @@ def _ratio_figure(
             linestyle="-.",
             label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$",
         )
+    if attenuation is not None:
+        _plot_pcfm_style_line(
+            ax,
+            x,
+            attenuation["ratio"],
+            color=COLOR_KXCI,
+            linestyle=ATTENUATED_LINESTYLE,
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$ att.",
+        )
+        if ratio_eq18 is not None:
+            _plot_pcfm_style_line(
+                ax,
+                x,
+                attenuation["ratio_eq18"],
+                color=COLOR_KXCI_EQ18,
+                linestyle=ATTENUATED_LINESTYLE,
+                label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$ att.",
+            )
     if crossover is not None and np.isfinite(crossover):
         ax.axvline(crossover, color="0.35", linestyle="--", linewidth=LINE_LW)
     _style_axes(ax, loglog=loglog)
@@ -445,6 +535,7 @@ def _lld_sweep_figure(
     y_k: np.ndarray,
     *,
     y_k_eq18: np.ndarray,
+    attenuation: dict[str, np.ndarray] | None,
     x_fixed: float,
     loglog: bool,
     n_label: str,
@@ -467,6 +558,31 @@ def _lld_sweep_figure(
         linestyle="-.",
         label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$",
     )
+    if attenuation is not None:
+        _plot_pcfm_style_line(
+            ax,
+            l_over_ld,
+            attenuation["y_n"],
+            color=COLOR_N,
+            linestyle=ATTENUATED_LINESTYLE,
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$ att.",
+        )
+        _plot_pcfm_style_line(
+            ax,
+            l_over_ld,
+            attenuation["y_k"],
+            color=COLOR_KXCI,
+            linestyle=ATTENUATED_LINESTYLE,
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$ att.",
+        )
+        _plot_pcfm_style_line(
+            ax,
+            l_over_ld,
+            attenuation["y_k_eq18"],
+            color=COLOR_KXCI_EQ18,
+            linestyle=ATTENUATED_LINESTYLE,
+            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$ att.",
+        )
     ax.set_xscale("log")
     if loglog:
         ax.set_yscale("log")
@@ -524,6 +640,40 @@ def _combined_comparison_figure(
                 label=label_k_eq18,
             )
             arrays.append(case["y_k_eq18"])
+        if case.get("attenuation") is not None:
+            att = case["attenuation"]
+            label_att_n = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$ att." if idx == 0 else "_nolegend_"
+            label_att_k = r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$ att." if idx == 0 else "_nolegend_"
+            label_att_k_eq18 = (
+                r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$ att." if idx == 0 else "_nolegend_"
+            )
+            _plot_pcfm_style_line(
+                ax,
+                x,
+                att["y_n"],
+                color=COLOR_N,
+                linestyle=ATTENUATED_LINESTYLE,
+                label=label_att_n,
+            )
+            _plot_pcfm_style_line(
+                ax,
+                x,
+                att["y_k"],
+                color=COLOR_KXCI,
+                linestyle=ATTENUATED_LINESTYLE,
+                label=label_att_k,
+            )
+            arrays.extend([att["y_n"], att["y_k"]])
+            if show_kxci_alternative:
+                _plot_pcfm_style_line(
+                    ax,
+                    x,
+                    att["y_k_eq18"],
+                    color=COLOR_KXCI_EQ18,
+                    linestyle=ATTENUATED_LINESTYLE,
+                    label=label_att_k_eq18,
+                )
+                arrays.append(att["y_k_eq18"])
 
     if show_unity_guides:
         ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
@@ -565,6 +715,16 @@ def _combined_ratio_figure(
         crossover = case["crossover"]
         if crossover is not None and np.isfinite(crossover):
             ax.axvline(crossover, color=COLOR_N_REFERENCE, linestyle="--", linewidth=LINE_LW)
+        if case.get("attenuation") is not None:
+            att = case["attenuation"]
+            _plot_pcfm_style_line(
+                ax,
+                x,
+                att["ratio"],
+                color=COLOR_KXCI,
+                linestyle=ATTENUATED_LINESTYLE,
+                label=rf"$\mathnormal{{\mathcal{{N}}^{{(\mathrm{{PCFM-I}})}}/\mathcal{{N}}^{{(\mathrm{{TD}})}}}}$ att., {case['case_label']}",
+            )
 
     _style_axes(ax, loglog=loglog)
     ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
@@ -629,18 +789,23 @@ def _ensure_flat_profile(
     return profile_path
 
 
-def _prepare_flat_td_corrections(
+def _prepare_td_corrections(
     system: System,
     *,
     profile_path: Path,
+    flat_profile: bool,
+    profile_channel_idx: int | None = None,
     ipulse: int,
     recompute: bool,
     max_l_over_ld: float,
     eta_override: float | None = None,
     m_lo_truncation: int = 2,
 ) -> dict[str, Any]:
-    _force_flat_profile_mode(system)
-    profile_path = _ensure_flat_profile(system, profile_path, recompute=recompute)
+    if flat_profile:
+        _force_flat_profile_mode(system)
+        profile_path = _ensure_flat_profile(system, profile_path, recompute=recompute)
+    elif not profile_path.exists():
+        raise FileNotFoundError(f"Attenuation power profile not found: {profile_path}")
     pulse_name = "gaussian" if ipulse == 0 else "nyquist"
     lld_max = max(float(max_l_over_ld), 2.5)
     s2b_cache = s2b_lo_extrema_path(
@@ -648,6 +813,7 @@ def _prepare_flat_td_corrections(
         m_lo_truncation=m_lo_truncation,
         fiber_length=float(system.fiber_length),
         lld_max=lld_max,
+        custom_fB_index=profile_channel_idx,
     )
     s2a_caches = [
         s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo)
@@ -655,10 +821,11 @@ def _prepare_flat_td_corrections(
     ]
     lg.info(
         "TD correction lookup setup: pulse={} flat_profile={} profile_path={} "
-        "S2B cache={} source S2A caches={}".format(
+        "profile_channel_idx={} S2B cache={} source S2A caches={}".format(
             pulse_name,
-            profile_path.exists(),
+            bool(flat_profile),
             profile_path,
+            profile_channel_idx,
             s2b_cache,
             [str(path) for path in s2a_caches],
         )
@@ -669,8 +836,23 @@ def _prepare_flat_td_corrections(
         ipulse=ipulse,
         recompute=recompute,
         profile_path=profile_path,
+        profile_channel_idx=profile_channel_idx,
         max_lld=max_l_over_ld,
     )
+    hi_factor = 1.0
+    if not flat_profile:
+        _, fB_min, fB_max, _, _ = load_fB(
+            system,
+            profile_path=profile_path,
+            profile_channel_idx=profile_channel_idx,
+        )
+        if not np.allclose(fB_min, fB_max, rtol=1e-10, atol=1e-12):
+            lg.warning(
+                "Profile-aware TD correction received non-identical min/max fB "
+                "for profile_channel_idx={}; using fB_min for the HI correction.",
+                profile_channel_idx,
+            )
+        hi_factor = float(raman_integral(system, "HI", fB_min))
     ps_ideal_raw = tuple(
         float(v)
         for v in ideal_fit_coefficients(
@@ -704,7 +886,32 @@ def _prepare_flat_td_corrections(
         "s2a_caches": s2a_caches,
         "pulse_name": pulse_name,
         "m_lo_truncation": int(m_lo_truncation),
+        "flat_profile": bool(flat_profile),
+        "profile_channel_idx": None if profile_channel_idx is None else int(profile_channel_idx),
+        "hi_factor": float(hi_factor),
     }
+
+
+def _prepare_flat_td_corrections(
+    system: System,
+    *,
+    profile_path: Path,
+    ipulse: int,
+    recompute: bool,
+    max_l_over_ld: float,
+    eta_override: float | None = None,
+    m_lo_truncation: int = 20,
+) -> dict[str, Any]:
+    return _prepare_td_corrections(
+        system,
+        profile_path=profile_path,
+        flat_profile=True,
+        ipulse=ipulse,
+        recompute=recompute,
+        max_l_over_ld=max_l_over_ld,
+        eta_override=eta_override,
+        m_lo_truncation=m_lo_truncation,
+    )
 
 
 def _td_corrected_softplus_params_flat(
@@ -716,17 +923,28 @@ def _td_corrected_softplus_params_flat(
     lo_value = float(td_ctx["rmin_lookup"](float(l_over_ld), float(l_over_ld)))
     ps_ideal = tuple(float(v) for v in td_ctx["ps_ideal"])
     ps_corrected = tuple(float(v) for v in apply_plateau_correction(ps_ideal, lo_value))
+    hi_factor = float(td_ctx.get("hi_factor", 1.0))
+    if not td_ctx.get("flat_profile", False):
+        ps_corrected = tuple(
+            float(v) for v in apply_turning_point_correction(ps_corrected, hi_factor)
+        )
+        # lg.info(
+        #     "We apply HI correction"
+        #     )
     if verbose:
+        profile_kind = "flat-profile" if td_ctx.get("flat_profile", False) else "profile-aware"
         lg.info(
-            "TD flat-profile correction from cache {} at L/LD={:.6g}: "
+            "TD {} correction from cache {} at L/LD={:.6g}: "
             "using rmin_lookup(L/LD,L/LD)={:.6e}; ideal (a,Lambda,eta)=({:.6e},{:.6e},{:.6e}) "
-            "-> corrected (a,Lambda,eta)=({:.6e},{:.6e},{:.6e})".format(
+            "HI factor={:.6e} -> corrected (a,Lambda,eta)=({:.6e},{:.6e},{:.6e})".format(
+                profile_kind,
                 td_ctx["s2b_cache"],
                 float(l_over_ld),
                 lo_value,
                 ps_ideal[0],
                 ps_ideal[1],
                 ps_ideal[2],
+                hi_factor,
                 ps_corrected[0],
                 ps_corrected[1],
                 ps_corrected[2],
@@ -799,6 +1017,14 @@ def _config_key_map() -> dict[str, str]:
         "recompute-corrections": "recompute_corrections",
         "flat_profile": "flat_profile",
         "flat-profile": "flat_profile",
+        "show_attenuation": "show_attenuation",
+        "show-attenuation": "show_attenuation",
+        "attenuation_profile_path": "attenuation_profile_path",
+        "attenuation-profile-path": "attenuation_profile_path",
+        "attenuation_profile_degree": "attenuation_profile_degree",
+        "attenuation-profile-degree": "attenuation_profile_degree",
+        "attenuation_channel_index": "attenuation_channel_index",
+        "attenuation-channel-index": "attenuation_channel_index",
         "ipulse": "ipulse",
         "m_lo_truncation": "m_lo_truncation",
         "m-lo-truncation": "m_lo_truncation",
@@ -835,13 +1061,28 @@ def _load_config_defaults(config_path: Path | None) -> dict[str, object]:
 
     if "out_dir" in defaults:
         defaults["out_dir"] = (config_path.parent / Path(defaults["out_dir"])).resolve()
-    for key in ("system_config", "profile_path"):
+    for key in ("system_config", "profile_path", "attenuation_profile_path"):
         if key in defaults and defaults[key] is not None:
             defaults[key] = (config_path.parent / Path(defaults[key])).resolve()
     if "l_over_leff_values" in defaults:
         defaults["l_over_leff_values"] = _as_float_list(defaults["l_over_leff_values"])
 
     return defaults
+
+
+def _resolve_attenuation_profile_path(
+    system: System,
+    explicit_path: Path | None,
+) -> Path:
+    if explicit_path is not None:
+        return Path(explicit_path)
+    runtime_cfg = _load_pcfm_runtime_config(system)
+    raw_path = runtime_cfg.get("profile_path")
+    if raw_path is None:
+        raise ValueError(
+            "--attenuation-profile-path is required because [pcfm.paths].profile is missing."
+        )
+    return Path(str(raw_path))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -949,6 +1190,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use a synthetic flat power profile when building TD corrections.",
     )
     parser.add_argument(
+        "--show-attenuation",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Overlay TD/PCFM curves using the center-channel attenuation profile.",
+    )
+    parser.add_argument(
+        "--attenuation-profile-path",
+        type=Path,
+        default=None,
+        help="Power profile file for the attenuation overlay. Defaults to [pcfm.paths].profile from --system-config.",
+    )
+    parser.add_argument(
+        "--attenuation-profile-degree",
+        type=int,
+        default=9,
+        help="Polynomial degree used to fit the attenuation power profile for PCFM-I/II.",
+    )
+    parser.add_argument(
+        "--attenuation-channel-index",
+        type=int,
+        default=None,
+        help="Optional profile channel index for attenuation; defaults to the workflow band-center channel.",
+    )
+    parser.add_argument(
         "--ipulse",
         type=int,
         choices=(0, 1),
@@ -982,11 +1247,15 @@ def main() -> None:
         raise ValueError("lambda, L/Leff, and eta must be strictly positive.")
     if int(args.m_lo_truncation) < 0:
         raise ValueError("m_lo_truncation must be non-negative.")
+    if int(args.attenuation_profile_degree) < 0:
+        raise ValueError("attenuation_profile_degree must be non-negative.")
     l_over_leff_values = _as_float_list(args.l_over_leff_values) or [float(args.l_over_leff)]
     if any(value <= 0.0 for value in l_over_leff_values):
         raise ValueError("All L/Leff values must be strictly positive.")
     if args.use_td_corrections and args.system_config is None:
         raise ValueError("--system-config is required when --use-td-corrections is enabled.")
+    if args.show_attenuation and args.system_config is None:
+        raise ValueError("--system-config is required when --show-attenuation is enabled.")
 
     x = _make_x_grid(args.x_min, args.x_max, args.npts, args.loglog)
     td_ctx: dict[str, Any] | None = None
@@ -1020,6 +1289,58 @@ def main() -> None:
         td_ctx["lld_target"] = float(lld_target)
         td_ctx["ps_lld_target"] = tuple(float(v) for v in ps_lld_target)
 
+    attenuation_ctx: dict[str, Any] | None = None
+    if args.show_attenuation:
+        attenuation_system = System.from_toml(args.system_config)
+        attenuation_profile_path = _resolve_attenuation_profile_path(
+            attenuation_system,
+            args.attenuation_profile_path,
+        )
+        center_idx, center_label = _select_scaling_channel(attenuation_system)
+        attenuation_channel_idx = (
+            center_idx
+            if args.attenuation_channel_index is None
+            else int(args.attenuation_channel_index)
+        )
+        if attenuation_channel_idx < 0 or attenuation_channel_idx >= attenuation_system.n_channels:
+            raise IndexError(
+                f"attenuation_channel_index={attenuation_channel_idx} out of bounds "
+                f"for {attenuation_system.n_channels} channels"
+            )
+        poly_sums = _pcfm_I_poly_sums(
+            attenuation_system,
+            profile_path=str(attenuation_profile_path),
+            degree=int(args.attenuation_profile_degree),
+        )
+        attenuation_td_ctx = _prepare_td_corrections(
+            attenuation_system,
+            profile_path=attenuation_profile_path,
+            flat_profile=False,
+            profile_channel_idx=attenuation_channel_idx,
+            ipulse=int(args.ipulse),
+            recompute=bool(args.recompute_corrections),
+            max_l_over_ld=max(max(l_over_leff_values), DEFAULT_LLD_SWEEP_MAX),
+            eta_override=float(args.eta),
+            m_lo_truncation=int(args.m_lo_truncation),
+        )
+        attenuation_ctx = {
+            "system": attenuation_system,
+            "profile_path": attenuation_profile_path,
+            "channel_idx": int(attenuation_channel_idx),
+            "channel_label": center_label,
+            "degree": int(args.attenuation_profile_degree),
+            "pcfm_I_poly_sum": float(poly_sums[attenuation_channel_idx]),
+            "td_ctx": attenuation_td_ctx,
+        }
+        lg.info(
+            "Attenuation overlay: profile={} channel_idx={} band={} PCFM-I poly_sum={:.6e}".format(
+                attenuation_profile_path,
+                attenuation_channel_idx,
+                center_label,
+                attenuation_ctx["pcfm_I_poly_sum"],
+            )
+        )
+
     suffixes = [".pdf", ".png"] if args.format == "both" else [f".{args.format}"]
     multi_case = len(l_over_leff_values) > 1
     summary_rows: list[dict[str, float]] = []
@@ -1033,6 +1354,7 @@ def main() -> None:
 
         y_n = y_n_paper
         y_n_reference = None
+        attenuation_case: dict[str, np.ndarray] | None = None
         n_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
         n_reference_label = None
         plateau_ideal = float("nan")
@@ -1052,10 +1374,37 @@ def main() -> None:
             plateau_ideal, lambda_ideal, eta_ideal = ps_ideal
             plateau_corrected, lambda_corrected, eta_corrected = ps_corrected
 
+        if attenuation_ctx is not None:
+            att_td_ctx = attenuation_ctx["td_ctx"]
+            ps_att = _td_corrected_softplus_params_flat(l_over_leff, att_td_ctx)
+            y_n_att = n_softplus_scaled(x, l_over_ld=l_over_leff, ps=ps_att)
+            y_k_att = y_k * float(attenuation_ctx["pcfm_I_poly_sum"])
+            y_k_eq18_att = pcfm_II_profile_normalized(
+                x,
+                l_over_ld=l_over_leff,
+                system=attenuation_ctx["system"],
+                profile_path=attenuation_ctx["profile_path"],
+                profile_channel_idx=int(attenuation_ctx["channel_idx"]),
+                degree=int(attenuation_ctx["degree"]),
+            )
+            attenuation_case = {
+                "y_n": np.asarray(y_n_att, dtype=float),
+                "y_k": np.asarray(y_k_att, dtype=float),
+                "y_k_eq18": np.asarray(y_k_eq18_att, dtype=float),
+            }
+
         if args.normalize:
             arrays_to_scale = [y_n, y_k, y_k_eq18]
             if y_n_reference is not None:
                 arrays_to_scale.append(y_n_reference)
+            if attenuation_case is not None:
+                arrays_to_scale.extend(
+                    [
+                        attenuation_case["y_n"],
+                        attenuation_case["y_k"],
+                        attenuation_case["y_k_eq18"],
+                    ]
+                )
             for y in arrays_to_scale:
                 finite = y[np.isfinite(y)]
                 if finite.size == 0:
@@ -1070,6 +1419,7 @@ def main() -> None:
             y_k,
             y_k_eq18=y_k_eq18,
             y_n_reference=y_n_reference,
+            attenuation=attenuation_case,
             loglog=args.loglog,
             normalize=args.normalize,
             show_crossover=args.show_crossover,
@@ -1097,6 +1447,14 @@ def main() -> None:
                 y_k_x1,
                 y_k_eq18=y_k_eq18_x1,
                 y_n_reference=y_n_ref_x1,
+                attenuation=(
+                    None
+                    if attenuation_case is None
+                    else {
+                        key: np.asarray(value, dtype=float)[np.isfinite(x) & (x >= 1.0)]
+                        for key, value in attenuation_case.items()
+                    }
+                ),
                 loglog=args.loglog,
                 normalize=args.normalize,
                 show_crossover=args.show_crossover,
@@ -1114,10 +1472,20 @@ def main() -> None:
         if args.show_ratio:
             ratio = safe_ratio(y_k, y_n)
             ratio_eq18 = safe_ratio(y_k_eq18, y_n) if args.show_kxci_alternative else None
+            attenuation_ratio = None
+            if attenuation_case is not None:
+                attenuation_ratio = {
+                    "ratio": safe_ratio(attenuation_case["y_k"], attenuation_case["y_n"]),
+                    "ratio_eq18": safe_ratio(
+                        attenuation_case["y_k_eq18"],
+                        attenuation_case["y_n"],
+                    ),
+                }
             fig_ratio = _ratio_figure(
                 x,
                 ratio,
                 ratio_eq18=ratio_eq18,
+                attenuation=attenuation_ratio,
                 loglog=args.loglog,
                 crossover=crossover,
             )
@@ -1126,6 +1494,15 @@ def main() -> None:
             plt.close(fig_ratio)
         else:
             ratio = safe_ratio(y_k, y_n)
+            attenuation_ratio = None
+            if attenuation_case is not None:
+                attenuation_ratio = {
+                    "ratio": safe_ratio(attenuation_case["y_k"], attenuation_case["y_n"]),
+                    "ratio_eq18": safe_ratio(
+                        attenuation_case["y_k_eq18"],
+                        attenuation_case["y_n"],
+                    ),
+                }
 
         print(
             "Parameters: "
@@ -1163,6 +1540,17 @@ def main() -> None:
                 "y_k_eq18": np.asarray(y_k_eq18, dtype=float).copy(),
                 "ratio": np.asarray(ratio, dtype=float).copy(),
                 "crossover": crossover,
+                "attenuation": (
+                    None
+                    if attenuation_case is None
+                    else {
+                        "y_n": np.asarray(attenuation_case["y_n"], dtype=float).copy(),
+                        "y_k": np.asarray(attenuation_case["y_k"], dtype=float).copy(),
+                        "y_k_eq18": np.asarray(attenuation_case["y_k_eq18"], dtype=float).copy(),
+                        "ratio": np.asarray(attenuation_ratio["ratio"], dtype=float).copy(),
+                        "ratio_eq18": np.asarray(attenuation_ratio["ratio_eq18"], dtype=float).copy(),
+                    }
+                ),
             }
         )
 
@@ -1185,6 +1573,15 @@ def main() -> None:
         if x_xge1.size >= 2:
             case_results_xge1: list[dict[str, Any]] = []
             for case in case_results:
+                attenuation_xge1 = None
+                if case.get("attenuation") is not None:
+                    attenuation_xge1 = {
+                        "y_n": np.asarray(case["attenuation"]["y_n"], dtype=float)[mask_xge1],
+                        "y_k": np.asarray(case["attenuation"]["y_k"], dtype=float)[mask_xge1],
+                        "y_k_eq18": np.asarray(case["attenuation"]["y_k_eq18"], dtype=float)[mask_xge1],
+                        "ratio": np.asarray(case["attenuation"]["ratio"], dtype=float)[mask_xge1],
+                        "ratio_eq18": np.asarray(case["attenuation"]["ratio_eq18"], dtype=float)[mask_xge1],
+                    }
                 case_results_xge1.append(
                     {
                         "l_over_leff": case["l_over_leff"],
@@ -1194,6 +1591,7 @@ def main() -> None:
                         "y_k_eq18": np.asarray(case["y_k_eq18"], dtype=float)[mask_xge1],
                         "ratio": np.asarray(case["ratio"], dtype=float)[mask_xge1],
                         "crossover": case["crossover"],
+                        "attenuation": attenuation_xge1,
                     }
                 )
 
@@ -1250,6 +1648,42 @@ def main() -> None:
         n_lld_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
     y_k_lld = k_xci(x_fixed_grid, leff_over_l=1.0 / lld_sweep)
     y_k_eq18_lld = k_xci_eq18_normalized(x_fixed_grid, l_over_leff=lld_sweep)
+    attenuation_lld = None
+    if attenuation_ctx is not None:
+        att_td_ctx = attenuation_ctx["td_ctx"]
+        y_n_lld_att = np.array(
+            [
+                n_softplus_scaled(
+                    np.array([DEFAULT_LLD_SWEEP_X], dtype=float),
+                    l_over_ld=float(value),
+                    ps=_td_corrected_softplus_params_flat(float(value), att_td_ctx, verbose=False),
+                )[0]
+                for value in lld_sweep
+            ],
+            dtype=float,
+        )
+        y_k_lld_att = y_k_lld * float(attenuation_ctx["pcfm_I_poly_sum"])
+        y_k_eq18_lld_att = np.array(
+            [
+                pcfm_II(
+                    attenuation_ctx["system"],
+                    profile_path=str(attenuation_ctx["profile_path"]),
+                    interferer_idx=int(attenuation_ctx["channel_idx"]),
+                    beta2_eff_s2_per_m=float(value),
+                    delta_f_hz=DEFAULT_LLD_SWEEP_X,
+                    bandwidth_hz=1.0,
+                    length_m=1.0,
+                    degree=int(attenuation_ctx["degree"]),
+                )
+                for value in lld_sweep
+            ],
+            dtype=float,
+        )
+        attenuation_lld = {
+            "y_n": y_n_lld_att,
+            "y_k": y_k_lld_att,
+            "y_k_eq18": y_k_eq18_lld_att,
+        }
 
     final_idx = -1
     final_lld = float(lld_sweep[final_idx])
@@ -1317,6 +1751,7 @@ def main() -> None:
         y_n_lld,
         y_k_lld,
         y_k_eq18=y_k_eq18_lld,
+        attenuation=attenuation_lld,
         x_fixed=DEFAULT_LLD_SWEEP_X,
         loglog=args.loglog,
         n_label=n_lld_label,

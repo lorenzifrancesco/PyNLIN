@@ -419,7 +419,7 @@ def run_dar_fig3(cfg_path: Path | str = Path("input/dar_struct.toml"),
     ax.plot(lengths, nlin_qpsk_ratio_db, marker="s", ms=3, lw=0.9, label="QPSK")
     ax.plot(lengths, nlin_16qam_ratio_db, marker="^", ms=3, lw=0.9, label="16-QAM")
     ax.set_xlabel("Length [km]")
-    ax.set_ylabel(r"$P_{NLI}/P_{sig}(L)\;[\mathrm{dB}]$")
+    ax.set_ylabel(r"$\mathrm{NSR}\;[\mathrm{dB}]$")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best", fontsize=7)
     fig.tight_layout()

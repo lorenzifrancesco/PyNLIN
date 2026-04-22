@@ -22,7 +22,7 @@ try:
         scale_figsize_to_ieee_column,
     )
     from analysis.pcfm.io import _power_profile_hash, _resolve_signal_power, _write_flat_profile
-    from analysis.pcfm.models import _load_or_compute_pcfm
+    from analysis.pcfm.models import _load_or_compute_pcfm_I
     from analysis.pcfm.td import _td_modulation_components
     from analysis.uwb_nlin import _nlin_cache_path
 except ModuleNotFoundError:
@@ -32,7 +32,7 @@ except ModuleNotFoundError:
         scale_figsize_to_ieee_column,
     )
     from pcfm.io import _power_profile_hash, _resolve_signal_power, _write_flat_profile  # type: ignore[no-redef]
-    from pcfm.models import _load_or_compute_pcfm  # type: ignore[no-redef]
+    from pcfm.models import _load_or_compute_pcfm_I  # type: ignore[no-redef]
     from pcfm.td import _td_modulation_components  # type: ignore[no-redef]
     from uwb_nlin import _nlin_cache_path  # type: ignore[no-redef]
 
@@ -270,7 +270,7 @@ def _plot_linecuts(
         )
     ax_p.set_title(f"{channel_label}: line cuts vs launch power", fontsize=9)
     ax_p.set_xlabel("Launch power [dBm]")
-    ax_p.set_ylabel(r"$10\log_{10}(P_{NLI}/P_{sig})$ [dB]")
+    ax_p.set_ylabel(r"$\mathrm{NSR}\;[\mathrm{dB}]$")
     ax_p.grid(alpha=0.25)
     ax_p.legend(fontsize=5.5, ncol=1)
 
@@ -314,7 +314,7 @@ def _plot_linecuts(
         )
     ax_b.set_title(fr"{channel_label}: line cuts vs $\beta_2$", fontsize=9)
     ax_b.set_xlabel(r"$\beta_2$ [s$^2$/m]")
-    ax_b.set_ylabel(r"$10\log_{10}(P_{NLI}/P_{sig})$ [dB]")
+    ax_b.set_ylabel(r"$\mathrm{NSR}\;[\mathrm{dB}]$")
     ax_b.grid(alpha=0.25)
     ax_b.legend(fontsize=5.5, ncol=1)
 
@@ -427,7 +427,7 @@ def run_scan(
                 use_numeric_xci=bool(pcfm_numeric_xci),
             )
             pcfm_path = out_dir / f"pcfm_b{beta_tag}_p{p_tag}_disp{disp_tag}_prof{profile_power_tag}.npy"
-            nlin_pcfm, _, nlin_pcfm_xci = _load_or_compute_pcfm(
+            nlin_pcfm, _, nlin_pcfm_xci = _load_or_compute_pcfm_I(
                 system=system,
                 profile_path=profile_path,
                 launch_powers_w=launch_vec,

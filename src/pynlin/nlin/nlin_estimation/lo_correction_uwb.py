@@ -47,13 +47,18 @@ init_logging()
 
 
 def build_lookup_integral_table_with_raman(cf,
-                                           m_lo_truncation: int = 2,
+                                           m_lo_truncation: int = 40,
                                            ipulse: int = 1,
                                            recompute=False,
                                            profile_path: Path | str | None = None,
+                                           profile_channel_idx: int | None = None,
                                            max_lld: float | None = None) -> Tuple[callable, callable]:
     """Generate interpolants for Raman-inclusive LO corrections at fB_min and fB_max."""
-    _, _, _, fB_min, fB_max = load_fB(cf, profile_path=profile_path)
+    _, _, _, fB_min, fB_max = load_fB(
+        cf,
+        profile_path=profile_path,
+        profile_channel_idx=profile_channel_idx,
+    )
     use_trapezoid_only = _flat_profiles_enabled(cf)
     z_samples = int(os.getenv("PYNLIN_RAMAN_LO_Z_SAMPLES", "2001"))
     z_samples = max(z_samples, 33)
@@ -76,6 +81,7 @@ def build_lookup_integral_table_with_raman(cf,
         m_lo_truncation=m_lo_truncation,
         fiber_length=fiber_length,
         lld_max=lld[-1],
+        custom_fB_index=profile_channel_idx,
     )
     if os.path.exists(filename) and not recompute:
         lg.info(

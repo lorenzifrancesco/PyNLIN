@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from loguru import logger as lg
 
-from .analytics import flat_profile_pcfm_xci_channel_power
+from .analytics import pcfm_general
 from pynlin.nlin.pcfm_gn import (
     PcfmConfig,
     compute_gn_direct,
@@ -45,7 +45,7 @@ def _save(
     np.save(xci_path, components[1])
 
 
-def _load_or_compute_pcfm(
+def _load_or_compute_pcfm_I(
     system: System,
     profile_path: Path | str,
     launch_powers_w: np.ndarray,
@@ -75,7 +75,7 @@ def _load_or_compute_pcfm(
     return out
 
 
-def _load_or_compute_flat_analytic_xci(
+def _load_or_compute_pcfm_general(
     system: System,
     launch_powers_w: np.ndarray,
     output_path: Path,
@@ -85,19 +85,17 @@ def _load_or_compute_flat_analytic_xci(
     xci_model: str,
     recompute: bool = False,
 ) -> np.ndarray:
-    """Compute or load a flat-profile analytic XCI vector and persist to .npy."""
+    """Compute or load an analytic XCI vector and persist to .npy."""
     if output_path.exists() and not recompute:
-        lg.info(f"Loading cached flat analytic XCI from {output_path}")
+        lg.info(f"Loading cached analytic XCI from {output_path}")
         return np.load(output_path)
 
-    lg.info(f"Computing flat analytic XCI (model={xci_model})")
+    lg.info(f"Computing analytic XCI (model={xci_model})")
     if xci_model == "eq18":
-        lg.warning("Eq. 18 flat analytic XCI requested.")
-        lg.warning("This path evaluates the special-function kernel for all channels.")
-        lg.warning("Use cached results when possible; recomputation is still heavier than closed-form XCI.")
+        lg.warning("PCFM-II analytic XCI requested.")
     values = np.array(
         [
-            flat_profile_pcfm_xci_channel_power(
+            pcfm_general(
                 system,
                 channel_idx=idx,
                 launch_powers_w=launch_powers_w,

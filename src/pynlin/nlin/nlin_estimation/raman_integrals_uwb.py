@@ -28,7 +28,11 @@ def _load_signal_solution(path: Path):
     return data, sig, z
 
 
-def load_fB(system: System, profile_path: Path | str | None = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
+def load_fB(
+    system: System,
+    profile_path: Path | str | None = None,
+    profile_channel_idx: int | None = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, callable, callable]:
     """Load normalized Raman gain profiles fB(z) from a Jiang-based profile if available."""
     if profile_path is not None:
         candidates = [Path(profile_path)]
@@ -70,8 +74,19 @@ def load_fB(system: System, profile_path: Path | str | None = None) -> Tuple[np.
 
     fB = signal_powers / signal_powers[0, :, :]
     assert np.all(fB[0, :, :] == 1.0)
-    fB_max = np.max(fB, axis=(1, 2))
-    fB_min = np.min(fB, axis=(1, 2))
+    if profile_channel_idx is None:
+        fB_for_extrema = fB
+        fB_max = np.max(fB_for_extrema, axis=(1, 2))
+        fB_min = np.min(fB_for_extrema, axis=(1, 2))
+    else:
+        idx = int(profile_channel_idx)
+        if idx < 0 or idx >= fB.shape[2]:
+            raise IndexError(
+                f"profile_channel_idx={idx} out of bounds for profile with {fB.shape[2]} channels"
+            )
+        fB_for_extrema = fB[:, :, idx]
+        fB_max = np.max(fB_for_extrema, axis=1)
+        fB_min = np.min(fB_for_extrema, axis=1)
     if z_axis is None:
         z_axis = np.linspace(0, system.fiber_length, len(fB_max))
 
@@ -109,9 +124,14 @@ def raman_integral(system: System,
 
 
 def load_raman_integral_extremes(system: System,
-                                 profile_path: Path | str | None = None) -> Tuple[float, float, float, float]:
+                                 profile_path: Path | str | None = None,
+                                 profile_channel_idx: int | None = None) -> Tuple[float, float, float, float]:
     """Return LO/HI Raman integrals for minimum and maximum gain envelopes."""
-    _, fB_min, fB_max, _, _ = load_fB(system, profile_path=profile_path)
+    _, fB_min, fB_max, _, _ = load_fB(
+        system,
+        profile_path=profile_path,
+        profile_channel_idx=profile_channel_idx,
+    )
     r_lo_min = raman_integral(system, "LO", fB_min)
     r_lo_max = raman_integral(system, "LO", fB_max)
     r_hi_min = raman_integral(system, "HI", fB_min)

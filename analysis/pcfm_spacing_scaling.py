@@ -24,7 +24,7 @@ from analysis.pcfm.config import (
     _select_scaling_channel,
     _wdm_nonoverlap_max_spacing_hz,
 )
-from analysis.pcfm.analytics import flat_profile_pcfm_xci_channel_power
+from analysis.pcfm.analytics import pcfm_general
 from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
 from analysis.pcfm.io import (
     _launch_referenced_nlin_to_output_power,
@@ -33,7 +33,7 @@ from analysis.pcfm.io import (
     _resolve_launch_powers,
     _write_flat_profile,
 )
-from analysis.pcfm.models import _load_or_compute_pcfm
+from analysis.pcfm.models import _load_or_compute_pcfm_I
 from analysis.pcfm.ssfm_interface import compute_ssfm_center_nli, prepare_ssfm_runtime
 from analysis.pcfm.td import _td_modulation_components
 from analysis.uwb_nlin import _nlin_cache_path
@@ -130,7 +130,7 @@ def _build_constant_launch_vector(system: System, launch_dbm: float | None) -> n
 
 def _center_channel_eq18_xci(system: System, launch_channel_w: float, channel_idx: int) -> float:
     launch = np.full(system.wdm.frequency_grid().size, float(launch_channel_w), dtype=float)
-    return flat_profile_pcfm_xci_channel_power(
+    return pcfm_general(
         system,
         channel_idx=channel_idx,
         launch_powers_w=launch,
@@ -388,7 +388,7 @@ def run_spacing_sweep(
             use_numeric_xci=bool(pcfm_numeric_xci),
         )
         pcfm_path = out_dir / f"pcfm_{cache_tag}.npy"
-        pcfm_total, pcfm_sci, pcfm_xci = _load_or_compute_pcfm(
+        pcfm_total, pcfm_sci, pcfm_xci = _load_or_compute_pcfm_I(
             system=system,
             profile_path=profile_path,
             launch_powers_w=launch_vec,

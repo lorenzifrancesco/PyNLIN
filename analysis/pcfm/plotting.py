@@ -398,7 +398,7 @@ def plot_pcfm_nlin_power(
     )
     _plot_metric(
         _over_pout_db,
-        ylabel=r"$P_{NLI}/P_{out}\;[\mathrm{dB}]$",
+        ylabel=r"$\mathrm{NSR}\;[\mathrm{dB}]$",
         target_path=out_path.with_name(f"{out_path.stem}_over_pout_db{out_path.suffix}"),
         success_msg="Saved normalized NLIN plot to {path}",
     )

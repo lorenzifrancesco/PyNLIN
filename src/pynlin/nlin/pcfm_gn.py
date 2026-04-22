@@ -263,7 +263,7 @@ def poly_sum(coeffs: np.ndarray) -> float:
     float
         Scalar weighted convolution sum.
     """
-    conv = np.convolve(coeffs, coeffs)
+    conv = np.convolve(coeffs, coeffs) # this compute each element of the sum
     denom = np.arange(conv.size, dtype=float) + 1.0
     return float(np.sum(conv / denom))
 

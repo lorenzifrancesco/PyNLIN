@@ -27,6 +27,14 @@ _S1_REQUIRED_KEYS = {
     "n_samples_numeric",
 }
 
+_CANONICAL_PERFECT_S1_PARAMS = {
+    "gaussian": (0.28221327, 3.28726640, 0.49259348),
+    "nyquist": (0.47125353, 2.11578009, 0.92291662),
+}
+_CANONICAL_S1_LLW_MIN = 1e-2
+_CANONICAL_S1_LLW_MAX = 1e2
+_CANONICAL_S1_NPTS = 400
+# FIXME this hardcoding of the S1 data is ok, but not nice.
 
 def _scalar_value(value):
     arr = np.asarray(value)
@@ -88,6 +96,34 @@ def save_s1_ref_nlin_curve(
         except FileNotFoundError:
             pass
     return target
+
+
+def _save_canonical_perfect_s1_ref_curve(target: Path, pulse: str) -> Path:
+    """Write the dispersionless perfect S1 reference without legacy MMF inputs."""
+    raise("This should never be called")
+    try:
+        a, b, c = _CANONICAL_PERFECT_S1_PARAMS[pulse]
+    except KeyError as exc:
+        raise ValueError(f"No canonical perfect S1 parameters for pulse {pulse!r}.") from exc
+
+    llw_grid = np.geomspace(
+        _CANONICAL_S1_LLW_MIN,
+        _CANONICAL_S1_LLW_MAX,
+        _CANONICAL_S1_NPTS,
+    )
+    ref_nlin_curve = a * (1.0 + (llw_grid / b) ** (1.0 / c)) ** (-c)
+    return save_s1_ref_nlin_curve(
+        target,
+        llw_grid=llw_grid,
+        raw_nlin_curve=ref_nlin_curve,
+        fiber_length=1.0,
+        baud_rate=1.0,
+        pulse_shape=pulse,
+        mode="perfect",
+        gvda=0.0,
+        gvdb=0.0,
+        n_samples_numeric=_CANONICAL_S1_NPTS,
+    )
 
 
 def load_s1_ref_dataset(
@@ -210,6 +246,10 @@ def ensure_s1_ref_nlin_curve(
                 load_s1_ref_dataset(path=target, mode=mode, gvda=gvda, gvdb=gvdb)
                 return target
             lg.info(f"Generating missing S1 reference curve: {target.name}")
+            if mode == "perfect" and np.isclose(float(gvda), 0.0) and np.isclose(float(gvdb), 0.0):
+                _save_canonical_perfect_s1_ref_curve(target, pulse)
+                load_s1_ref_dataset(path=target, pulse_shape=pulse, mode=mode, gvda=gvda, gvdb=gvdb)
+                return target
             from pynlin.nlin.validation import compute_numeric_nlin
 
             compute_numeric_nlin(

@@ -51,6 +51,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
         "pcfm_numeric_xci": False,
         "pcfm_eq18_xci": False,
         "td_exclude_self_channel": True,
+        "td_m_lo_truncation": 40,
         "plot_pcfm_total_and_sci": False,
         "power_profiles_mode": "recompute",
         "td_mode": "cached",
@@ -100,6 +101,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
             "pcfm_numeric_xci",
             "pcfm_eq18_xci",
             "td_exclude_self_channel",
+            "td_m_lo_truncation",
             "plot_pcfm_total_and_sci",
             "power_profiles_mode",
             "td_mode",
@@ -126,6 +128,9 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
         "gn_direct_mode", defaults["gn_direct_mode"], _MODEL_MODES
     )
     defaults["plot_mode"] = _normalize_mode("plot_mode", defaults["plot_mode"], _BINARY_MODES)
+    defaults["td_m_lo_truncation"] = _normalize_nonnegative_int(
+        "td_m_lo_truncation", defaults["td_m_lo_truncation"]
+    )
     return defaults
 
 
@@ -145,6 +150,16 @@ def _normalize_mode(name: str, value: object, allowed: set[str]) -> str:
     if mode not in allowed:
         raise ValueError(f"Invalid {name}={value!r}; expected one of {sorted(allowed)}.")
     return mode
+
+
+def _normalize_nonnegative_int(name: str, value: object) -> int:
+    try:
+        out = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a non-negative integer; got {value!r}.") from exc
+    if out < 0:
+        raise ValueError(f"{name} must be non-negative; got {out}.")
+    return out
 
 
 def _resolve_scaling_run_flags(

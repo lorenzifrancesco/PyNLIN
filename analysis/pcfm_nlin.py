@@ -25,7 +25,7 @@ try:
     from analysis.pcfm.models import (
         _load_or_compute_gn,
         _load_or_compute_gn_direct,
-        _load_or_compute_pcfm,
+        _load_or_compute_pcfm_I,
     )
     from analysis.pcfm.plotting import (
         plot_pcfm_diagnostics,
@@ -62,7 +62,7 @@ except ModuleNotFoundError:
     from pcfm.models import (  # type: ignore[no-redef]
         _load_or_compute_gn,
         _load_or_compute_gn_direct,
-        _load_or_compute_pcfm,
+        _load_or_compute_pcfm_I,
     )
     from pcfm.plotting import (  # type: ignore[no-redef]
         plot_pcfm_diagnostics,
@@ -101,7 +101,7 @@ __all__ = [
     "_resolve_launch_powers",
     "_resolve_signal_power",
     "_save_nlin_csv",
-    "_load_or_compute_pcfm",
+    "_load_or_compute_pcfm_I",
     "_load_or_compute_gn",
     "_load_or_compute_gn_direct",
     "plot_pcfm_gsnr",
