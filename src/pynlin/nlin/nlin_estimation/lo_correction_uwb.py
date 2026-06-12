@@ -9,6 +9,7 @@ from loguru import logger as lg
 from scipy.interpolate import RegularGridInterpolator
 
 from pynlin.log_init import init_logging
+from pynlin.nlin.nlin_estimation.config import flat_profiles_enabled
 from pynlin.nlin.collision import MAX_LLD, ensure_i_low_dataset
 from pynlin.nlin.cache_names import (
     s2a_lo_timeint_path,
@@ -16,32 +17,6 @@ from pynlin.nlin.cache_names import (
 )
 from pynlin.nlin.nlin_estimation.raman_integrals_uwb import load_fB
 
-
-def _flat_profiles_enabled(system) -> bool:
-    """Return whether the run requests flat-profile shortcuts for Raman terms."""
-    raw = getattr(system, "raw_config", None)
-    if not isinstance(raw, dict):
-        return False
-    pog = raw.get("pcfm")
-    if isinstance(pog, dict):
-        run = pog.get("run")
-        if isinstance(run, dict):
-            mode = run.get("power_profiles_mode")
-            if isinstance(mode, str):
-                mode = mode.strip().lower()
-                if mode == "flat":
-                    return True
-                if mode in {
-                    "cached",
-                    "recompute",
-                    "cached_no_profile_launch",
-                    "recompute_no_profile_launch",
-                }:
-                    return False
-    nlin_section = raw.get("nlin")
-    if not isinstance(nlin_section, dict):
-        return False
-    return bool(nlin_section.get("flat_profiles") or nlin_section.get("flat_profile"))
 
 init_logging()
 
@@ -59,7 +34,7 @@ def build_lookup_integral_table_with_raman(cf,
         profile_path=profile_path,
         profile_channel_idx=profile_channel_idx,
     )
-    use_trapezoid_only = _flat_profiles_enabled(cf)
+    use_trapezoid_only = flat_profiles_enabled(cf)
     z_samples = int(os.getenv("PYNLIN_RAMAN_LO_Z_SAMPLES", "2001"))
     z_samples = max(z_samples, 33)
     if use_trapezoid_only:
@@ -196,7 +171,7 @@ def build_lookup_integral_table_with_raman(cf,
             return func((x, y))
         return func_wrapper
 
-    return func_wrapper(inter_max), func_wrapper(inter_min)
+    return func_wrapper(inter_min), func_wrapper(inter_max)
 
 
 __all__ = ["build_lookup_integral_table_with_raman"]

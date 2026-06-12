@@ -29,6 +29,7 @@ from pynlin.nlin.cache_names import (
     s3_pair_nlin_kernel_path,
 )
 from pynlin.nlin.collision import build_I_low_interpolator, ensure_i_low_dataset
+from pynlin.nlin.nlin_estimation.config import flat_profiles_enabled
 from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus, LLW_MIN, LLW_MAX
 from pynlin.nlin.nlin_estimation.lo_correction_uwb import build_lookup_integral_table_with_raman
 from pynlin.nlin.nlin_estimation.raman_integrals_uwb import (
@@ -45,33 +46,7 @@ init_logging()
 SPATIAL_MODES = np.array([1, 2, 2, 1])
 MU0 = qam_mu0(64)
 UWB_M_LO_TRUNCATION_DEFAULT = 40
-
-
-def _flat_profiles_enabled(system) -> bool:
-    """Return whether flat-profile mode is enabled in run configuration."""
-    raw = getattr(system, "raw_config", None)
-    if not isinstance(raw, dict):
-        return False
-    pog = raw.get("pcfm")
-    if isinstance(pog, dict):
-        run = pog.get("run")
-        if isinstance(run, dict):
-            mode = run.get("power_profiles_mode")
-            if isinstance(mode, str):
-                mode = mode.strip().lower()
-                if mode == "flat":
-                    return True
-                if mode in {
-                    "cached",
-                    "recompute",
-                    "cached_no_profile_launch",
-                    "recompute_no_profile_launch",
-                }:
-                    return False
-    nlin_section = raw.get("nlin")
-    if not isinstance(nlin_section, dict):
-        return False
-    return bool(nlin_section.get("flat_profiles") or nlin_section.get("flat_profile"))
+_TOTAL_NLIN_CACHE_VERSION = 2
 
 
 def _resolve_n_workers(reserve_cpus: int | None) -> int:
@@ -128,8 +103,15 @@ def get_kappa2_matrix_uwb(system: System,
     kappa2 = np.ones((n_modes, n_modes))
     if use_kappa:
         lg.warning("Applying kappa.csv coupling weights. Check the Manakov averaging.")
-        kappa = np.atleast_2d(np.loadtxt('input/fiber_data/kappa_uwb.csv', delimiter=','))
-        assert(np.isclose(kappa[0, 0], 8.0 / 9.0, atol=0.01)), "Expected kappa[0,0] ~ 8/9 for SMF; check kappa_uwb.csv contents."   
+        kappa_path = Path('input/fiber_data/kappa_uwb.csv')
+        if not kappa_path.exists():
+            if n_modes == 1:
+                kappa = np.array([[8.0 / 9.0]], dtype=float)
+            else:
+                raise FileNotFoundError(f"UWB kappa file not found: {kappa_path}")
+        else:
+            kappa = np.atleast_2d(np.loadtxt(kappa_path, delimiter=','))
+        assert(np.isclose(kappa[0, 0], 8.0 / 9.0, atol=0.01)), "Expected kappa[0,0] ~ 8/9 for SMF; check kappa_uwb.csv contents."
         if n_modes == 1:
             kappa2 = np.array([[float(kappa[0, 0]) ** 2]], dtype=float)
         else:
@@ -252,7 +234,7 @@ def gvd_correction(system: System,
     ldb = 1/(br**2 * gvdb) if gvdb != 0 else 1e30
     lld_max = max(abs(br**2 * gvda * L), abs(br**2 * gvdb * L), 1e-30)
     lo_value = 0.0
-    use_trapezoid_only = _flat_profiles_enabled(system)
+    use_trapezoid_only = flat_profiles_enabled(system)
     for m_lo in range(m_lo_truncation+1):
         ensure_i_low_dataset(
             m_lo=m_lo,
@@ -301,6 +283,28 @@ def apply_turning_point_correction(ps: Tuple[float, float, float],
     return tuple(ps)
 
 
+def _raman_extremes(system: System) -> Tuple[float, float, float, float]:
+    extremes = _G.get("raman_extremes")
+    if extremes is None:
+        extremes = load_raman_integral_extremes(system)
+    return extremes
+
+
+def _interpolate_lo_value(system: System,
+                          fB: np.ndarray,
+                          lo_value_min: float,
+                          lo_value_max: float) -> float:
+    r_lo_min, r_lo_max, _, _ = _raman_extremes(system)
+    if np.isclose(r_lo_max, r_lo_min):
+        return float(lo_value_min)
+    raman_integral_fB_lo = raman_integral(system, "LO", fB)
+    return float(
+        (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min)
+        * (lo_value_max - lo_value_min)
+        + lo_value_min
+    )
+
+
 def fit_nlin(system: System,
              gvda: float,
              gvdb: float,
@@ -325,20 +329,11 @@ def fit_nlin(system: System,
         n_samples_numeric_n=n_samples_numeric_n,
     )
 
+    lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
+    lo_value_min = raman_gvd_correction_min(L/lda, L/ldb)
+    lo_value_fB = _interpolate_lo_value(system, fB, lo_value_min, lo_value_max)
     if np.all(fB == 1.0):
         lg.trace("You are using a flat fB, no Raman correction will be applied")
-        lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
-        lo_value_min = raman_gvd_correction_min(L/lda, L/ldb)
-        extremes = _G.get("raman_extremes")
-        if extremes is None:
-            extremes = load_raman_integral_extremes(system)
-        r_lo_min, r_lo_max, _, _ = extremes
-        if np.isclose(r_lo_max, r_lo_min):
-            lo_value_fB = lo_value_min
-        else:
-            raman_integral_fB_lo = raman_integral(system, "LO", fB)
-            lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
-                (lo_value_max - lo_value_min) + lo_value_min
         ps = apply_plateau_correction(ps_ideal.copy(), lo_value_fB)
 
         def nlin_basic(dgd):
@@ -346,17 +341,7 @@ def fit_nlin(system: System,
         nlin_basic.ps_params = ps
         return nlin_basic
 
-    lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
-    lo_value_min = raman_gvd_correction_min(L/lda, L/ldb)
-    extremes = _G.get("raman_extremes")
-    if extremes is None:
-        extremes = load_raman_integral_extremes(system)
-    r_lo_min, r_lo_max, _, _ = extremes
-
-    raman_integral_fB_lo = raman_integral(system, "LO", fB)
     raman_integral_fB_hi = raman_integral(system, "HI", fB)
-    lo_value_fB = (raman_integral_fB_lo - r_lo_min) / (r_lo_max - r_lo_min) * \
-        (lo_value_max - lo_value_min) + lo_value_min
     lg.trace(f"LO value: {lo_value_fB:.2e}")
     ps_ramanful = apply_plateau_correction(ps_ideal.copy(), lo_value_fB)
     ps_ramanful = apply_turning_point_correction(ps_ramanful, raman_integral_fB_hi)
@@ -383,12 +368,23 @@ def total_nlin_uwb(system: System,
         lg.info(f"Loading cached total NLIN from {cache_target}")
         cached = np.load(cache_target, allow_pickle=True)
         if isinstance(cached, np.lib.npyio.NpzFile):
+            version = cached.get("cache_version")
             data = cached.get("nlin")
-            if data is not None:
+            version_ok = (
+                version is not None
+                and int(np.asarray(version).item()) == _TOTAL_NLIN_CACHE_VERSION
+            )
+            if data is not None and version_ok:
                 cached = data
             else:
+                lg.warning(
+                    f"Cached NLIN at {cache_target} is missing current metadata; recomputing."
+                )
                 cached = None
             cached.close()
+        else:
+            lg.warning(f"Cached NLIN at {cache_target} is unversioned; recomputing.")
+            cached = None
         if cached is not None:
             expected_shape = (collision_coeffs.shape[0], collision_coeffs.shape[1])
             if getattr(cached, "shape", None) != expected_shape:
@@ -433,17 +429,17 @@ def total_nlin_uwb(system: System,
     if freqs.size != n_freqs:
         raise ValueError(f"freq grid size {freqs.size} != n_freqs {n_freqs}")
     gamma2 = _gamma_matrix_uwb(system, freqs) ** 2
-    base_prefactor = (P_in_arr**3) / (br**2)
+    cut_power_prefactor = P_in_arr / (br**2)
+    interferer_power2 = P_in_arr**2
     lg.trace(
         "gamma_ij^2 diag[min/max]=({:.2e}, {:.2e}), offdiag[min/max]=({:.2e}, {:.2e}), "
-        "P_in mean={:.2e} W -> base prefactor range [{:.2e}, {:.2e}]".format(
+        "P_in range=({:.2e}, {:.2e}) W".format(
             float(np.min(np.diag(gamma2))),
             float(np.max(np.diag(gamma2))),
             float(np.min(gamma2)),
             float(np.max(gamma2)),
-            float(P_in_arr.mean()),
-            float(base_prefactor.min()),
-            float(base_prefactor.max()),
+            float(P_in_arr.min()),
+            float(P_in_arr.max()),
         )
     )
 
@@ -452,24 +448,30 @@ def total_nlin_uwb(system: System,
         raise AssertionError(
             f"Expected kappa2[0,0] to be (8/9)^2 for SMF kappa fallback, got {kappa2[0,0]}"
         )
-    total_nlin = np.zeros((n_modes, n_freqs))
+    prefactor_matrix = np.zeros((n_modes, n_modes), dtype=float)
     for mA in range(n_modes):
-        for nuA in range(n_freqs):
-            for mB in range(n_modes):
-                for nuB in range(n_freqs):
-                    if exclude_self_channel and nuB == nuA:
-                        continue
-                    prefactor = nlin_prefactor(system, mA, mB)
-                    total_nlin[mA, nuA] += (
-                        collision_coeffs_si[mA, nuA, mB, nuB]
-                        * kappa2[mA, mB]
-                        * prefactor
-                        * gamma2[nuA, nuB]
-                    )
-    total_nlin *= base_prefactor
+        for mB in range(n_modes):
+            prefactor_matrix[mA, mB] = nlin_prefactor(system, mA, mB)
+
+    if exclude_self_channel:
+        diag_idx = np.arange(n_freqs)
+        collision_coeffs_si = np.array(collision_coeffs_si, copy=True)
+        collision_coeffs_si[:, diag_idx, :, diag_idx] = 0.0
+
+    total_nlin = np.einsum(
+        "aibj,ab,ab,ij,bj->ai",
+        collision_coeffs_si,
+        kappa2,
+        prefactor_matrix,
+        gamma2,
+        interferer_power2,
+        optimize=True,
+    )
+    total_nlin *= cut_power_prefactor
     if cache_target is not None:
         cache_target.parent.mkdir(parents=True, exist_ok=True)
-        np.save(cache_target, total_nlin)
+        with cache_target.open("wb") as fh:
+            np.savez(fh, nlin=total_nlin, cache_version=_TOTAL_NLIN_CACHE_VERSION)
         lg.info(f"Saved total NLIN cache to {cache_target}")
     return total_nlin
 
@@ -677,14 +679,14 @@ def _init_collision_worker(
     _G["n_pairs"] = (n_modes * n_freqs) ** 2
     _G["cf"] = system
     _G["ipulse"] = ipulse
-    raman_max, raman_min = build_lookup_integral_table_with_raman(
+    raman_min, raman_max = build_lookup_integral_table_with_raman(
         system,
         m_lo_truncation=int(m_lo_truncation),
         ipulse=ipulse,
         recompute=bool(recompute_lookup_tables),
         profile_path=profile_path,
         max_lld=max_lld,
-    )
+    ) # FIXME check
     _G["raman_min"] = raman_min
     _G["raman_max"] = raman_max
     _G["n_workers"] = n_workers
@@ -800,7 +802,7 @@ def total_nlin_from_system(system,
     ccfs = collision_coeffs if collision_coeffs is not None else collision_coeffs_system_uwb(
         system,
         ipulse=1,
-        recompute=False,
+        recompute=recompute,
         reserve_cpus=reserve_cpus,
         profile_path=profile_path,
         m_lo_truncation=m_lo_truncation,

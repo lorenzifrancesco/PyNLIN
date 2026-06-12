@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
+import pytest
 from matplotlib.colors import TwoSlopeNorm
 from scipy.io import loadmat
 
@@ -24,8 +25,9 @@ mat_file = next((p for p in candidate_paths if p.exists()), None)
 
 if mat_file is None:
     searched = "\n".join(str(p) for p in candidate_paths)
-    raise FileNotFoundError(
-        "Could not find aquila_15_LP_modes.mat. Searched in:\n" + searched
+    pytest.skip(
+        "Could not find aquila_15_LP_modes.mat. Searched in:\n" + searched,
+        allow_module_level=True,
     )
 
 print(f"Loading: {mat_file}")

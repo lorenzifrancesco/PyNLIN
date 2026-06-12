@@ -39,6 +39,7 @@ NLIN_MARKER_EDGE_WIDTH = 0.25
 SAVEFIG_PAD_INCHES = 0.04
 AXIS_LABEL_SIZE = 9.5
 LEGEND_SIZE = 8.5
+NLIN_POWER_XLIM_THZ = (184.0, 204.0)
 
 plt.rcParams["xtick.labelsize"] = 8
 plt.rcParams["ytick.labelsize"] = 8
@@ -69,6 +70,11 @@ def _ordered_legend(ax: plt.Axes, labels: list[str], **kwargs) -> None:
 
 def _is_eq18_label(label: str) -> bool:
     return "eq18" in str(label).lower()
+
+
+def _set_freq_xlim_thz(ax: plt.Axes) -> None:
+    """Apply fixed frequency axis limits used across PCFM NLIN plots."""
+    ax.set_xlim(*NLIN_POWER_XLIM_THZ)
 
 
 def _safe_histogram_bins(values: np.ndarray, n_bins: int, *, log_scale: bool) -> np.ndarray:
@@ -179,6 +185,7 @@ def plot_pcfm_gsnr(
 
     ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(r"$\mathnormal{GSNR_{NLI} \; [\mathrm{dB}]}$", fontsize=AXIS_LABEL_SIZE)
+    _set_freq_xlim_thz(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -377,6 +384,7 @@ def plot_pcfm_nlin_power(
 
         ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
         ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_SIZE)
+        _set_freq_xlim_thz(ax)
         _disable_dbm_axis_grouping(ax)
         ax.grid(False)
         _ordered_legend(
@@ -422,6 +430,7 @@ def plot_pcfm_diagnostics(
     ax.plot(freqs_thz, launch_dbm, lw=0.8, color="black")
     ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(r"$\mathnormal{P_\mathrm{launch}\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
+    _set_freq_xlim_thz(ax)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     _save_figure(fig, out_dir / "launch_power.pdf", dpi=300)
@@ -502,6 +511,7 @@ def plot_pcfm_diagnostics(
     ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
     ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(r"$\mathnormal{P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
+    _set_freq_xlim_thz(ax)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -582,6 +592,7 @@ def plot_pcfm_diagnostics(
     ax1.plot(freqs_thz, p_l, lw=0.8, color="tab:blue")
     ax1.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
     ax1.set_ylabel(r"$\mathnormal{p(L)}$", color="tab:blue", fontsize=AXIS_LABEL_SIZE)
+    _set_freq_xlim_thz(ax1)
     ax2 = ax1.twinx()
     ax2.plot(freqs_thz, poly_sum, lw=0.8, color="tab:orange")
     ax2.set_ylabel(
@@ -623,6 +634,7 @@ def plot_pcfm_diagnostics(
         )
     ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(r"$\mathnormal{P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
+    _set_freq_xlim_thz(ax)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -641,6 +653,7 @@ def plot_pcfm_diagnostics(
         color="tab:blue",
         fontsize=AXIS_LABEL_SIZE,
     )
+    _set_freq_xlim_thz(ax1)
     ax2 = ax1.twinx()
     ax2.plot(freqs_thz, aeff * 1e12, lw=0.8, color="tab:orange")
     ax2.set_ylabel(

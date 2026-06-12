@@ -2,7 +2,6 @@
 
 from typing import Tuple
 from pathlib import Path
-import os
 
 import numpy as np
 
@@ -15,17 +14,58 @@ init_logging()
 
 def _load_signal_solution(path: Path):
     """Return (data, signal_solution, z_axis) from supported profile files."""
-    if path.suffix == ".npz":
-        lg.info(f"[raman_integrals_uwb] Loading profile from {path}")
-        data = np.load(path, allow_pickle=True)
-        sig = data.get("signal_solution")
-        z = data.get("z")
-        return data, sig, z
     lg.info(f"[raman_integrals_uwb] Loading profile from {path}")
-    data = np.load(path, allow_pickle=True).item()
-    sig = data.get("signal_sol")
-    z = data.get("z")
+    payload = np.load(path, allow_pickle=True)
+    if isinstance(payload, np.lib.npyio.NpzFile):
+        data = payload
+    elif isinstance(payload, np.ndarray) and payload.shape == ():
+        data = payload.item()
+    elif isinstance(payload, dict):
+        data = payload
+    else:
+        raise TypeError(f"Unexpected Raman profile payload type: {type(payload)}")
+
+    sig = None
+    if hasattr(data, "get"):
+        for key in ("signal_sol", "signal_solution", "signal_power"):
+            if key in data:
+                sig = data.get(key)
+                if sig is not None:
+                    break
+    z = data.get("z") if hasattr(data, "get") else None
     return data, sig, z
+
+
+def _coerce_signal_powers(signal_powers: np.ndarray, z_axis, system: System) -> np.ndarray:
+    """Normalize supported profile layouts to ``(z, modes, channels)``."""
+    arr = np.asarray(signal_powers, dtype=float)
+    z_size = None if z_axis is None else np.asarray(z_axis).size
+    n_channels = getattr(system, "n_channels", None)
+
+    if arr.ndim == 2:
+        if z_size is not None:
+            if arr.shape[0] == z_size:
+                sig_z_ch = arr
+            elif arr.shape[1] == z_size:
+                sig_z_ch = arr.T
+            else:
+                raise ValueError(f"Unrecognized signal_solution shape {arr.shape} for z size {z_size}.")
+        elif n_channels is not None and arr.shape[0] == n_channels:
+            sig_z_ch = arr.T
+        else:
+            sig_z_ch = arr
+        return sig_z_ch[:, None, :]
+
+    if arr.ndim == 3:
+        if z_size is not None and arr.shape[0] == z_size:
+            if n_channels is not None and arr.shape[2] == n_channels:
+                return arr
+            return np.swapaxes(arr, 1, 2)
+        if z_size is not None and arr.shape[1] == z_size:
+            return np.transpose(arr, (1, 2, 0))
+        raise ValueError(f"Unrecognized signal_solution shape {arr.shape} for z size {z_size}.")
+
+    raise ValueError(f"Unexpected signal_solution shape: {arr.shape}")
 
 
 def load_fB(
@@ -44,7 +84,6 @@ def load_fB(
     sig = None
     z_axis = None
     data = None
-    source_path = None
     for path in candidates:
         if not path.exists():
             if profile_path is not None:
@@ -55,22 +94,13 @@ def load_fB(
             if profile_path is not None:
                 raise FileNotFoundError(f"Requested Raman profile missing signal data: {path}")
             continue
-        source_path = path
         break
     if sig is None:
         raise FileNotFoundError("No suitable Raman profile file found for fB computation.")
 
     # lg.info(f"[raman_integrals_uwb] Using signal profiles from {source_path}")
 
-    signal_powers = np.array(sig, dtype=float)
-    if signal_powers.ndim == 2:
-        # (z, channels) -> add mode axis
-        signal_powers = signal_powers[:, :, None]
-    if signal_powers.ndim == 3:
-        # (z, channels, modes) -> swap to (z, modes, channels)
-        signal_powers = np.swapaxes(signal_powers, 1, 2)
-    else:
-        raise ValueError(f"Unexpected signal_solution shape: {signal_powers.shape}")
+    signal_powers = _coerce_signal_powers(sig, z_axis, system)
 
     fB = signal_powers / signal_powers[0, :, :]
     assert np.all(fB[0, :, :] == 1.0)
@@ -107,6 +137,8 @@ def raman_integral(system: System,
                    fB: np.ndarray):
     """Compute LO or HI Raman integrals for a given longitudinal gain profile."""
     fB = np.asarray(fB, dtype=np.float64)
+    if fB.shape[0] < 2:
+        raise ValueError("Raman integral requires at least two longitudinal samples.")
     if fB.size:
         fB_min = float(np.nanmin(fB))
         fB_max = float(np.nanmax(fB))
@@ -116,11 +148,12 @@ def raman_integral(system: System,
             f"min={fB_min:.3e} max={fB_max:.3e} mean={fB_mean:.3e}"
         )
     z_axis = np.linspace(0, system.fiber_length, len(fB))
-    dz = z_axis[1] - z_axis[0]
-    # lg.info(f"max fB   = {np.max(fB):.3e}, min fB = {np.min(fB):.3e}")
+    regime = regime.upper()
     if regime == "LO":
-        return (np.sum(fB) * dz / system.fiber_length) ** 2
-    return np.sum(fB ** 2) * dz / system.fiber_length
+        return (np.trapezoid(fB, z_axis, axis=0) / system.fiber_length) ** 2
+    if regime == "HI":
+        return np.trapezoid(fB ** 2, z_axis, axis=0) / system.fiber_length
+    raise ValueError(f"Unsupported Raman integral regime: {regime!r}")
 
 
 def load_raman_integral_extremes(system: System,
