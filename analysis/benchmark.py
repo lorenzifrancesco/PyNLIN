@@ -40,15 +40,15 @@ import pynlin.wdm
 from pynlin.fiber import MMFiber
 from pynlin.fiber_data.load_fiber_values import load_group_delay
 from pynlin.log_init import init_logging
-from pynlin.nlin.cache_names import (
+from pynlin.methods.td.cache import (
     s2b_lo_extrema_path,
     s3_pair_nlin_kernel_path,
 )
-from pynlin.nlin import nlin_estimator as td_estimator
-from pynlin.nlin.nlin_estimation.ideal_fits import ideal_fit_coefficients
-from pynlin.nlin.nlin_estimation.lo_correction import build_lookup_integral_table_with_raman
-from pynlin.nlin.nlin_estimation.raman_integrals import load_fB, load_raman_integral_extremes
-from pynlin.nlin.nlin_estimator import total_nlin
+from pynlin.methods.td import legacy_estimator as td_estimator
+from pynlin.methods.td.estimation.ideal_fits import ideal_fit_coefficients
+from pynlin.methods.td.estimation.lo_correction import build_lookup_integral_table_with_raman
+from pynlin.methods.td.estimation.raman_integrals import load_fB, load_raman_integral_extremes
+from pynlin.methods.td.legacy_estimator import total_nlin
 from pynlin.system import System
 
 init_logging()
@@ -278,6 +278,7 @@ def _collision_coeffs_filename(cf: System, ipulse: int) -> Path:
         fiber_type=fiber_type,
         br_hz=float(cf.baud_rate),
         n_ch=int(cf.n_channels),
+        fiber_length=float(cf.fiber_length),
         spacing_hz=getattr(cf, "channel_spacing", None),
     )
 
@@ -626,7 +627,7 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--system",
         type=Path,
-        default=Path("input/mmf_struct.toml"),
+        default=Path("input/studies.toml"),
         help="Path to MMF system TOML.",
     )
     ap.add_argument("--runs", type=int, default=5, help="Number of measured runs.")

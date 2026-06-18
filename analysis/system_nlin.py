@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pynlin.wdm
 from pynlin.log_init import init_logging
-from pynlin.nlin.nlin_estimator import collision_coeffs_system, total_nlin
+from pynlin.methods.td.legacy_estimator import collision_coeffs_system, total_nlin
 from pynlin.system import System
 from pynlin.utils import dBm2watt, watt2dBm
 init_logging()
@@ -71,6 +71,18 @@ def _log_mmf_td_timing(timings: dict) -> None:
         sum_noninteracting,
         end_to_end_with_noninteracting,
     )
+
+
+def _validate_smf_mmf_configs(smf_file: Path, mmf_file: Path, smf_system: System, mmf_system: System) -> None:
+    if smf_file.resolve() == mmf_file.resolve():
+        raise ValueError(
+            "SMF/MMF comparison requires distinct config files; "
+            f"both paths currently resolve to {smf_file.resolve()}."
+        )
+    if smf_system.n_modes != 1:
+        raise ValueError(f"Expected SMF config with one mode at {smf_file}; got n_modes={smf_system.n_modes}.")
+    if mmf_system.n_modes <= 1:
+        raise ValueError(f"Expected MMF config with more than one mode at {mmf_file}; got n_modes={mmf_system.n_modes}.")
 
 
 def _compute_mmf_td_nlin_with_timing(
@@ -160,10 +172,11 @@ def plot_case_study_noise(
     dpi = 300
     grid = False
 
-    smf_file = Path("./input/smf_struct.toml")
-    mmf_file = Path("./input/mmf_struct.toml")
+    smf_file = Path("./input/studies.toml")
+    mmf_file = Path("./input/studies.toml")
     smf_system = System.from_toml(smf_file)
     mmf_system = System.from_toml(mmf_file)
+    _validate_smf_mmf_configs(smf_file, mmf_file, smf_system, mmf_system)
     cf_smf = smf_system
     cf_mmf = mmf_system
     print(
@@ -290,10 +303,11 @@ def plot_case_study_noise_histogram(
     grid = False
 
     # --- Load configs & sanity checks (as in the first function) ---
-    smf_file = Path("./input/smf_struct.toml")
-    mmf_file = Path("./input/mmf_struct.toml")
+    smf_file = Path("./input/studies.toml")
+    mmf_file = Path("./input/studies.toml")
     smf_system = System.from_toml(smf_file)
     mmf_system = System.from_toml(mmf_file)
+    _validate_smf_mmf_configs(smf_file, mmf_file, smf_system, mmf_system)
     cf_smf = smf_system
     cf_mmf = mmf_system
     print(

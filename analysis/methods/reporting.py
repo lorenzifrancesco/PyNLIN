@@ -4,9 +4,9 @@ import numpy as np
 from loguru import logger as lg
 from scipy.constants import c
 
-from pynlin.nlin import nlin_estimator_uwb as nlin_uwb
-from pynlin.nlin import pcfm_gn as pcfm
-from pynlin.nlin.pcfm_gn import PcfmConfig
+from pynlin.methods.td import estimator as nlin_uwb
+from pynlin.methods import pcfm
+from pynlin.methods.pcfm import PcfmConfig
 from pynlin.system import System
 
 

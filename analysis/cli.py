@@ -2,19 +2,24 @@ import argparse
 import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+for path in (REPO_ROOT, SRC_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 try:
-    from analysis.pcfm.config import (
+    from analysis.config import (
         PROFILE_MAX_W,
         _flat_profiles_enabled,
         _load_pcfm_runtime_config,
         _to_optional_path,
     )
-    from analysis.pcfm.io import (
+    from analysis.methods.io import (
         _load_launch_powers_csv,
         _profile_needs_recompute,
         _resolve_launch_powers,
@@ -22,36 +27,36 @@ try:
         _save_nlin_csv,
         _write_flat_profile,
     )
-    from analysis.pcfm.models import (
+    from analysis.methods.models import (
         _load_or_compute_gn,
         _load_or_compute_gn_direct,
         _load_or_compute_pcfm_I,
     )
-    from analysis.pcfm.plotting import (
+    from analysis.methods.plotting import (
         plot_pcfm_diagnostics,
         plot_pcfm_gsnr,
         plot_pcfm_nlin_power,
     )
-    from analysis.pcfm.reporting import (
+    from analysis.methods.reporting import (
         _format_array_snippet,
         _format_param_table,
         _log_td_pcfm_parameters,
         _summarize_array,
     )
-    from analysis.pcfm.td import (
+    from pynlin.methods.td import (
         _qam_mu0,
         _td_modulation_components,
         _td_prefactor_coeffs,
     )
-    from analysis.pcfm.workflow import run_pcfm_workflow
+    from analysis.methods.workflow import run_pcfm_workflow
 except ModuleNotFoundError:
-    from pcfm.config import (  # type: ignore[no-redef]
+    from analysis.config import (  # type: ignore[no-redef]
         PROFILE_MAX_W,
         _flat_profiles_enabled,
         _load_pcfm_runtime_config,
         _to_optional_path,
     )
-    from pcfm.io import (  # type: ignore[no-redef]
+    from methods.io import (  # type: ignore[no-redef]
         _load_launch_powers_csv,
         _profile_needs_recompute,
         _resolve_launch_powers,
@@ -59,28 +64,28 @@ except ModuleNotFoundError:
         _save_nlin_csv,
         _write_flat_profile,
     )
-    from pcfm.models import (  # type: ignore[no-redef]
+    from methods.models import (  # type: ignore[no-redef]
         _load_or_compute_gn,
         _load_or_compute_gn_direct,
         _load_or_compute_pcfm_I,
     )
-    from pcfm.plotting import (  # type: ignore[no-redef]
+    from methods.plotting import (  # type: ignore[no-redef]
         plot_pcfm_diagnostics,
         plot_pcfm_gsnr,
         plot_pcfm_nlin_power,
     )
-    from pcfm.reporting import (  # type: ignore[no-redef]
+    from methods.reporting import (  # type: ignore[no-redef]
         _format_array_snippet,
         _format_param_table,
         _log_td_pcfm_parameters,
         _summarize_array,
     )
-    from pcfm.td import (  # type: ignore[no-redef]
+    from pynlin.methods.td import (  # type: ignore[no-redef]
         _qam_mu0,
         _td_modulation_components,
         _td_prefactor_coeffs,
     )
-    from pcfm.workflow import run_pcfm_workflow  # type: ignore[no-redef]
+    from methods.workflow import run_pcfm_workflow  # type: ignore[no-redef]
 
 
 __all__ = [
@@ -112,13 +117,15 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="PCFM TD/GN workflow runner")
+    parser = argparse.ArgumentParser(description="Named studies workflow runner")
     parser.add_argument(
         "--config",
         type=str,
-        default="./input/pcfm_struct.toml",
-        help="Path to system TOML (includes [pcfm] runtime settings).",
+        default="./input/studies.toml",
+        help="Path to system TOML (includes [profiles], [methods.*], and [studies.*]).",
     )
     args = parser.parse_args()
 
-    run_pcfm_workflow(cfg_path=Path(args.config))
+    from analysis.studies import run_studies
+
+    run_studies(Path(args.config))

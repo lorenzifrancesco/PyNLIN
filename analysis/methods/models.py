@@ -4,13 +4,15 @@ import numpy as np
 from loguru import logger as lg
 
 from .analytics import pcfm_general
-from pynlin.nlin.pcfm_gn import (
+from pynlin.methods.pcfm import (
     PcfmConfig,
     compute_gn_direct,
     compute_gn_numeric,
     compute_pcfm_nlin,
 )
 from pynlin.system import System
+
+_NLIN_CACHE_VERSION = 2
 
 
 def _component_paths(output_path: Path) -> tuple[Path, Path]:
@@ -20,15 +22,57 @@ def _component_paths(output_path: Path) -> tuple[Path, Path]:
     )
 
 
+def _version_path(output_path: Path) -> Path:
+    return output_path.with_suffix(".npy.ver")
+
+
+def _load_npy_with_version(path: Path) -> np.ndarray:
+    """Load a .npy file and verify its cache version."""
+    loaded = np.load(path, allow_pickle=True)
+    if isinstance(loaded, np.lib.npyio.NpzFile):
+        ver = int(np.asarray(loaded.get("cache_version", 0)).item())
+        if ver != _NLIN_CACHE_VERSION:
+            lg.warning(f"Cache version mismatch ({ver} != {_NLIN_CACHE_VERSION}) at {path}; treating as stale.")
+            raise FileNotFoundError(f"Stale cache version at {path}")
+        return loaded["nlin"]
+    ver_path = _version_path(path)
+    if not ver_path.exists():
+        lg.warning(f"Cache version missing at {path}; treating as stale.")
+        raise FileNotFoundError(f"Unversioned cache at {path}")
+    ver = int(ver_path.read_text().strip())
+    if ver != _NLIN_CACHE_VERSION:
+        lg.warning(f"Cache version mismatch ({ver} != {_NLIN_CACHE_VERSION}) at {path}; treating as stale.")
+        raise FileNotFoundError(f"Stale cache version at {path}")
+    return loaded
+
+
+def _save_with_version(path: Path, arr: np.ndarray) -> None:
+    """Save a .npy file with a sidecar version marker."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, arr)
+    _version_path(path).write_text(str(_NLIN_CACHE_VERSION))
+
+
 def _load_cached(
     output_path: Path,
     return_components: bool,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
-    nlin = np.load(output_path)
+    nlin = _load_npy_with_version(output_path)
     if not return_components:
         return nlin
     sci_path, xci_path = _component_paths(output_path)
-    return nlin, np.load(sci_path), np.load(xci_path)
+    sci = xci = None
+    try:
+        sci = _load_npy_with_version(sci_path)
+    except Exception:
+        lg.warning(f"SCI component missing or stale at {sci_path}; will recompute.")
+    try:
+        xci = _load_npy_with_version(xci_path)
+    except Exception:
+        lg.warning(f"XCI component missing or stale at {xci_path}; will recompute.")
+    if sci is not None and xci is not None:
+        return nlin, sci, xci
+    raise FileNotFoundError(f"Incomplete cached components at {output_path}")
 
 
 def _save(
@@ -37,12 +81,12 @@ def _save(
     components: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(output_path, nlin)
+    _save_with_version(output_path, nlin)
     if components is None:
         return
     sci_path, xci_path = _component_paths(output_path)
-    np.save(sci_path, components[0])
-    np.save(xci_path, components[1])
+    _save_with_version(sci_path, components[0])
+    _save_with_version(xci_path, components[1])
 
 
 def _load_or_compute_pcfm_I(
@@ -56,8 +100,11 @@ def _load_or_compute_pcfm_I(
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute or load PCFM NLIN and persist to .npy."""
     if output_path.exists() and not recompute:
-        lg.info(f"Loading cached PCFM NLIN from {output_path}")
-        return _load_cached(output_path, return_components)
+        lg.debug(f"Loading cached PCFM NLIN from {output_path}")
+        try:
+            return _load_cached(output_path, return_components)
+        except Exception:
+            lg.warning(f"Stale or invalid cache at {output_path}; recomputing.")
 
     lg.info("Computing PCFM NLIN")
     out = compute_pcfm_nlin(
@@ -87,8 +134,11 @@ def _load_or_compute_pcfm_general(
 ) -> np.ndarray:
     """Compute or load an analytic XCI vector and persist to .npy."""
     if output_path.exists() and not recompute:
-        lg.info(f"Loading cached analytic XCI from {output_path}")
-        return np.load(output_path)
+        lg.debug(f"Loading cached analytic XCI from {output_path}")
+        try:
+            return _load_npy_with_version(output_path)
+        except Exception:
+            lg.warning(f"Stale or invalid cache at {output_path}; recomputing.")
 
     lg.info(f"Computing analytic XCI (model={xci_model})")
     if xci_model == "eq18":
@@ -107,8 +157,7 @@ def _load_or_compute_pcfm_general(
         ],
         dtype=float,
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(output_path, values)
+    _save_with_version(output_path, values)
     return values
 
 
@@ -124,8 +173,11 @@ def _load_or_compute_gn(
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute or load numeric GN NLIN and persist to .npy."""
     if output_path.exists() and not recompute:
-        lg.info(f"Loading cached numeric GN NLIN from {output_path}")
-        return _load_cached(output_path, return_components)
+        lg.debug(f"Loading cached numeric GN NLIN from {output_path}")
+        try:
+            return _load_cached(output_path, return_components)
+        except Exception:
+            lg.warning(f"Stale or invalid cache at {output_path}; recomputing.")
 
     lg.info("Computing numeric GN NLIN")
     out = compute_gn_numeric(
@@ -155,8 +207,11 @@ def _load_or_compute_gn_direct(
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute or load direct GN NLIN and persist to .npy."""
     if output_path.exists() and not recompute:
-        lg.info(f"Loading cached direct GN NLIN from {output_path}")
-        return _load_cached(output_path, return_components)
+        lg.debug(f"Loading cached direct GN NLIN from {output_path}")
+        try:
+            return _load_cached(output_path, return_components)
+        except Exception:
+            lg.warning(f"Stale or invalid cache at {output_path}; recomputing.")
 
     lg.info("Computing direct GN NLIN")
     out = compute_gn_direct(

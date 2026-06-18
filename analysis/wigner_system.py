@@ -32,7 +32,7 @@ from pynlin.utils import BaseModel, ConfigDict, _toml_load
 
 
 class WignerSystemConfig(BaseModel):
-    config: str = "input/uwb_struct.toml"
+    config: str = "input/studies.toml"
     out: str = "media/wigner/wigner_cycle_average.pdf"
     pulse_out: str = "media/wigner/pulse_shape.pdf"
     qam_order: int = 16

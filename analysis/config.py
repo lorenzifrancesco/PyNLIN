@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Mapping
 
 import numpy as np
@@ -11,7 +12,6 @@ from pynlin.wdm import IrregularWDM
 
 PROFILE_MAX_W = 10.0
 _BINARY_MODES = {"off", "on"}
-_CACHE_MODES = {"cached", "recompute"}
 _MODEL_MODES = {"off", "cached", "recompute"}
 _POWER_PROFILE_MODES = {
     "flat",
@@ -20,6 +20,95 @@ _POWER_PROFILE_MODES = {
     "cached_no_profile_launch",
     "recompute_no_profile_launch",
 }
+
+_METHOD_MODES = {"off", "cached", "recompute"}
+_STUDY_TYPES = {"full_system", "subset", "sweep"}
+
+
+@dataclass(frozen=True)
+class ProfilesConfig:
+    mode: str = "recompute"
+    path: Path = Path("results/pcfm_power_profiles.npy")
+    launch_csv: Path | None = None
+
+
+@dataclass(frozen=True)
+class TDMethodConfig:
+    mode: str = "cached"
+    exclude_self_channel: bool = True
+    m_lo_truncation: int = 40
+    use_kappa: bool = True
+    use_x_mode: bool = True
+
+
+@dataclass(frozen=True)
+class PCFMMethodConfig:
+    mode: str = "cached"
+    numeric_sci: bool = True
+    numeric_xci: bool = False
+    eq18_xci: bool = False
+    degree: int = 9
+    include_mci: bool = False
+    plot_total_and_sci: bool = False
+
+
+@dataclass(frozen=True)
+class GNMethodConfig:
+    mode: str = "off"
+    direct_mode: str = "off"
+
+
+@dataclass(frozen=True)
+class MCMethodConfig:
+    mode: str = "off"
+    engine: str = "ssfm"
+    n_trials: int = 1
+    rng_seed: int = 1234
+    template: Path | None = None
+    n_channels: int = 5
+
+
+@dataclass(frozen=True)
+class MethodsConfig:
+    td: TDMethodConfig = field(default_factory=TDMethodConfig)
+    pcfm: PCFMMethodConfig = field(default_factory=PCFMMethodConfig)
+    gn: GNMethodConfig = field(default_factory=GNMethodConfig)
+    mc: MCMethodConfig = field(default_factory=MCMethodConfig)
+
+
+@dataclass(frozen=True)
+class SubsetConfig:
+    mode: str = "center_window"
+    center: str | int = "auto"
+    half_width: int = 2
+    cut_indices: tuple[int, ...] = ()
+    interferer_indices: tuple[int, ...] = ()
+    include_sci: bool = True
+
+
+@dataclass(frozen=True)
+class SweepConfig:
+    variable: str = ""
+    unit: str = ""
+    values: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class StudyConfig:
+    name: str
+    type: str
+    methods: tuple[str, ...]
+    out_dir: Path
+    plot: bool = False
+    subset: SubsetConfig | None = None
+    sweep: SweepConfig | None = None
+
+
+@dataclass(frozen=True)
+class StudiesRuntimeConfig:
+    profiles: ProfilesConfig
+    methods: MethodsConfig
+    studies: tuple[StudyConfig, ...]
 
 
 def _flat_profiles_enabled(system: System) -> bool:
@@ -48,8 +137,11 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
     defaults: dict[str, object] = {
         "profile_path": "results/pcfm_power_profiles.npy",
         "launch_csv_path": None,
+        "pcfm_numeric_sci": True,
         "pcfm_numeric_xci": False,
         "pcfm_eq18_xci": False,
+        "pcfm_degree": 9,
+        "pcfm_include_mci": False,
         "td_exclude_self_channel": True,
         "td_m_lo_truncation": 40,
         "plot_pcfm_total_and_sci": False,
@@ -62,6 +154,29 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
     }
     raw = getattr(system, "raw_config", None)
     if not isinstance(raw, Mapping):
+        return defaults
+    if "profiles" in raw or "methods" in raw:
+        profiles = _load_profiles_config(system)
+        methods = _load_methods_config(system)
+        defaults.update(
+            {
+                "profile_path": str(profiles.path),
+                "launch_csv_path": None if profiles.launch_csv is None else str(profiles.launch_csv),
+                "power_profiles_mode": profiles.mode,
+                "td_mode": methods.td.mode,
+                "pcfm_mode": methods.pcfm.mode,
+                "gn_mode": methods.gn.mode,
+                "gn_direct_mode": methods.gn.direct_mode,
+                "pcfm_numeric_sci": methods.pcfm.numeric_sci,
+                "pcfm_numeric_xci": methods.pcfm.numeric_xci,
+                "pcfm_eq18_xci": methods.pcfm.eq18_xci,
+                "pcfm_degree": methods.pcfm.degree,
+                "pcfm_include_mci": methods.pcfm.include_mci,
+                "td_exclude_self_channel": methods.td.exclude_self_channel,
+                "td_m_lo_truncation": methods.td.m_lo_truncation,
+                "plot_pcfm_total_and_sci": methods.pcfm.plot_total_and_sci,
+            }
+        )
         return defaults
     pog = raw.get("pcfm")
     if not isinstance(pog, Mapping):
@@ -98,8 +213,11 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
                 f"{legacy_run_keys}. Use *_mode keys in [pcfm.run]."
             )
         for key in (
+            "pcfm_numeric_sci",
             "pcfm_numeric_xci",
             "pcfm_eq18_xci",
+            "pcfm_degree",
+            "pcfm_include_mci",
             "td_exclude_self_channel",
             "td_m_lo_truncation",
             "plot_pcfm_total_and_sci",
@@ -121,8 +239,8 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
     defaults["power_profiles_mode"] = _normalize_mode(
         "power_profiles_mode", defaults["power_profiles_mode"], _POWER_PROFILE_MODES
     )
-    defaults["td_mode"] = _normalize_mode("td_mode", defaults["td_mode"], _CACHE_MODES)
-    defaults["pcfm_mode"] = _normalize_mode("pcfm_mode", defaults["pcfm_mode"], _CACHE_MODES)
+    defaults["td_mode"] = _normalize_mode("td_mode", defaults["td_mode"], _MODEL_MODES)
+    defaults["pcfm_mode"] = _normalize_mode("pcfm_mode", defaults["pcfm_mode"], _MODEL_MODES)
     defaults["gn_mode"] = _normalize_mode("gn_mode", defaults["gn_mode"], _MODEL_MODES)
     defaults["gn_direct_mode"] = _normalize_mode(
         "gn_direct_mode", defaults["gn_direct_mode"], _MODEL_MODES
@@ -131,6 +249,10 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
     defaults["td_m_lo_truncation"] = _normalize_nonnegative_int(
         "td_m_lo_truncation", defaults["td_m_lo_truncation"]
     )
+    defaults["pcfm_degree"] = _normalize_nonnegative_int(
+        "pcfm_degree", defaults["pcfm_degree"]
+    )
+    defaults["pcfm_include_mci"] = bool(defaults["pcfm_include_mci"])
     return defaults
 
 
@@ -141,6 +263,176 @@ def _to_optional_path(value: Path | str | None) -> Path | None:
     if text == "":
         return None
     return Path(text)
+
+
+def _as_mapping(value: object, name: str) -> Mapping:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a TOML table.")
+    return value
+
+
+def _as_bool(value: object, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{name} must be a boolean; got {value!r}.")
+
+
+def _as_int(value: object, name: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer; got {value!r}.") from exc
+
+
+def _as_float_tuple(value: object, name: str) -> tuple[float, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{name} must be a list of numbers; got {value!r}.")
+    return tuple(float(v) for v in value)
+
+
+def _as_int_tuple(value: object, name: str) -> tuple[int, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{name} must be a list of integers; got {value!r}.")
+    return tuple(int(v) for v in value)
+
+
+def _load_profiles_config(system: System) -> ProfilesConfig:
+    raw = getattr(system, "raw_config", None)
+    profiles = _as_mapping(raw.get("profiles") if isinstance(raw, Mapping) else None, "[profiles]")
+    mode = _normalize_mode("profiles.mode", profiles.get("mode", "recompute"), _POWER_PROFILE_MODES)
+    path = _to_optional_path(profiles.get("path", "results/pcfm_power_profiles.npy"))
+    if path is None:
+        raise ValueError("[profiles].path is required.")
+    return ProfilesConfig(
+        mode=mode,
+        path=path,
+        launch_csv=_to_optional_path(profiles.get("launch_csv")),
+    )
+
+
+def _load_methods_config(system: System) -> MethodsConfig:
+    raw = getattr(system, "raw_config", None)
+    methods = _as_mapping(raw.get("methods") if isinstance(raw, Mapping) else None, "[methods]")
+    td = _as_mapping(methods.get("td"), "[methods.td]")
+    pcfm = _as_mapping(methods.get("pcfm"), "[methods.pcfm]")
+    gn = _as_mapping(methods.get("gn"), "[methods.gn]")
+    mc = _as_mapping(methods.get("mc"), "[methods.mc]")
+
+    return MethodsConfig(
+        td=TDMethodConfig(
+            mode=_normalize_mode("methods.td.mode", td.get("mode", "cached"), _METHOD_MODES),
+            exclude_self_channel=bool(td.get("exclude_self_channel", True)),
+            m_lo_truncation=_normalize_nonnegative_int(
+                "methods.td.m_lo_truncation", td.get("m_lo_truncation", 40)
+            ),
+            use_kappa=bool(td.get("use_kappa", True)),
+            use_x_mode=bool(td.get("use_x_mode", True)),
+        ),
+        pcfm=PCFMMethodConfig(
+            mode=_normalize_mode("methods.pcfm.mode", pcfm.get("mode", "cached"), _METHOD_MODES),
+            numeric_sci=bool(pcfm.get("numeric_sci", True)),
+            numeric_xci=bool(pcfm.get("numeric_xci", False)),
+            eq18_xci=bool(pcfm.get("eq18_xci", False)),
+            degree=_normalize_nonnegative_int("methods.pcfm.degree", pcfm.get("degree", 9)),
+            include_mci=bool(pcfm.get("include_mci", False)),
+            plot_total_and_sci=bool(pcfm.get("plot_total_and_sci", False)),
+        ),
+        gn=GNMethodConfig(
+            mode=_normalize_mode("methods.gn.mode", gn.get("mode", "off"), _METHOD_MODES),
+            direct_mode=_normalize_mode(
+                "methods.gn.direct_mode", gn.get("direct_mode", "off"), _METHOD_MODES
+            ),
+        ),
+        mc=MCMethodConfig(
+            mode=_normalize_mode("methods.mc.mode", mc.get("mode", "off"), _METHOD_MODES),
+            engine=str(mc.get("engine", "ssfm")),
+            n_trials=max(_as_int(mc.get("n_trials", 1), "methods.mc.n_trials"), 1),
+            rng_seed=_as_int(mc.get("rng_seed", 1234), "methods.mc.rng_seed"),
+            template=_to_optional_path(mc.get("template")),
+            n_channels=max(_as_int(mc.get("n_channels", 5), "methods.mc.n_channels"), 1),
+        ),
+    )
+
+
+def _load_subset_config(data: object, name: str) -> SubsetConfig | None:
+    if data is None:
+        return None
+    subset = _as_mapping(data, f"[studies.{name}.subset]")
+    return SubsetConfig(
+        mode=str(subset.get("mode", "center_window")),
+        center=subset.get("center", "auto"),
+        half_width=max(_as_int(subset.get("half_width", 2), f"studies.{name}.subset.half_width"), 0),
+        cut_indices=_as_int_tuple(subset.get("cut_indices"), f"studies.{name}.subset.cut_indices"),
+        interferer_indices=_as_int_tuple(
+            subset.get("interferer_indices"), f"studies.{name}.subset.interferer_indices"
+        ),
+        include_sci=bool(subset.get("include_sci", True)),
+    )
+
+
+def _load_sweep_config(data: object, name: str) -> SweepConfig | None:
+    if data is None:
+        return None
+    sweep = _as_mapping(data, f"[studies.{name}.sweep]")
+    return SweepConfig(
+        variable=str(sweep.get("variable", "")),
+        unit=str(sweep.get("unit", "")),
+        values=_as_float_tuple(sweep.get("values"), f"studies.{name}.sweep.values"),
+    )
+
+
+def _load_studies_config(system: System) -> tuple[StudyConfig, ...]:
+    raw = getattr(system, "raw_config", None)
+    studies = _as_mapping(raw.get("studies") if isinstance(raw, Mapping) else None, "[studies]")
+    if not studies:
+        return (
+            StudyConfig(
+                name="full_system",
+                type="full_system",
+                methods=("td", "pcfm"),
+                out_dir=Path("results/studies/full_system"),
+                plot=True,
+            ),
+        )
+
+    out: list[StudyConfig] = []
+    for name, value in studies.items():
+        study = _as_mapping(value, f"[studies.{name}]")
+        study_type = _normalize_mode(f"studies.{name}.type", study.get("type"), _STUDY_TYPES)
+        methods = study.get("methods", [])
+        if not isinstance(methods, (list, tuple)) or not methods:
+            raise ValueError(f"studies.{name}.methods must be a non-empty list.")
+        method_names = tuple(str(method).strip().lower() for method in methods)
+        unknown = sorted(set(method_names) - {"td", "pcfm", "gn", "mc"})
+        if unknown:
+            raise ValueError(f"studies.{name}.methods contains unknown methods: {unknown}")
+        out.append(
+            StudyConfig(
+                name=str(name),
+                type=study_type,
+                methods=method_names,
+                out_dir=Path(study.get("out_dir", f"results/studies/{name}")),
+                plot=bool(study.get("plot", False)),
+                subset=_load_subset_config(study.get("subset"), str(name)),
+                sweep=_load_sweep_config(study.get("sweep"), str(name)),
+            )
+        )
+    return tuple(out)
+
+
+def load_studies_runtime_config(system: System) -> StudiesRuntimeConfig:
+    """Load the method-agnostic studies runtime config from a system TOML."""
+    return StudiesRuntimeConfig(
+        profiles=_load_profiles_config(system),
+        methods=_load_methods_config(system),
+        studies=_load_studies_config(system),
+    )
 
 
 def _normalize_mode(name: str, value: object, allowed: set[str]) -> str:

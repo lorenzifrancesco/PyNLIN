@@ -8,7 +8,7 @@ from scipy.constants import c
 from scipy.integrate import cumulative_trapezoid
 from scipy.special import sici
 
-from pynlin.nlin import pcfm_gn
+from pynlin.methods import pcfm as pcfm_gn
 from pynlin.system import System
 
 

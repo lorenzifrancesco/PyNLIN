@@ -227,7 +227,7 @@ def _fit_channel(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", type=str, default="input/uwb_struct.toml")
+    ap.add_argument("--config", type=str, default="input/studies.toml")
     ap.add_argument("--profile", type=str, default="results/uwb_power_profiles.npy")
     ap.add_argument("--band", type=str, default="O")
     ap.add_argument("--pump-count", type=int, default=4)

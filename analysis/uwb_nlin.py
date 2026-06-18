@@ -7,15 +7,16 @@ from pathlib import Path
 
 import pynlin.wdm
 from pynlin.log_init import init_logging
-from pynlin.nlin.nlin_estimator_uwb import (
+from pynlin.methods.td.estimator import (
     collision_coeffs_system_uwb,
     total_nlin_uwb,
 )
-from pynlin.nlin.cache_names import s3_chan_nlin_td_path
+from pynlin.methods.td.cache import s3_chan_nlin_td_path
 from pynlin.raman.power_profiles import simulate_power_profiles
 from pynlin.raman.plot_optimization import plot_profiles
 from pynlin.system import System
 from pynlin.utils import dBm2watt, watt2dBm
+
 from scipy.constants import c
 
 os.environ.setdefault("LOGURU_LEVEL", "DEBUG")
@@ -38,8 +39,77 @@ def plot_case_study_fits():
     pass
 
 
+_PROFILE_SYS_HASH_KEY = "system_config_hash"
+
+
+def _inject_profile_hash(save_path: Path, system: System) -> None:
+    """Inject a system-config hash into an existing profile file."""
+    from analysis.runtime.cache import profile_system_hash
+    payload = np.load(save_path, allow_pickle=True)
+    if isinstance(payload, np.lib.npyio.NpzFile):
+        data = dict(payload)
+    elif isinstance(payload, np.ndarray) and payload.shape == ():
+        data = payload.item()
+    elif isinstance(payload, dict):
+        data = payload
+    else:
+        lg.warning(f"Cannot inject hash into profile of type {type(payload)}")
+        return
+    data[_PROFILE_SYS_HASH_KEY] = profile_system_hash(system)
+    np.save(save_path, data)
+
+
+def _check_profile_hash(save_path: Path, system: System) -> None:
+    """Warn if a profile file was computed with a different system configuration."""
+    from analysis.runtime.cache import profile_system_hash
+    try:
+        payload = np.load(save_path, allow_pickle=True)
+        if isinstance(payload, np.lib.npyio.NpzFile):
+            data = payload
+        elif isinstance(payload, np.ndarray) and payload.shape == ():
+            data = payload.item()
+        elif isinstance(payload, dict):
+            data = payload
+        else:
+            return
+        stored = data.get(_PROFILE_SYS_HASH_KEY)
+        if stored is None:
+            lg.warning(f"Profile at {save_path} has no system-config hash; may be stale.")
+            return
+        current = profile_system_hash(system)
+        if str(stored) != current:
+            lg.warning(
+                f"Profile at {save_path} was computed with a different system configuration "
+                f"(hash {stored} vs current {current}). Consider setting power_profiles_mode='recompute'."
+            )
+    except Exception as exc:
+        lg.debug(f"Could not check profile hash: {exc}")
+
+
+def _profile_hash_matches(save_path: Path, system: System) -> bool:
+    """Check if a profile file was computed with the same system configuration."""
+    from analysis.runtime.cache import profile_system_hash
+    try:
+        payload = np.load(save_path, allow_pickle=True)
+        if isinstance(payload, np.lib.npyio.NpzFile):
+            data = payload
+        elif isinstance(payload, np.ndarray) and payload.shape == ():
+            data = payload.item()
+        elif isinstance(payload, dict):
+            data = payload
+        else:
+            return False
+        stored = data.get(_PROFILE_SYS_HASH_KEY)
+        if stored is None:
+            return False
+        current = profile_system_hash(system)
+        return str(stored) == current
+    except Exception:
+        return False
+
+
 def compute_raman_profiles(system: System,
-                           save_path: str = "results/uwb_power_profiles.npy",
+                           save_path: str | Path = "results/uwb_power_profiles.npy",
                            integration_steps: int = 300,
                            recompute: bool = False,
                            jiang_cfg=None,
@@ -47,15 +117,22 @@ def compute_raman_profiles(system: System,
     """Compute Raman profiles using the standard Jiang pipeline in power_profiles.py."""
     save_path = Path(save_path)
     if save_path.exists() and not recompute:
-        lg.info(f"Raman profiles already exist at {save_path}; skipping recompute.")
-        return
-    cfg_path = system.source or Path("./input/uwb_struct.toml")
+        if _profile_hash_matches(save_path, system):
+            lg.debug(f"Raman profiles already exist at {save_path}; skipping recompute.")
+            return
+        lg.warning(
+            f"Profile at {save_path} has a different system hash; "
+            "auto-recomputing to avoid stale cache."
+        )
+
+    cfg_path = system.source or Path("./input/studies.toml")
     simulate_power_profiles(
         cfg_path=cfg_path,
         output_path=save_path,
         z_points=integration_steps,
         jiang_cfg=jiang_cfg,
     )
+    _inject_profile_hash(save_path, system)
     if max_power_w is not None:
         payload = np.load(save_path, allow_pickle=True).item()
         sig = payload.get("signal_sol")
@@ -69,7 +146,7 @@ def compute_raman_profiles(system: System,
             raise ValueError(
                 f"Raman profile {save_path} max power {max_val:.3e} W exceeds {max_power_w:.3e} W."
             )
-    lg.info(f"Saved Raman/ISRS power profiles to {save_path}")
+    lg.debug(f"Saved Raman/ISRS power profiles to {save_path}")
     return
 
 
@@ -83,7 +160,7 @@ def plot_power_profiles(
     if not p_path.exists():
         lg.warning(f"Profile file {p_path} not found; skipping plot.")
         return
-    lg.info(f"Loading profile data for plotting from {p_path}")
+    lg.debug(f"Loading profile data for plotting from {p_path}")
     data = np.load(p_path, allow_pickle=True).item()
 
     sig_wl = data.get("signal_wavelengths")
@@ -138,7 +215,7 @@ def _load_profile_launch_powers(profile_path: Path | str, expected_channels: int
         lg.warning(f"Profile file {p_path} not found; using uniform launch power.")
         return None
     try:
-        lg.info(f"Loading profile data from {p_path}")
+        lg.debug(f"Loading profile data from {p_path}")
         payload = np.load(p_path, allow_pickle=True)
         if isinstance(payload, np.lib.npyio.NpzFile):
             data = payload
@@ -180,7 +257,7 @@ def _load_profile_output_powers(profile_path: Path | str, expected_channels: int
         lg.warning(f"Profile file {p_path} not found; skipping output power plot.")
         return None
     try:
-        lg.info(f"Loading profile data for output power from {p_path}")
+        lg.debug(f"Loading profile data for output power from {p_path}")
         payload = np.load(p_path, allow_pickle=True)
         if isinstance(payload, np.lib.npyio.NpzFile):
             data = payload
@@ -377,7 +454,7 @@ def plot_case_study_noise(
     dpi = 300
     grid = False
 
-    cfg_path = Path("./input/uwb_struct.toml")
+    cfg_path = Path("./input/studies.toml")
     syst = System.from_toml(cfg_path)
     freqs = syst.wdm.frequency_grid()
 
@@ -701,7 +778,7 @@ def plot_case_study_noise_histogram(
     dpi = 300
     grid = False
 
-    cfg_path = Path("./input/uwb_struct.toml")
+    cfg_path = Path("./input/studies.toml")
     cf = System.from_toml(cfg_path)
     print(
         f"Loading a WDM grid \n "
@@ -812,11 +889,11 @@ def plot_case_study_noise_histogram(
 
 if __name__ == "__main__":
     if os.getenv("PCFM_WORKFLOW") == "1":
-        from analysis.pcfm_nlin import run_pcfm_workflow
+        from analysis.methods.workflow import run_pcfm_workflow
         run_pcfm_workflow()
         raise SystemExit(0)
     # First, compute and save Raman/ISRS power profiles using provided pumps
-    cfg_path = Path("./input/uwb_struct.toml")
+    cfg_path = Path("./input/studies.toml")
     system = System.from_toml(cfg_path)
     print(system.summary())
     # exit()

@@ -6,11 +6,11 @@ from loguru import logger as lg
 from scipy.constants import c
 
 from analysis.uwb_nlin import _load_profile_launch_powers
-from pynlin.nlin.pcfm_gn import load_signal_profiles
+from pynlin.methods.pcfm import load_signal_profiles
 from pynlin.system import System
 from pynlin.utils import dBm2watt
 
-from .config import PROFILE_MAX_W
+from analysis.config import PROFILE_MAX_W
 
 
 def _profile_needs_recompute(
@@ -45,7 +45,7 @@ def _write_flat_profile(
         "z": z_axis,
     }
     np.save(path, payload)
-    lg.info(f"Saved flat SPP profile to {path}")
+    lg.debug(f"Saved flat SPP profile to {path}")
 
 
 def _load_launch_powers_csv(path: Path | str, freqs_hz: np.ndarray) -> np.ndarray:

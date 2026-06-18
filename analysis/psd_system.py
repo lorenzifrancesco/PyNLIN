@@ -26,7 +26,7 @@ from pynlin.utils import BaseModel, ConfigDict, _toml_load
 
 
 class PsdSystemConfig(BaseModel):
-    config: str = "input/uwb_struct.toml"
+    config: str = "input/studies.toml"
     out: str = "media/psd/psd_qam.pdf"
     pulse_out: str = "media/psd/pulse_shape.pdf"
     qam_orders: str | list[int] = "16"

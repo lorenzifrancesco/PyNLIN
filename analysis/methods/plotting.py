@@ -5,9 +5,9 @@ import numpy as np
 from loguru import logger as lg
 from matplotlib.ticker import ScalarFormatter
 
-from pynlin.nlin import pcfm_gn as pcfm
-from pynlin.nlin.pcfm_gn import PcfmConfig
-from pynlin.nlin.pcfm_gn import fit_spp_polynomials, load_signal_profiles, normalize_spp
+from pynlin.methods import pcfm
+from pynlin.methods.pcfm import PcfmConfig
+from pynlin.methods.pcfm import fit_spp_polynomials, load_signal_profiles, normalize_spp
 from pynlin.system import System
 from pynlin.utils import watt2dBm
 
@@ -137,21 +137,20 @@ def plot_pcfm_gsnr(
         label="TD",
     )
 
-    if plot_pcfm_total_and_sci:
-        for label, gsnr in gsnr_pcfm.items():
-            display = "" if label == "no_loss" else label
-            suffix = f" {display}" if display else ""
-            ax.plot(
-                freqs_hz * 1e-12,
-                gsnr,
-                color=GNUPLOT_ORANGE,
-                lw=0.45,
-                marker="o",
-                markersize=1.2,
-                markerfacecolor="none",
-                markeredgewidth=marker_lw,
-                label=f"PCFM{suffix}",
-            )
+    for label, gsnr in gsnr_pcfm.items():
+        display = "" if label == "no_loss" else label
+        suffix = f" {display}" if display else ""
+        ax.plot(
+            freqs_hz * 1e-12,
+            gsnr,
+            color=GNUPLOT_ORANGE,
+            lw=0.45,
+            marker="o",
+            markersize=1.2,
+            markerfacecolor="none",
+            markeredgewidth=marker_lw,
+            label=f"PCFM{suffix}",
+        )
 
     if gsnr_gn:
         for label, gsnr in gsnr_gn.items():
@@ -283,23 +282,22 @@ def plot_pcfm_nlin_power(
                 label="TD",
             )
 
-        if plot_pcfm_total_and_sci:
-            for label, nlin in nlin_pcfm_w.items():
-                display = "" if label == "no_loss" else label
-                suffix = f" {display}" if display else ""
-                values = metric_fn(nlin)
-                ax.plot(
-                    freqs_hz * 1e-12,
-                    values,
-                    color=GNUPLOT_ORANGE,
-                    lw=0.0,
-                    ls="None",
-                    marker=MARKER_PCFM,
-                    markersize=NLIN_MARKER_SIZE,
-                    markerfacecolor=GNUPLOT_ORANGE,
-                    markeredgewidth=marker_lw,
-                    label=f"PCFM{suffix}",
-                )
+        for label, nlin in nlin_pcfm_w.items():
+            display = "" if label == "no_loss" else label
+            suffix = f" {display}" if display else ""
+            values = metric_fn(nlin)
+            ax.plot(
+                freqs_hz * 1e-12,
+                values,
+                color=GNUPLOT_ORANGE,
+                lw=0.0,
+                ls="None",
+                marker=MARKER_PCFM,
+                markersize=NLIN_MARKER_SIZE,
+                markerfacecolor=GNUPLOT_ORANGE,
+                markeredgewidth=marker_lw,
+                label=f"PCFM{suffix}",
+            )
 
         if nlin_pcfm_xci_w:
             for label, nlin in nlin_pcfm_xci_w.items():
@@ -315,7 +313,7 @@ def plot_pcfm_nlin_power(
                     markersize=NLIN_MARKER_SIZE if is_eq18 else NLIN_MARKER_SIZE_KXCI,
                     markerfacecolor="white" if is_eq18 else GNUPLOT_GREEN,
                     markeredgewidth=marker_lw,
-                    label=f"PCFM {'II' if is_eq18 else 'I'}",
+                    label=f"PCFM XCI{' II' if is_eq18 else ''}",
                 )
 
         if nlin_gn_w:
@@ -389,7 +387,7 @@ def plot_pcfm_nlin_power(
         ax.grid(False)
         _ordered_legend(
             ax,
-            ["PCFM I", "PCFM II", "TD Gaussian", "TD 16-QAM", "TD 256-QAM"],
+            ["PCFM", "PCFM XCI", "PCFM XCI II", "TD Gaussian", "TD 16-QAM", "TD 256-QAM"],
             loc="best",
             fontsize=LEGEND_SIZE,
         )

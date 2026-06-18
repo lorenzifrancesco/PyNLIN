@@ -14,7 +14,7 @@ def _fmt_c(val: complex) -> str:
 
 
 class FwmEstimationConfig(BaseModel):
-    config: str = "input/uwb_struct.toml"
+    config: str = "input/studies.toml"
     out: Optional[str] = None
     f_min_ghz: Optional[float] = None
     f_max_ghz: Optional[float] = None

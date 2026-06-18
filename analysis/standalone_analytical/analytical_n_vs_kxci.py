@@ -38,21 +38,21 @@ import matplotlib.pyplot as plt
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from analysis.pcfm.analytics import (
+from analysis.methods.analytics import (
     _g_kernel as _g_kernel_fast,
     _pcfm_I_poly_sums,
     pcfm_II,
 )
-from analysis.pcfm.config import _load_pcfm_runtime_config, _select_scaling_channel
-from analysis.pcfm.figure_size import scale_figsize_to_ieee_column
-from analysis.pcfm.io import _write_flat_profile
-from pynlin.nlin.cache_names import s2a_lo_timeint_path, s2b_lo_extrema_path
-from pynlin.nlin.nlin_estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus
-from pynlin.nlin.nlin_estimation.lo_correction_uwb import (
+from analysis.config import _load_pcfm_runtime_config, _select_scaling_channel
+from analysis.methods.figure_size import scale_figsize_to_ieee_column
+from analysis.methods.io import _write_flat_profile
+from pynlin.methods.td.cache import s2a_lo_timeint_path, s2b_lo_extrema_path
+from pynlin.methods.td.estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus
+from pynlin.methods.td.estimation.lo_correction_uwb import (
     build_lookup_integral_table_with_raman,
 )
-from pynlin.nlin.nlin_estimation.raman_integrals_uwb import load_fB, raman_integral
-from pynlin.nlin.nlin_estimator_uwb import (
+from pynlin.methods.td.estimation.raman_integrals_uwb import load_fB, raman_integral
+from pynlin.methods.td.estimator import (
     apply_plateau_correction,
     apply_turning_point_correction,
 )
@@ -62,7 +62,7 @@ from pynlin.utils import _toml_load
 
 DEFAULT_OUT_DIR = REPO_ROOT / "media" / "standalone_analytical"
 DEFAULT_CONFIG_PATH = REPO_ROOT / "input" / "analytical_n_vs_kxci.toml"
-DEFAULT_SYSTEM_CONFIG_PATH = REPO_ROOT / "input" / "pcfm_struct.toml"
+DEFAULT_SYSTEM_CONFIG_PATH = REPO_ROOT / "input" / "studies.toml"
 DEFAULT_MPLRC_PATH = Path.home() / ".config" / "matplotlib" / "matplotlibrc"
 DPI = 300
 CONFIG_SECTION = "analytical_n_vs_kxci"
