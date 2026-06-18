@@ -8,8 +8,8 @@ the TD versus PCFM comparison.
 
 The derivation below is implementation-aware. It follows the formulas
 currently used in `analysis/pcfm/workflow.py`,
-`analysis/pcfm/td.py`, `src/pynlin/nlin/nlin_estimator_uwb.py`, and
-`src/pynlin/nlin/pcfm_gn.py`.
+`pynlin.methods.td`, `pynlin.methods.td.estimator`, and
+`pynlin.methods.pcfm.gn`.
 
 ## 1. Shared Physical Quantities
 

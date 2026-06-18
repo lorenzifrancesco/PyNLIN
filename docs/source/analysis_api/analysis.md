@@ -7,8 +7,10 @@
 
 analysis.fiber_analysis
 analysis.fwm
-analysis.pcfm
+analysis.methods
 analysis.raman
+analysis.runners
+analysis.runtime
 analysis.sandbox
 ```
 

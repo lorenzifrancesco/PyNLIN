@@ -49,9 +49,9 @@ $$P_s(z)=P_s(0)\exp\left(-\alpha_s z + \frac{g_{\mathrm{eff}}P_{p,\mathrm{in}}e^
 
 ## 2. Time-domain NLI model (implementation-exact)
 
-This section documents the equations currently executed by the PCFM
-workflow (`analysis/pcfm/workflow.py`), which is also exposed by the
-compatibility entrypoint `analysis/pcfm_nlin.py`.
+This section documents the equations currently executed by the reusable TD/MC
+method layer (`pynlin.methods.td`, `pynlin.methods.mc`) and orchestrated by the
+PCFM workflow (`analysis/methods/workflow.py`).
 
 The TD formulas below are implementation-exact for this repository. They
 do not map one-to-one onto a single closed-form derivation in
@@ -377,7 +377,7 @@ reporting), not a change to the kernel physics.
 
 ### Idealized flat-profile SMF comparison
 
-For the idealized case used by `input/pcfm_struct.toml`:
+For the idealized case (historically `input/pcfm_struct.toml`):
 
 - single spatial mode,
 - constant $\beta_2$,

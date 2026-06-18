@@ -5,7 +5,7 @@
 ```{toctree}
 :maxdepth: 4
 
-pynlin.nlin
+pynlin.methods
 pynlin.raman
 ```
 
