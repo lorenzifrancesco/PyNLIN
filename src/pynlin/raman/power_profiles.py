@@ -22,7 +22,7 @@ from pynlin.utils import dBm2watt
 
 
 def simulate_power_profiles(
-    cfg_path: Path | str = Path("input/dummy_struct.toml"),
+    cfg_path: Path | str = Path("input/studies.toml"),
     output_path: Path | str = Path("results/dummy_power_profiles.npy"),
     z_points: int = 400,
     decimation_factor: int = 1,
@@ -76,4 +76,4 @@ def _init_logging() -> None:
 
 if __name__ == "__main__":
     _init_logging()
-    simulate_power_profiles(cfg_path="input/uwb_struct.toml", output_path="results/uwb_power_profiles.npy")
+    simulate_power_profiles(cfg_path="input/studies.toml", output_path="results/uwb_power_profiles.npy")

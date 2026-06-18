@@ -1686,7 +1686,7 @@ def main():
     lg.remove()
     lg.add(sys.stderr, level=level)
 
-    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/uwb_struct.toml")
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/studies.toml")
     profile_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("results/uwb_power_profiles.npy")
     output_path = Path(sys.argv[3]) if len(sys.argv) > 3 else Path("results/uwb_ase_power_profile.npy")
 
@@ -1932,7 +1932,7 @@ def main_bak():
     lg.remove()
     lg.add(sys.stderr, level=level)
     # Simple smoke test: load system TOML (default smf_struct) and run single-mode amplification
-    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/dummy_struct.toml")
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/studies.toml")
     try:
         from pynlin.system import System
         from pynlin.utils import dBm2watt, nu2lambda
@@ -1991,9 +1991,9 @@ def main_bak():
         plot_matrix(gm_narrow, "Narrowband gain matrix", "gain_matrix_narrow.png")
         plot_matrix(gm_wide - gm_narrow, "Gain matrix diff (wide - narrow)", "gain_matrix_diff.png")
 
-        # Reference narrowband case from smf_struct.toml
+        # Reference case from the active studies TOML
         try:
-            smf_ref = System.from_toml(Path("input/smf_struct.toml"))
+            smf_ref = System.from_toml(Path("input/studies.toml"))
             ref_freqs = smf_ref.wdm.frequency_grid()
             ref_idx = np.linspace(0, len(ref_freqs) - 1, min(200, len(ref_freqs)), dtype=int)
             ref_freq_sample = ref_freqs[ref_idx]

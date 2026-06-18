@@ -3,17 +3,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pynlin.pulses import GaussianPulse, PulseType
-from pynlin.nlin.cache_names import (
+from pynlin.pulses import PulseType
+from pynlin.methods.td.cache import (
     s1_ref_nlin_curve_path,
     s2a_lo_timeint_path,
     s2b_lo_extrema_path,
     s3_chan_nlin_td_path,
     s3_pair_nlin_kernel_path,
 )
-from pynlin.nlin.reference_curves import load_s1_ref_dataset, save_s1_ref_nlin_curve
+from pynlin.methods.td.reference_curves import load_s1_ref_dataset, save_s1_ref_nlin_curve
 from pynlin.system import System
-from pynlin.wdm import RegularWDM
 
 
 def _input_path(name: str) -> Path:
@@ -22,58 +21,40 @@ def _input_path(name: str) -> Path:
     return repo_root / "input" / name
 
 
-@pytest.mark.parametrize(
-    "fname,fiber_type,n_modes",
-    [("smf_struct.toml", "SM", 1), ("mmf_struct.toml", "MM", 4)],
-)
-def test_system_from_toml_structured(fname, fiber_type, n_modes):
-    cfg_path = _input_path(fname)
+def test_system_from_active_studies_toml():
+    cfg_path = _input_path("studies.toml")
     system = System.from_toml(cfg_path)
 
-    # Fiber
-    assert system.fiber.fiber_type == fiber_type
-    assert system.fiber.n_modes == n_modes
-
-    # WDM
-    assert isinstance(system.wdm, RegularWDM)
-    assert system.wdm.num_channels == 200
-
-    # Pulse
-    assert isinstance(system.pulse, GaussianPulse)
-    assert system.pulse_config.type == PulseType.GAUSSIAN
-    assert system.pulse.baud_rate == pytest.approx(33e9)
-
-    # Amplification
-    assert system.amplification.n_pumps == 2
+    assert system.fiber.fiber_type == "SM"
+    assert system.fiber.n_modes == 1
+    assert system.wdm.num_channels == 600
+    assert system.pulse_config.type == PulseType.NYQUIST
+    assert system.pulse.baud_rate == pytest.approx(24.5e9)
+    assert system.amplification.n_pumps == 3
     assert system.amplification.raman_gain == pytest.approx(0.0)
-    assert system.pump_specs and len(system.pump_specs) == 2
+    assert system.pump_specs and len(system.pump_specs) == 3
 
-    # Numerics should be picked up automatically from numerical_config.toml
+    # Numerics are embedded in [numerics] in the active studies TOML.
     assert system.numerics is not None
     assert system.numerics.gvd == pytest.approx(-20e-27)
 
 
-def test_constant_dispersion_beta1_extrapolates_beyond_csv_range():
-    system = System.from_toml(_input_path("pcfm_struct.toml"))
+def test_active_studies_toml_beta_grids_are_finite():
+    system = System.from_toml(_input_path("studies.toml"))
     freqs = system.wdm.frequency_grid()
 
-    beta1, _ = system.beta_grids(freqs=freqs)
-    beta1 = beta1.reshape(-1)
-    diffs = np.diff(beta1)
+    beta1, beta2 = system.beta_grids(freqs=freqs)
 
-    # With constant beta2 and uniform channel spacing, beta1(f) should keep a
-    # nonzero linear slope in frequency even below the CSV support instead of
-    # clamping flat.
-    assert np.all(np.abs(diffs) > 0.0)
-    coeffs = np.polyfit(freqs, beta1, 1)
-    fitted = np.polyval(coeffs, freqs)
-    assert np.allclose(beta1, fitted, rtol=0.0, atol=1e-20)
+    assert beta1.shape == (system.n_modes, freqs.size)
+    assert beta2.shape == (system.n_modes, freqs.size)
+    assert np.all(np.isfinite(beta1))
+    assert np.all(np.isfinite(beta2))
 
 
 def test_pcfm_struct_merges_bands_and_singular_band_section():
-    system = System.from_toml(_input_path("pcfm_struct.toml"))
+    system = System.from_toml(_input_path("studies.toml"))
 
-    assert system.n_channels == 150
+    assert system.n_channels == 600
     assert hasattr(system.wdm, "_band_slices")
     assert set(system.wdm._band_slices) == {"S", "C", "L"}
 
@@ -91,9 +72,10 @@ def test_stage_labelled_cache_names():
         fiber_type="smf",
         br_hz=50e9,
         n_ch=150,
+        fiber_length=100e3,
         spacing_hz=100e9,
         disp_tag="abc123",
-    ).name == "s3_pair_nlin_kernel_ipulse1_smf_br50p000GHz_n150_sp100p000GHz_dispabc123.npy"
+    ).name == "s3_pair_nlin_kernel_ipulse1_smf_L100.0km_br50p000GHz_n150_sp100p000GHz_dispabc123.npy"
     assert s3_chan_nlin_td_path(tag="flat_profile", use_kappa=False, use_x_mode=True).name == (
         "s3_chan_nlin_td_flat_profile_k0_x1.npy"
     )

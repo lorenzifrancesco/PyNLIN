@@ -657,7 +657,7 @@ if __name__ == "__main__":  # pragma: no cover
     lg.remove()
     lg.add(sys.stderr, level=level)
 
-    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/dummy_struct.toml")
+    cfg_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("input/studies.toml")
     system = System.from_toml(cfg_path)
     try:
         out_fig = system.plot_launch_spectrum()

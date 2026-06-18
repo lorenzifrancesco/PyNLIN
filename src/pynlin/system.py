@@ -3,8 +3,8 @@ System container combining fiber, WDM grid, pulse settings, amplification, and n
 
 Designed to mirror the sectioned TOML layout used by existing configs without
 going through the legacy cfg helpers. Leverages the section-aware loaders in
-fiber.py and wdm.py, and optionally pulls numerical parameters from a dedicated
-TOML (defaults to numerical_config.toml next to the system file).
+fiber.py and wdm.py, and reads numerical parameters from the same TOML when a
+``[numerics]`` section is present.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,14 +69,15 @@ def _build_fiber(system_path: Path, data: Mapping) -> Fiber:
     return SMFiber.from_config(cfg)
 
 
-def _load_numerics(system_path: Path, numerical_path: Optional[Path]) -> Optional[NumericalConfig]:
-    if numerical_path is None:
-        candidate = system_path.with_name("numerical_config.toml")
-        if candidate.exists():
-            numerical_path = candidate
-    if numerical_path is None:
+def _load_numerics(data: Mapping, numerical_path: Optional[Path]) -> Optional[NumericalConfig]:
+    if numerical_path is not None:
+        return NumericalConfig(**_toml_load(numerical_path))
+    numerics = data.get("numerics") if isinstance(data, Mapping) else None
+    if numerics is None:
         return None
-    return NumericalConfig(**_toml_load(numerical_path))
+    if not isinstance(numerics, Mapping):
+        raise ValueError("[numerics] must be a TOML table.")
+    return NumericalConfig(**numerics)
 
 
 @dataclass
@@ -107,7 +108,7 @@ class System:
         amp_section = data.get("amplification") if isinstance(data, Mapping) else None
         amp = Amplification.from_mapping(amp_section if isinstance(amp_section, Mapping) else {}, root_data=data)
         numerics_path = Path(numerical_path) if numerical_path is not None else None
-        numerics = _load_numerics(system_path, numerics_path)
+        numerics = _load_numerics(data, numerics_path)
         wdm_section = data.get("wdm") if isinstance(data, Mapping) else {}
         nlin_section = data.get("nlin") if isinstance(data, Mapping) else {}
         fiber_section = data.get("fiber") if isinstance(data, Mapping) else {}
@@ -130,7 +131,7 @@ class System:
             pulse_config=pulse_cfg,
             numerics=numerics,
             source=system_path,
-            numerics_source=numerics_path,
+            numerics_source=numerics_path if numerics_path is not None else (system_path if numerics is not None else None),
             launch_power=launch_power,
             store=store,
             collision_margin=collision_margin,
