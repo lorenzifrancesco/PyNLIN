@@ -1,7 +1,22 @@
 import numpy as np
 
 from pynlin.fiber import SMFiber
-from pynlin.nlin.pcfm_gn import PcfmConfig, _beta2_eff, compute_pcfm_nlin
+from scipy.constants import c
+
+from pynlin.methods.pcfm import (
+    N2_SIO2,
+    PcfmConfig,
+    _aeff_array,
+    _beta2_array,
+    _beta2_eff,
+    _to_per_channel_power,
+    _to_per_polarization_power,
+    compute_pcfm_nlin,
+    compute_sci_numeric,
+    fit_spp_polynomials,
+    load_signal_profiles,
+    normalize_spp,
+)
 from pynlin.pulses import GaussianPulse
 from pynlin.system import System
 from pynlin.wdm import Amplification, RegularWDM
@@ -88,3 +103,48 @@ def test_xci_scales_with_interferer_power_squared(tmp_path):
 
     ratio = xci_b_cut / xci_a_cut
     assert np.isclose(ratio, 4.0, rtol=1e-2, atol=0.0)
+
+
+def test_pcfm_uses_dual_pol_input_and_per_pol_output_scaling(tmp_path):
+    length = 50e3
+    system = _make_minimal_system(
+        n_channels=1,
+        spacing_hz=50e9,
+        center_frequency=193.1e12,
+        length=length,
+    )
+    profile_path = _make_constant_profile(tmp_path, n_channels=1, length=length, n_z=20)
+    launch = np.array([1e-3])
+    cfg = PcfmConfig(
+        degree=3,
+        use_numeric_xci=False,
+        use_beta2_eff=False,
+        n_f=4,
+        n_z=6,
+    )
+
+    total, sci, xci = compute_pcfm_nlin(
+        system,
+        profile_path,
+        launch_powers_w=launch,
+        config=cfg,
+        return_components=True,
+    )
+
+    freqs = system.wdm.frequency_grid()
+    b_ch = float(system.pulse.baud_rate)
+    signal_power_ch_z, z = load_signal_profiles(profile_path, system)
+    spp = normalize_spp(signal_power_ch_z, z)
+    coeffs = fit_spp_polynomials(z, spp, cfg.degree)
+    beta2 = _beta2_array(system, freqs)[0]
+    aeff = _aeff_array(system, freqs)[0]
+    gamma = 2.0 * np.pi * freqs[0] / c * (N2_SIO2 / aeff)
+    k_sci = compute_sci_numeric(coeffs[0], length, beta2, b_ch, cfg.n_f, cfg.n_z, cfg.phase_coeff)
+    g_ch = _to_per_channel_power(launch[0]) / b_ch
+    expected_sci = _to_per_polarization_power(
+        (16.0 / 27.0) * (g_ch ** 3) * (gamma ** 2) * k_sci * b_ch
+    )
+
+    assert np.allclose(xci, 0.0)
+    assert np.allclose(sci, expected_sci)
+    assert np.allclose(total, expected_sci)

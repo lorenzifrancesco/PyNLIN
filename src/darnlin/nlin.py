@@ -22,7 +22,7 @@ init_logging()
 def calc_interChannel(
     gamma: float,
     beta2: float,
-    alpha: float,
+    alpha: float, # the calculations here are performed for the simplest attenuation model
     nspan: int,
     L: float,
     PD: float,
@@ -42,7 +42,7 @@ def calc_interChannel(
     arg1 = (R[1, :] - R[2, :]) * (R[1, :] + 2 * np.pi * q - R[0, :])
     argPD1 = arg1
     mask1 = (w0 < np.pi) & (w0 > -np.pi)
-    denom1 = 1j * beta2 * arg1 - alpha
+    denom1 = 1j * beta2 * arg1 - alpha 
     ss1 = (
         np.exp(1j * argPD1 * PD)
         * (np.exp(1j * beta2 * arg1 * L - alpha * L) - 1.0)

@@ -393,7 +393,7 @@ def plot_channel_dgd_distribution(cf_file = "./input/mmf.toml"):
 
 def plot_channel_gvd_distribution(cf_file = "./input/mmf.toml"):
     """Plot distribution of channel GVD across all modes/channels."""
-    from pynlin.nlin.collision import get_systems_dispersions
+    from pynlin.methods.td.collision import get_systems_dispersions
     cf = cfg.load_toml_to_struct(cf_file)
     wdm = pynlin.wdm.WDM(
         spacing=cf.channel_spacing,

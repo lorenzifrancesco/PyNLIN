@@ -2,7 +2,7 @@
 """Benchmark full regeneration of results/partial_nlin_*_perfect_... files.
 
 This script times the end-to-end call to:
-    pynlin.nlin.validation.compute_numeric_nlin(...)
+    pynlin.methods.td.validation.compute_numeric_nlin(...)
 
 It is intended for before/after performance comparisons when changing
 collision-integral kernels (e.g., m_th_time_integral_general).
@@ -38,19 +38,6 @@ def _patch_legacy_config_loader() -> None:
             return SimpleNamespace(**tomllib.load(f))
 
     cfg.load_toml_to_struct = _legacy_load_toml_to_struct
-
-
-def _patch_nlin_package_exports() -> None:
-    # validation imports symbols from pynlin.nlin package level, while the
-    # implementations currently live in the flat module loaded as _nlin_module.
-    import pynlin.nlin as nlin_pkg
-
-    if not hasattr(nlin_pkg, "_nlin_module"):
-        raise RuntimeError("pynlin.nlin._nlin_module is missing.")
-    flat = nlin_pkg._nlin_module
-    sys.modules["pynlin.nlin_module"] = flat
-    nlin_pkg.X0mm_space_integral = flat.X0mm_space_integral
-    nlin_pkg.compute_all_collisions_time_integrals = flat.compute_all_collisions_time_integrals
 
 
 def _stats(values: list[float]) -> dict[str, float]:
@@ -158,9 +145,8 @@ def run_benchmark(
     perfect_only: bool,
 ) -> dict:
     _patch_legacy_config_loader()
-    _patch_nlin_package_exports()
 
-    from pynlin.nlin.validation import compute_numeric_nlin
+    from pynlin.methods.td.validation import compute_numeric_nlin
 
     if ipulse not in (0, 1):
         raise ValueError(f"ipulse must be 0 or 1, got {ipulse}")

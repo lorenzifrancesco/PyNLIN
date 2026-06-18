@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from pynlin.nlin.nlin_estimation import lo_correction_uwb
-from pynlin.nlin.nlin_estimation.raman_integrals_uwb import load_fB, raman_integral
-from pynlin.nlin.nlin_estimator_uwb import get_kappa2_matrix_uwb, total_nlin_uwb
+from pynlin.methods.td.estimation import lo_correction_uwb
+from pynlin.methods.td.estimation.raman_integrals_uwb import load_fB, raman_integral
+from pynlin.methods.td.estimator import get_kappa2_matrix_uwb, total_nlin_uwb
 
 
 class _DummyWDM:
