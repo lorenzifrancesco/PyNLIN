@@ -45,11 +45,13 @@ def run_td(context: RunContext, config: TDMethodConfig, *, cache_scope: str) -> 
         recompute=config.mode == "recompute",
         profile_path=context.profile_path,
         m_lo_truncation=config.m_lo_truncation,
+        time_integral_backend=config.time_integral_backend,
     )
     extra_tag = method_cache_tag(
         cache_scope,
         context.cache_tag,
         f"mtrunc{config.m_lo_truncation}",
+        f"tib{config.time_integral_backend}",
         "xci" if config.exclude_self_channel else "all",
     )
     launch_nlin = total_nlin_uwb(

@@ -35,7 +35,12 @@ def test_load_studies_runtime_config_new_schema():
                 "launch_csv": "results/launch.csv",
             },
             "methods": {
-                "td": {"mode": "recompute", "exclude_self_channel": False, "m_lo_truncation": 3},
+                "td": {
+                    "mode": "recompute",
+                    "exclude_self_channel": False,
+                    "m_lo_truncation": 3,
+                    "time_integral_backend": "x0mm_fft",
+                },
                 "pcfm": {"mode": "cached", "numeric_xci": True, "degree": 7},
                 "mc": {"mode": "off", "n_trials": 4, "rng_seed": 99},
             },
@@ -58,6 +63,7 @@ def test_load_studies_runtime_config_new_schema():
     assert cfg.methods.td.mode == "recompute"
     assert cfg.methods.td.exclude_self_channel is False
     assert cfg.methods.td.m_lo_truncation == 3
+    assert cfg.methods.td.time_integral_backend == "x0mm_fft"
     assert cfg.methods.pcfm.numeric_xci is True
     assert cfg.methods.pcfm.degree == 7
     assert cfg.methods.mc.n_trials == 4
@@ -69,6 +75,18 @@ def test_load_studies_runtime_config_new_schema():
 
     pcfm_runtime = _load_pcfm_runtime_config(system)
     assert pcfm_runtime["pcfm_degree"] == 7
+    assert pcfm_runtime["td_time_integral_backend"] == "x0mm_fft"
+
+
+def test_load_studies_runtime_config_rejects_invalid_td_time_integral_backend():
+    system = _system({"methods": {"td": {"time_integral_backend": "bad"}}})
+
+    try:
+        load_studies_runtime_config(system)
+    except ValueError as exc:
+        assert "methods.td.time_integral_backend" in str(exc)
+    else:
+        raise AssertionError("invalid TD time integral backend was accepted")
 
 
 def test_resolve_center_window_subset_auto_center():

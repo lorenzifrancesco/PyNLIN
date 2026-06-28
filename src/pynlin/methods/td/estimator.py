@@ -32,6 +32,7 @@ from pynlin.methods.td.collision import build_I_low_interpolator, ensure_i_low_d
 from pynlin.methods.td.estimation.config import flat_profiles_enabled
 from pynlin.methods.td.estimation.ideal_fits_uwb import ideal_fit_coefficients, softplus, LLW_MIN, LLW_MAX
 from pynlin.methods.td.estimation.lo_correction_uwb import build_lookup_integral_table_with_raman
+from pynlin.methods.td.reference_curves import normalize_time_integral_backend
 from pynlin.methods.td.estimation.raman_integrals_uwb import (
     load_fB,
     load_raman_integral_extremes,
@@ -226,7 +227,8 @@ def gvd_correction(system: System,
                    gvdb: float,
                    fiber_length: Optional[float] = None,
                    m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT,
-                   ipulse: int = 1) -> float:
+                   ipulse: int = 1,
+                   time_integral_backend: str = "direct") -> float:
     """Integrate low-order collision terms to correct the LO plateau with GVD."""
     L = _get_fiber_length(system) if fiber_length is None else fiber_length
     br = _get_baud_rate(system)
@@ -243,6 +245,7 @@ def gvd_correction(system: System,
             fiber_length=L,
             max_lld=lld_max,
             recompute=False,
+            time_integral_backend=time_integral_backend,
         )
         I_low_dataset = np.load(s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo))
         interp = build_I_low_interpolator(I_low_dataset, ipulse=ipulse)
@@ -312,7 +315,8 @@ def fit_nlin(system: System,
              raman_gvd_correction_min: callable,
              raman_gvd_correction_max: callable,
              ipulse: int,
-             m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT) -> callable:
+             m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT,
+             time_integral_backend: str = "direct") -> callable:
     """Return a fitted NLIN curve for a channel pair with given GVDs and Raman profile."""
 
     br = _get_baud_rate(system)
@@ -327,6 +331,7 @@ def fit_nlin(system: System,
         fiber_length=L,
         baud_rate=br,
         n_samples_numeric_n=n_samples_numeric_n,
+        time_integral_backend=time_integral_backend,
     )
 
     lo_value_max = raman_gvd_correction_max(L/lda, L/ldb)
@@ -524,13 +529,16 @@ def collision_coeffs_system_uwb(system: System,
                                 recompute: bool = False,
                                 reserve_cpus: int | None = None,
                                 profile_path: Path | str | None = None,
-                                m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT) -> np.ndarray:
+                                m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT,
+                                time_integral_backend: str = "direct") -> np.ndarray:
     """Compute or load channel-pair collision coefficients (SMF or MMF)."""
+    time_integral_backend = normalize_time_integral_backend(time_integral_backend)
     fiber_type = "smf" if system.n_modes == 1 else "mmf"
     profile_tag_parts = []
     if profile_path is not None:
         profile_tag_parts.append(Path(profile_path).stem)
     profile_tag_parts.append(f"mtrunc{int(m_lo_truncation)}")
+    profile_tag_parts.append(f"tib{time_integral_backend}")
     profile_tag = "_".join(profile_tag_parts)
     br_hz = _get_baud_rate(system)
     spacing_hz = getattr(system.wdm, "spacing", None)
@@ -570,6 +578,7 @@ def collision_coeffs_system_uwb(system: System,
         recompute=recompute,
         profile_path=profile_path,
         max_lld=max_lld,
+        time_integral_backend=time_integral_backend,
     )
     ideal_fit_coefficients(
         0.0,
@@ -578,6 +587,7 @@ def collision_coeffs_system_uwb(system: System,
         fiber_length=_get_fiber_length(system),
         baud_rate=_get_baud_rate(system),
         n_samples_numeric_n=n_samples_numeric_n,
+        time_integral_backend=time_integral_backend,
     )
     fB, fB_min, fB_max, fB_min_function, fB_max_function = load_fB(system, profile_path=profile_path)
 
@@ -620,6 +630,7 @@ def collision_coeffs_system_uwb(system: System,
             n_workers,
             raman_extremes,
             int(m_lo_truncation),
+            time_integral_backend,
         ),
     }
     if os.name == "posix":
@@ -650,6 +661,7 @@ _G = {
     "n_workers": None,
     "raman_extremes": None,
     "m_lo_truncation": None,
+    "time_integral_backend": "direct",
 }
 
 
@@ -667,6 +679,7 @@ def _init_collision_worker(
     n_workers,
     raman_extremes,
     m_lo_truncation,
+    time_integral_backend,
 ):
     """Populate worker globals for ProcessPool collision-coefficient jobs."""
     os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -687,12 +700,14 @@ def _init_collision_worker(
         recompute=bool(recompute_lookup_tables),
         profile_path=profile_path,
         max_lld=max_lld,
+        time_integral_backend=normalize_time_integral_backend(time_integral_backend),
     ) # FIXME check
     _G["raman_min"] = raman_min
     _G["raman_max"] = raman_max
     _G["n_workers"] = n_workers
     _G["raman_extremes"] = raman_extremes
     _G["m_lo_truncation"] = int(m_lo_truncation)
+    _G["time_integral_backend"] = normalize_time_integral_backend(time_integral_backend)
 
 
 def _work_A(task_A):
@@ -744,6 +759,7 @@ def _work_A(task_A):
                 raman_gvd_correction_max=rmax,
                 ipulse=ipulse,
                 m_lo_truncation=int(_G["m_lo_truncation"]),
+                time_integral_backend=_G["time_integral_backend"],
             )(dgd)
             block[mB, nuB] = val
 
@@ -777,7 +793,8 @@ def collision_coeffs_from_system(system,
                                  recompute: bool = False,
                                  reserve_cpus: int | None = None,
                                  profile_path: Path | str | None = None,
-                                 m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT) -> np.ndarray:
+                                 m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT,
+                                 time_integral_backend: str = "direct") -> np.ndarray:
     """Modern helper that accepts a System and delegates to collision_coeffs_system_uwb."""
     return collision_coeffs_system_uwb(
         system,
@@ -786,6 +803,7 @@ def collision_coeffs_from_system(system,
         reserve_cpus=reserve_cpus,
         profile_path=profile_path,
         m_lo_truncation=m_lo_truncation,
+        time_integral_backend=time_integral_backend,
     )
 
 
@@ -798,7 +816,8 @@ def total_nlin_from_system(system,
                            profile_path: Path | str | None = None,
                            cache_path: Path | str | None = None,
                            recompute: bool = False,
-                           m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT) -> np.ndarray:
+                           m_lo_truncation: int = UWB_M_LO_TRUNCATION_DEFAULT,
+                           time_integral_backend: str = "direct") -> np.ndarray:
     """Modern helper that accepts a System and computes NLIN end-to-end."""
     ccfs = collision_coeffs if collision_coeffs is not None else collision_coeffs_system_uwb(
         system,
@@ -807,6 +826,7 @@ def total_nlin_from_system(system,
         reserve_cpus=reserve_cpus,
         profile_path=profile_path,
         m_lo_truncation=m_lo_truncation,
+        time_integral_backend=time_integral_backend,
     )
     return total_nlin_uwb(
         system,

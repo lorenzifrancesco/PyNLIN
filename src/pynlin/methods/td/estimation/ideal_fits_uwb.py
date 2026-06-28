@@ -29,6 +29,7 @@ def _ideal_fit_coefficients_cached(
     ipulse: int,
     ref_path: str,
     ref_mtime_ns: int,
+    time_integral_backend: str,
 ) -> np.ndarray:
     """Fit NLIN curves for the Raman/GVD-free case and return softplus parameters.
 
@@ -37,7 +38,13 @@ def _ideal_fit_coefficients_cached(
     """
     p0 = [0.4, 4.5, 0.5]
     _ = ref_mtime_ns
-    dataset = load_s1_ref_dataset(path=ref_path, mode="perfect", gvda=0.0, gvdb=0.0)
+    dataset = load_s1_ref_dataset(
+        path=ref_path,
+        mode="perfect",
+        gvda=0.0,
+        gvdb=0.0,
+        time_integral_backend=time_integral_backend,
+    )
     pulse_shape = str(dataset["pulse_shape"])
     llw_numeric = np.asarray(dataset["llw_grid"], dtype=float)
     nlin_numeric = np.asarray(dataset["ref_nlin_curve"], dtype=float)
@@ -58,7 +65,8 @@ def ideal_fit_coefficients(gvda: float = 0.0,
                            ipulse: int = 1,
                            fiber_length: float | None = None,
                            baud_rate: float | None = None,
-                           n_samples_numeric_n: int | None = None) -> np.ndarray:
+                           n_samples_numeric_n: int | None = None,
+                           time_integral_backend: str = "direct") -> np.ndarray:
     """Fit NLIN curves for the Raman/GVD-free case and return softplus parameters.
 
     Cached by pulse type to avoid repeated disk I/O and curve fitting.
@@ -66,11 +74,18 @@ def ideal_fit_coefficients(gvda: float = 0.0,
     if gvda != 0.0 or gvdb != 0.0:
         raise RuntimeError("Use dispersion correction for nonzero GVD; ideal fit expects gvda=gvdb=0.")
     pulse_shape = "gaussian" if ipulse == 0 else "nyquist"
-    ref_path = ensure_s1_ref_nlin_curve(pulse_shape=pulse_shape, mode="perfect", gvda=0.0, gvdb=0.0)
+    ref_path = ensure_s1_ref_nlin_curve(
+        pulse_shape=pulse_shape,
+        mode="perfect",
+        gvda=0.0,
+        gvdb=0.0,
+        time_integral_backend=time_integral_backend,
+    )
     return _ideal_fit_coefficients_cached(
         ipulse,
         str(ref_path),
         ref_path.stat().st_mtime_ns,
+        time_integral_backend,
     ).copy()
 
 

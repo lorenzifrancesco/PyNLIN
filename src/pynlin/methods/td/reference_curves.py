@@ -27,6 +27,18 @@ _S1_REQUIRED_KEYS = {
     "n_samples_numeric",
 }
 
+_TIME_INTEGRAL_BACKENDS = {"direct", "x0mm_fft"}
+
+
+def normalize_time_integral_backend(value: str = "direct") -> str:
+    backend = str(value).strip().lower()
+    if backend not in _TIME_INTEGRAL_BACKENDS:
+        raise ValueError(
+            f"Unsupported time_integral_backend={value!r}. "
+            f"Expected one of {sorted(_TIME_INTEGRAL_BACKENDS)}."
+        )
+    return backend
+
 _CANONICAL_PERFECT_S1_PARAMS = {
     "gaussian": (0.28221327, 3.28726640, 0.49259348),
     "nyquist": (0.47125353, 2.11578009, 0.92291662),
@@ -55,12 +67,14 @@ def save_s1_ref_nlin_curve(
     gvda: float,
     gvdb: float,
     n_samples_numeric: int,
+    time_integral_backend: str = "direct",
 ) -> Path:
     """Save a normalized S1 reference dataset atomically."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     llw_grid = np.asarray(llw_grid, dtype=float)
     raw_nlin_curve = np.asarray(raw_nlin_curve, dtype=float)
+    time_integral_backend = normalize_time_integral_backend(time_integral_backend)
     if llw_grid.ndim != 1 or raw_nlin_curve.ndim != 1:
         raise ValueError("S1 reference curves must be one-dimensional.")
     if llw_grid.shape != raw_nlin_curve.shape:
@@ -88,6 +102,7 @@ def save_s1_ref_nlin_curve(
             gvda=np.array(float(gvda)),
             gvdb=np.array(float(gvdb)),
             n_samples_numeric=np.array(int(n_samples_numeric)),
+            time_integral_backend=np.array(time_integral_backend),
         )
         os.replace(tmp_path, target)
     finally:
@@ -134,8 +149,10 @@ def load_s1_ref_dataset(
     mode: str,
     gvda: float,
     gvdb: float,
+    time_integral_backend: str = "direct",
 ) -> dict[str, np.ndarray | float | int | str]:
     """Load and validate a structured S1 reference dataset."""
+    time_integral_backend = normalize_time_integral_backend(time_integral_backend)
     target = Path(path) if path is not None else s1_ref_nlin_curve_path(
         ipulse=ipulse,
         pulse_shape=pulse_shape,
@@ -165,6 +182,11 @@ def load_s1_ref_dataset(
         saved_gvda = float(_scalar_value(dataset["gvda"]))
         saved_gvdb = float(_scalar_value(dataset["gvdb"]))
         n_samples_numeric = int(_scalar_value(dataset["n_samples_numeric"]))
+        saved_backend = (
+            str(_scalar_value(dataset["time_integral_backend"]))
+            if "time_integral_backend" in dataset
+            else "direct"
+        )
     expected_pulse = pulse_name(ipulse=ipulse, pulse_shape=pulse_shape) if (ipulse is not None or pulse_shape is not None) else None
     if expected_pulse is not None and pulse != expected_pulse:
         raise ValueError(f"S1 dataset {target} has pulse_shape={pulse!r}, expected {expected_pulse!r}.")
@@ -180,6 +202,11 @@ def load_s1_ref_dataset(
         raise ValueError(f"S1 dataset {target} has inconsistent x_norm metadata.")
     if not np.allclose(ref_nlin_curve, raw_nlin_curve * x_norm ** (-2), rtol=1e-12, atol=0.0):
         raise ValueError(f"S1 dataset {target} has inconsistent normalized curve data.")
+    if saved_backend != time_integral_backend:
+        raise ValueError(
+            f"S1 dataset {target} has time_integral_backend={saved_backend!r}, "
+            f"expected {time_integral_backend!r}."
+        )
     return {
         "llw_grid": llw_grid,
         "raw_nlin_curve": raw_nlin_curve,
@@ -192,6 +219,7 @@ def load_s1_ref_dataset(
         "gvda": saved_gvda,
         "gvdb": saved_gvdb,
         "n_samples_numeric": n_samples_numeric,
+        "time_integral_backend": saved_backend,
         "path": target,
     }
 
@@ -203,6 +231,7 @@ def ensure_s1_ref_nlin_curve(
     mode: str,
     gvda: float,
     gvdb: float,
+    time_integral_backend: str = "direct",
     timeout_s: float = 3600.0,
     poll_s: float = 0.2,
 ) -> Path:
@@ -213,6 +242,7 @@ def ensure_s1_ref_nlin_curve(
     a small lock file so concurrent processes do not race while generating the
     same reference curve.
     """
+    time_integral_backend = normalize_time_integral_backend(time_integral_backend)
     pulse = pulse_name(ipulse=ipulse, pulse_shape=pulse_shape)
     target = s1_ref_nlin_curve_path(
         pulse_shape=pulse,
@@ -220,9 +250,23 @@ def ensure_s1_ref_nlin_curve(
         gvda=gvda,
         gvdb=gvdb,
     )
+    regenerate_existing = False
     if target.exists():
-        load_s1_ref_dataset(path=target, pulse_shape=pulse, mode=mode, gvda=gvda, gvdb=gvdb)
-        return target
+        try:
+            load_s1_ref_dataset(
+                path=target,
+                pulse_shape=pulse,
+                mode=mode,
+                gvda=gvda,
+                gvdb=gvdb,
+                time_integral_backend=time_integral_backend,
+            )
+            return target
+        except ValueError as exc:
+            if "time_integral_backend" not in str(exc):
+                raise
+            regenerate_existing = True
+            lg.info(f"Regenerating S1 reference curve for backend {time_integral_backend}: {target.name}")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     lock_path = target.with_suffix(target.suffix + ".lock")
@@ -233,8 +277,19 @@ def ensure_s1_ref_nlin_curve(
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             if target.exists():
-                load_s1_ref_dataset(path=target, mode=mode, gvda=gvda, gvdb=gvdb)
-                return target
+                try:
+                    load_s1_ref_dataset(
+                        path=target,
+                        mode=mode,
+                        gvda=gvda,
+                        gvdb=gvdb,
+                        time_integral_backend=time_integral_backend,
+                    )
+                    return target
+                except ValueError as exc:
+                    if "time_integral_backend" not in str(exc):
+                        raise
+                    regenerate_existing = True
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out waiting for S1 reference curve {target}")
             time.sleep(poll_s)
@@ -243,27 +298,41 @@ def ensure_s1_ref_nlin_curve(
         try:
             os.close(fd)
             if target.exists():
-                load_s1_ref_dataset(path=target, mode=mode, gvda=gvda, gvdb=gvdb)
-                return target
+                try:
+                    load_s1_ref_dataset(
+                        path=target,
+                        mode=mode,
+                        gvda=gvda,
+                        gvdb=gvdb,
+                        time_integral_backend=time_integral_backend,
+                    )
+                    return target
+                except ValueError as exc:
+                    if "time_integral_backend" not in str(exc):
+                        raise
+                    regenerate_existing = True
             lg.info(f"Generating missing S1 reference curve: {target.name}")
-            if mode == "perfect" and np.isclose(float(gvda), 0.0) and np.isclose(float(gvdb), 0.0):
-                _save_canonical_perfect_s1_ref_curve(target, pulse)
-                load_s1_ref_dataset(path=target, pulse_shape=pulse, mode=mode, gvda=gvda, gvdb=gvdb)
-                return target
             from pynlin.methods.td.validation import compute_numeric_nlin
 
             compute_numeric_nlin(
                 gvda=float(gvda),
                 gvdb=float(gvdb),
                 ipulse=0 if pulse == "gaussian" else 1,
-                recompute=False,
+                recompute=regenerate_existing,
                 perfect_only=(mode == "perfect"),
+                time_integral_backend=time_integral_backend,
             )
             if not target.exists():
                 raise FileNotFoundError(
                     f"S1 reference curve generation completed but {target} was not created."
                 )
-            load_s1_ref_dataset(path=target, mode=mode, gvda=gvda, gvdb=gvdb)
+            load_s1_ref_dataset(
+                path=target,
+                mode=mode,
+                gvda=gvda,
+                gvdb=gvdb,
+                time_integral_backend=time_integral_backend,
+            )
             return target
         finally:
             try:

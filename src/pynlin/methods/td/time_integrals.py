@@ -27,6 +27,7 @@ from pynlin.log_init import init_logging
 from pynlin.pulses import GaussianPulse, NyquistPulse, Pulse, RaisedCosinePulse
 from pynlin.utils import beta2rms
 from pynlin.wdm import WDM
+from pynlin.methods.td.xpm_kernel import compute_x0mm_time_integrals_fft
 
 init_logging()
 
@@ -135,6 +136,7 @@ def compute_all_collisions_time_integrals_system(
     use_multiprocessing: bool = True,
     partial_collisions_margin: int = 5,
     speedup_pulse_propagation=True,
+    time_integral_backend: str = "direct",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     f_grid = wdm.frequency_grid()
@@ -175,7 +177,8 @@ def compute_all_collisions_time_integrals_system(
         gvda, 
         gvdb, 
         use_multiprocessing=use_multiprocessing,
-        partial_collisions_margin=partial_collisions_margin)
+        partial_collisions_margin=partial_collisions_margin,
+        time_integral_backend=time_integral_backend)
 
 
 def compute_all_collisions_time_integrals(
@@ -186,6 +189,7 @@ def compute_all_collisions_time_integrals(
     gvdb: float,
     use_multiprocessing: bool = True,
     partial_collisions_margin: int = 5,
+    time_integral_backend: str = "direct",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute the integrals for all the collisions for the specified pair of
     channels.
@@ -206,6 +210,22 @@ def compute_all_collisions_time_integrals(
         partial_collisions_margin,
         dgd
     )[::-1]
+    time_integral_backend = str(time_integral_backend).lower()
+    if time_integral_backend not in {"direct", "x0mm_fft"}:
+        raise ValueError(f"Unsupported time_integral_backend={time_integral_backend!r}")
+
+    if time_integral_backend == "x0mm_fft":
+        n_z_points = 200
+        z_axis = np.linspace(0.0, fiber.length, n_z_points)
+        integrals = compute_x0mm_time_integrals_fft(
+            pulse,
+            z_axis,
+            np.asarray(m_list, dtype=int),
+            dgd=dgd,
+            gvda=gvda,
+            gvdb=gvdb,
+        )
+        return z_axis, integrals, m_list
     # ---
     # estimation of the useful z range 
     # ---

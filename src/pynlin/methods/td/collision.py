@@ -28,6 +28,7 @@ from pynlin.fiber_data.beta_utils import (
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_oi
 from pynlin.fiber import MMFiber
 from pynlin.methods.td.time_integrals import X0mm_space_integral, m_th_time_integral_general
+from pynlin.methods.td.xpm_kernel import compute_x0mm_time_integrals_fft
 from pynlin.methods.td.cache import (
     s2a_lo_timeint_path,
 )
@@ -327,19 +328,28 @@ def ensure_i_low_dataset(m_lo: int,
                          baud_rate: float,
                          fiber_length: float,
                          max_lld: float,
-                         recompute: bool = False) -> str:
+                         recompute: bool = False,
+                         time_integral_backend: str = "direct",
+                         n_lld_samples: int = 50) -> str:
     """Ensure an I_low dataset exists for the requested L/LD range."""
     if max_lld <= 0 or not np.isfinite(max_lld):
         raise ValueError("max_lld must be a positive finite value.")
     if ipulse not in (0, 1):
         raise ValueError(f"Unsupported ipulse={ipulse}. Expected 0 (gaussian) or 1 (nyquist).")
+    time_integral_backend = str(time_integral_backend).lower()
+    if time_integral_backend not in {"direct", "x0mm_fft"}:
+        raise ValueError(f"Unsupported time_integral_backend={time_integral_backend!r}")
+    n_lld_samples = int(n_lld_samples)
+    if n_lld_samples < 2:
+        raise ValueError("n_lld_samples must be at least 2")
 
     save_path = s2a_lo_timeint_path(ipulse=ipulse, m_lo=m_lo)
     if os.path.exists(save_path) and not recompute:
         try:
             with np.load(save_path, allow_pickle=False) as dataset:
                 lld_range = dataset["lld_range"]
-                if float(lld_range[-1]) >= max_lld:
+                saved_backend = str(dataset["time_integral_backend"].item()) if "time_integral_backend" in dataset else "direct"
+                if float(lld_range[-1]) >= max_lld and saved_backend == time_integral_backend:
                     return save_path
         except (OSError, ValueError, zipfile.BadZipFile, EOFError) as exc:
             lg.warning(f"Discarding unreadable I_low cache {save_path}: {exc}")
@@ -363,12 +373,22 @@ def ensure_i_low_dataset(m_lo: int,
         )
 
     z = np.linspace(0, fiber_length, 2)
-    lld_range = np.linspace(1e-30, max_lld, 50)
+    lld_range = np.linspace(1e-30, max_lld, n_lld_samples)
     LD_min = fiber_length / lld_range[-1]
     beta2_max = 1.0 / (baud_rate**2 * LD_min)
-    beta2_range = np.linspace(1e-30, beta2_max, 50)
+    beta2_range = np.linspace(1e-30, beta2_max, n_lld_samples)
 
     def compute_I_low(beta2a, beta2b):
+        if time_integral_backend == "x0mm_fft":
+            I_low = compute_x0mm_time_integrals_fft(
+                pulse,
+                np.array([z[-1]], dtype=float),
+                np.array([m_lo], dtype=int),
+                dgd=0.0,
+                gvda=beta2a,
+                gvdb=beta2b,
+            )
+            return float(np.real(I_low[0, -1]))
         I_low = np.real(m_th_time_integral_general(
             m_lo, [z[-1]], pulse, 0.0, beta2a, beta2b
         ))
@@ -393,6 +413,7 @@ def ensure_i_low_dataset(m_lo: int,
             I_low_values=I_low_values,
             lld_range=np.asarray(lld_range),
             z=np.asarray(z),
+            time_integral_backend=np.array(time_integral_backend),
         )
         os.replace(tmp_path, save_path)
     finally:

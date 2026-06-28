@@ -22,6 +22,7 @@ _POWER_PROFILE_MODES = {
 }
 
 _METHOD_MODES = {"off", "cached", "recompute"}
+_TD_TIME_INTEGRAL_BACKENDS = {"direct", "x0mm_fft"}
 _STUDY_TYPES = {"full_system", "subset", "sweep"}
 
 
@@ -39,6 +40,7 @@ class TDMethodConfig:
     m_lo_truncation: int = 40
     use_kappa: bool = True
     use_x_mode: bool = True
+    time_integral_backend: str = "direct"
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
         "pcfm_include_mci": False,
         "td_exclude_self_channel": True,
         "td_m_lo_truncation": 40,
+        "td_time_integral_backend": "direct",
         "plot_pcfm_total_and_sci": False,
         "power_profiles_mode": "recompute",
         "td_mode": "cached",
@@ -174,6 +177,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
                 "pcfm_include_mci": methods.pcfm.include_mci,
                 "td_exclude_self_channel": methods.td.exclude_self_channel,
                 "td_m_lo_truncation": methods.td.m_lo_truncation,
+                "td_time_integral_backend": methods.td.time_integral_backend,
                 "plot_pcfm_total_and_sci": methods.pcfm.plot_total_and_sci,
             }
         )
@@ -220,6 +224,7 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
             "pcfm_include_mci",
             "td_exclude_self_channel",
             "td_m_lo_truncation",
+            "td_time_integral_backend",
             "plot_pcfm_total_and_sci",
             "power_profiles_mode",
             "td_mode",
@@ -248,6 +253,9 @@ def _load_pcfm_runtime_config(system: System) -> dict[str, object]:
     defaults["plot_mode"] = _normalize_mode("plot_mode", defaults["plot_mode"], _BINARY_MODES)
     defaults["td_m_lo_truncation"] = _normalize_nonnegative_int(
         "td_m_lo_truncation", defaults["td_m_lo_truncation"]
+    )
+    defaults["td_time_integral_backend"] = _normalize_mode(
+        "td_time_integral_backend", defaults["td_time_integral_backend"], _TD_TIME_INTEGRAL_BACKENDS
     )
     defaults["pcfm_degree"] = _normalize_nonnegative_int(
         "pcfm_degree", defaults["pcfm_degree"]
@@ -333,6 +341,11 @@ def _load_methods_config(system: System) -> MethodsConfig:
             ),
             use_kappa=bool(td.get("use_kappa", True)),
             use_x_mode=bool(td.get("use_x_mode", True)),
+            time_integral_backend=_normalize_mode(
+                "methods.td.time_integral_backend",
+                td.get("time_integral_backend", "direct"),
+                _TD_TIME_INTEGRAL_BACKENDS,
+            ),
         ),
         pcfm=PCFMMethodConfig(
             mode=_normalize_mode("methods.pcfm.mode", pcfm.get("mode", "cached"), _METHOD_MODES),

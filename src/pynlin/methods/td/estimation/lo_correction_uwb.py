@@ -11,6 +11,7 @@ from scipy.interpolate import RegularGridInterpolator
 from pynlin.log_init import init_logging
 from pynlin.methods.td.estimation.config import flat_profiles_enabled
 from pynlin.methods.td.collision import MAX_LLD, ensure_i_low_dataset
+from pynlin.methods.td.reference_curves import normalize_time_integral_backend
 from pynlin.methods.td.cache import (
     s2a_lo_timeint_path,
     s2b_lo_extrema_path,
@@ -27,8 +28,10 @@ def build_lookup_integral_table_with_raman(cf,
                                            recompute=False,
                                            profile_path: Path | str | None = None,
                                            profile_channel_idx: int | None = None,
-                                           max_lld: float | None = None) -> Tuple[callable, callable]:
+                                           max_lld: float | None = None,
+                                           time_integral_backend: str = "direct") -> Tuple[callable, callable]:
     """Generate interpolants for Raman-inclusive LO corrections at fB_min and fB_max."""
+    time_integral_backend = normalize_time_integral_backend(time_integral_backend)
     _, _, _, fB_min, fB_max = load_fB(
         cf,
         profile_path=profile_path,
@@ -51,7 +54,12 @@ def build_lookup_integral_table_with_raman(cf,
     raman_correction_grid_max = np.zeros((n_samples, n_samples))
     raman_correction_grid_min = np.zeros((n_samples, n_samples))
 
-    profile_tag = Path(profile_path).stem if profile_path else None
+    profile_tag_parts = []
+    if profile_path:
+        profile_tag_parts.append(Path(profile_path).stem)
+    if time_integral_backend != "direct":
+        profile_tag_parts.append(f"tib{time_integral_backend}")
+    profile_tag = "_".join(profile_tag_parts) if profile_tag_parts else None
     filename = s2b_lo_extrema_path(
         ipulse=ipulse,
         m_lo_truncation=m_lo_truncation,
@@ -101,6 +109,7 @@ def build_lookup_integral_table_with_raman(cf,
                 fiber_length=float(fiber_length),
                 max_lld=float(lld[-1]),
                 recompute=recompute,
+                time_integral_backend=time_integral_backend,
             )
             add_min = np.zeros((n_samples, n_samples))
             add_max = np.zeros((n_samples, n_samples))

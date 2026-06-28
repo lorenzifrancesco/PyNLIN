@@ -87,7 +87,8 @@ def compute_numeric_nlin(gvda: float,
                          gvdb: float,
                          ipulse: int,
                          recompute: bool = False,
-                         perfect_only: bool = False):
+                         perfect_only: bool = False,
+                         time_integral_backend: str = "direct"):
     """Compute NLIN via numerical collision integrals across a DGD sweep.
 
     If ``perfect_only`` is True, compute/save only the ``*_perfect_*`` dataset
@@ -139,12 +140,28 @@ def compute_numeric_nlin(gvda: float,
 
     if not perfect_only:
         _, _, _, fB_min_func, fB_max_func = load_fB(cf)
-    if not os.path.exists(filename) or recompute:
+    should_compute = recompute or not os.path.exists(filename)
+    if not should_compute:
+        try:
+            load_s1_ref_dataset(
+                path=filename,
+                pulse_shape=pulse_shape,
+                mode="perfect",
+                gvda=gvda,
+                gvdb=gvdb,
+                time_integral_backend=time_integral_backend,
+            )
+        except ValueError as exc:
+            if "time_integral_backend" not in str(exc):
+                raise
+            should_compute = True
+    if should_compute:
         for idx, dgd in enumerate(dgds_numeric):
             z, I, m = compute_all_collisions_time_integrals(
                 fiber, pulse, dgd, gvda, gvdb, 
                 use_multiprocessing=True, 
-                partial_collisions_margin=5)
+                partial_collisions_margin=5,
+                time_integral_backend=time_integral_backend)
 
             X0mm = X0mm_space_integral(z, I, amplification_function=lambda x: 1)
             values_to_check = [X0mm]
@@ -175,6 +192,7 @@ def compute_numeric_nlin(gvda: float,
                 gvda=gvda,
                 gvdb=gvdb,
                 n_samples_numeric=n_samples_numeric,
+                time_integral_backend=time_integral_backend,
             )
             if not perfect_only:
                 save_s1_ref_nlin_curve(
@@ -188,6 +206,7 @@ def compute_numeric_nlin(gvda: float,
                     gvda=gvda,
                     gvdb=gvdb,
                     n_samples_numeric=n_samples_numeric,
+                    time_integral_backend=time_integral_backend,
                 )
                 save_s1_ref_nlin_curve(
                     s1_ref_nlin_curve_path(pulse_shape="gaussian", mode="max", gvda=gvda, gvdb=gvdb),
@@ -200,6 +219,7 @@ def compute_numeric_nlin(gvda: float,
                     gvda=gvda,
                     gvdb=gvdb,
                     n_samples_numeric=n_samples_numeric,
+                    time_integral_backend=time_integral_backend,
                 )
         else:
             save_s1_ref_nlin_curve(
@@ -213,6 +233,7 @@ def compute_numeric_nlin(gvda: float,
                 gvda=gvda,
                 gvdb=gvdb,
                 n_samples_numeric=n_samples_numeric,
+                time_integral_backend=time_integral_backend,
             )
             if not perfect_only:
                 save_s1_ref_nlin_curve(
@@ -226,6 +247,7 @@ def compute_numeric_nlin(gvda: float,
                     gvda=gvda,
                     gvdb=gvdb,
                     n_samples_numeric=n_samples_numeric,
+                    time_integral_backend=time_integral_backend,
                 )
                 save_s1_ref_nlin_curve(
                     s1_ref_nlin_curve_path(pulse_shape="nyquist", mode="max", gvda=gvda, gvdb=gvdb),
@@ -238,6 +260,7 @@ def compute_numeric_nlin(gvda: float,
                     gvda=gvda,
                     gvdb=gvdb,
                     n_samples_numeric=n_samples_numeric,
+                    time_integral_backend=time_integral_backend,
                 )
         if perfect_only:
             lg.info(f"Saved numeric perfect results to {filename}")

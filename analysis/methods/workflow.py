@@ -190,6 +190,7 @@ def run_pcfm_workflow(
     td_m_lo_truncation = int(
         runtime_cfg.get("td_m_lo_truncation", UWB_M_LO_TRUNCATION_DEFAULT)
     )
+    td_time_integral_backend = str(runtime_cfg.get("td_time_integral_backend", "direct"))
     cfg = PcfmConfig(
         degree=pcfm_degree,
         include_mci=pcfm_include_mci,
@@ -336,6 +337,7 @@ def run_pcfm_workflow(
             recompute=recompute_td,
             profile_path=profile_path,
             m_lo_truncation=td_m_lo_truncation,
+            time_integral_backend=td_time_integral_backend,
         ) # heart of TD
         nlin_td = total_nlin_uwb(
             system,
@@ -350,6 +352,7 @@ def run_pcfm_workflow(
                 use_x_mode=True,
                 extra_tag=(
                     f"{model_cache_tag}_mtrunc{td_m_lo_truncation}_"
+                    f"tib{td_time_integral_backend}_"
                     f"{'xci' if td_exclude_self_channel else 'all'}"
                 ),
             ),

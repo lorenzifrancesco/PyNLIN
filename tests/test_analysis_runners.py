@@ -9,7 +9,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from analysis.config import MCMethodConfig, PCFMMethodConfig, ProfilesConfig, TDMethodConfig
-from analysis.runners.methods import TDResult, run_mc, run_pcfm
+from analysis.runners.methods import TDResult, run_mc, run_pcfm, run_td
 from analysis.runtime.context import build_run_context
 from analysis.system_nlin import _validate_smf_mmf_configs
 from pynlin.constellation_stats import qam_mu0
@@ -117,6 +117,37 @@ def test_run_mc_matches_direct_chi_reconstruction_on_flat_context(tmp_path):
     assert np.allclose(result.chi2, chi2)
     assert np.allclose(result.prefactor, prefactor)
     assert np.allclose(result.nlin_16qam_output_w, direct_nlin * context.output_over_launch_ratio)
+
+
+def test_run_td_passes_time_integral_backend(monkeypatch, tmp_path):
+    system = _minimal_system()
+    profiles = ProfilesConfig(mode="flat", path=tmp_path / "flat.npy", launch_csv=None)
+    context = build_run_context(
+        system=system,
+        config_path=Path("test.toml"),
+        out_dir=tmp_path,
+        profiles=profiles,
+        cache_prefix="td_backend",
+    )
+    seen = {}
+
+    def fake_collision_coeffs_system_uwb(*args, **kwargs):
+        seen["backend"] = kwargs["time_integral_backend"]
+        return np.ones((1, 2, 1, 2), dtype=float)
+
+    monkeypatch.setattr(
+        "analysis.runners.methods.collision_coeffs_system_uwb",
+        fake_collision_coeffs_system_uwb,
+    )
+
+    result = run_td(
+        context,
+        TDMethodConfig(mode="recompute", time_integral_backend="x0mm_fft"),
+        cache_scope="unit",
+    )
+
+    assert seen["backend"] == "x0mm_fft"
+    assert result.collision_coeffs.shape == (1, 2, 1, 2)
 
 
 def test_system_nlin_rejects_same_smf_mmf_config_path(tmp_path):

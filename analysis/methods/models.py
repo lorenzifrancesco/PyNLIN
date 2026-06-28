@@ -142,7 +142,7 @@ def _load_or_compute_pcfm_general(
 
     lg.info(f"Computing analytic XCI (model={xci_model})")
     if xci_model == "eq18":
-        lg.warning("PCFM-II analytic XCI requested.")
+        lg.warning(f"PCFM-II analytic XCI requested with SPP fit degree={int(degree)}.")
     values = np.array(
         [
             pcfm_general(
