@@ -126,6 +126,15 @@ def compute_extended(case: dict) -> Path:
     )
 
 
+def _discretization_annotation() -> str:
+    return (
+        "Shaded: $L/L_W>80$ where\n"
+        "no-disp. collision width\n"
+        "$<\\Delta z$; curves there\n"
+        "may be under-resolved"
+    )
+
+
 def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     """Individual N1/N2/2PC + decomposition panels per case in subfolder."""
     d = np.load(path)
@@ -145,6 +154,11 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _annotate(ax)
+    # dz-resolution annotation
+    ax.text(0.98, 0.04, _discretization_annotation(),
+            transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=5.2, color="0.40",
+            bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=1.5))
     fig.tight_layout()
     fig.savefig(subdir / f"xhkm_n1_n2_{case['key']}.pdf", dpi=300)
     plt.close(fig)
@@ -163,6 +177,10 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=6)
     _annotate(ax)
+    ax.text(0.98, 0.04, _discretization_annotation(),
+            transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=5.2, color="0.40",
+            bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=1.5))
     fig.tight_layout()
     fig.savefig(subdir / f"xhkm_decomp_{case['key']}.pdf", dpi=300)
     plt.close(fig)
@@ -184,6 +202,10 @@ def _plot_n2pc_comparison(colors, paths, subdir) -> None:
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _annotate(ax)
+    ax.text(0.98, 0.04, _discretization_annotation(),
+            transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=5.2, color="0.40",
+            bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=1.5))
     fig.tight_layout()
     stem = "xhkm_n2pc_comparison_extended"
     fig.savefig(subdir / f"{stem}.pdf", dpi=300)
@@ -207,19 +229,14 @@ def _plot_combined_n1_n2_n2pc(colors, paths, subdir) -> None:
                 ls=":", label=f"{label} 2PC")
     ax.axvline(LLW_OLD_MAX, color="grey", lw=0.5, ls="--", alpha=0.5)
     ax.axvspan(RELIABILITY_LLW, 8000,
-               color="grey", alpha=0.06, label=r"$\leftarrow$ z-res. limit")
+               color="grey", alpha=0.06, label=r"z-res. limit")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N\,T^2/L^2$")
     ax.set_title("Nyquist Xhkm sums: extended range")
     ax.grid(True, which="both", alpha=0.25)
     leg = ax.legend(fontsize=5.6, ncol=2)
     _annotate(ax)
-    ax.text(0.98, 0.92,
-            "Shaded region: no-disp.\n"
-            "collision width $<\\Delta z$;\n"
-            "curves there may be\n"
-            "numerically under-resolved\n"
-            "and artificially split.",
+    ax.text(0.98, 0.92, _discretization_annotation(),
             transform=ax.transAxes, ha="right", va="top",
             fontsize=5.5, color="0.35",
             bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=1.5))
@@ -247,7 +264,7 @@ def _plot_ratio_comparison(colors, paths, subdir) -> None:
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _annotate(ax)
-    ax.text(0.98, 0.92, "Shaded: z-res. limit",
+    ax.text(0.98, 0.92, _discretization_annotation(),
             transform=ax.transAxes, ha="right", va="top",
             fontsize=5.5, color="0.35",
             bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=1.5))

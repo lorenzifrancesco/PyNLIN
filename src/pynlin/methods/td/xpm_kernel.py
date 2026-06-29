@@ -7,6 +7,7 @@ evaluators for the fundamental pulse-overlap coefficients.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Callable
 
@@ -68,6 +69,58 @@ def _z_trapezoid_weights(z: np.ndarray) -> np.ndarray:
     if z.size > 2:
         weights[1:-1] = (z[2:] - z[:-2]) / 2.0
     return weights
+
+
+def _check_discretization_limits(
+    grid: XPMKernelGrid,
+    *,
+    action: str = "warn",
+    min_pts_per_collision: float = 3.0,
+    max_walkoff_fraction: float = 0.8,
+) -> None:
+    """Warn or assert when FFT discretization limits compromise the collision integrals.
+
+    Parameters
+    ----------
+    action : ``"warn"``, ``"assert"``, or ``"silent"``
+    """
+    L = float(grid.z[-1] - grid.z[0])
+    n_z = grid.z.size
+    dz = np.mean(np.diff(grid.z))
+    LLW = L * float(grid.baud_rate) * float(grid.dgd)
+    T = 1.0 / float(grid.baud_rate)
+
+    # z-resolution: pts per collision width w = L/LLW
+    pts_per_collision = n_z / LLW if LLW > 0 else float("inf")
+    time_window = float(grid.t[-1] - grid.t[0])
+    total_walkoff = float(grid.dgd) * L
+    walkoff_fraction = total_walkoff / time_window if time_window > 0 else float("inf")
+
+    issues: list[str] = []
+    if pts_per_collision < min_pts_per_collision:
+        issues.append(
+            f"z-resolution: pts/collision={pts_per_collision:.2f} < {min_pts_per_collision} "
+            f"(LLW={LLW:.1f}, n_z={n_z}, dz={dz:.3g}m, collision width w=L/LLW={L/LLW:.3g}m)"
+        )
+    if walkoff_fraction > max_walkoff_fraction:
+        issues.append(
+            f"time-window wrap: walk-off consumes {100*walkoff_fraction:.0f}% of "
+            f"time window {1e9*time_window:.0f}ns (total walk-off dgd*L={1e12*total_walkoff:.0f}ps)"
+        )
+    elif walkoff_fraction > 0.5:
+        issues.append(
+            f"time-window marginal: walk-off consumes {100*walkoff_fraction:.0f}% of window"
+        )
+
+    if not issues:
+        return
+
+    msg = "FFT discretization limit(s) hit:\n" + "\n".join(issues)
+    if action == "assert":
+        raise AssertionError(msg)
+    elif action == "warn":
+        warnings.warn(msg, stacklevel=2)
+    # "silent" → nothing
 
 
 def kernel_grid_from_pulse(
@@ -295,13 +348,31 @@ def compute_xpm_kernel_fft(
     gvda: float,
     gvdb: float,
     amplification_function: Callable[[np.ndarray], np.ndarray] | None = None,
+    discretization_action: str = "warn",
+    min_pts_per_collision: float = 3.0,
+    max_walkoff_fraction: float = 0.8,
 ) -> XPMKernelResult:
     """Compute a finite ``X[h,r,m] = X_{h,m+r,m}`` table by FFT overlaps.
 
     This is a low-level benchmark evaluator. It preserves collision identities
     and does not change the production TD-NLIN fitted estimators.
+
+    Parameters
+    ----------
+    discretization_action : ``"warn"``, ``"assert"``, or ``"silent"``
+        How to handle discretization-limit violations.
+    min_pts_per_collision : float
+        Minimum acceptable ratio ``n_z / (L/L_W)``.
+    max_walkoff_fraction : float
+        Maximum acceptable fraction of the time window consumed by walk-off.
     """
     grid = kernel_grid_from_pulse(pulse, z, dgd=dgd, gvda=gvda, gvdb=gvdb)
+    _check_discretization_limits(
+        grid,
+        action=discretization_action,
+        min_pts_per_collision=min_pts_per_collision,
+        max_walkoff_fraction=max_walkoff_fraction,
+    )
     h_values = np.asarray(h_values, dtype=int).reshape(-1)
     r_values = np.asarray(r_values, dtype=int).reshape(-1)
     m_values = np.asarray(m_values, dtype=int).reshape(-1)
@@ -331,6 +402,15 @@ def compute_xpm_kernel_fft(
                 lags, Q = sliding_overlap_fft(C_h, D_r, grid.dt)
                 X[h_idx, r_idx, :] += z_weight * sample_correlation(lags, Q, tau)
 
+    L = float(grid.z[-1] - grid.z[0])
+    LLW = L * float(grid.baud_rate) * float(grid.dgd)
+    n_z = grid.z.size
+    dz_mean = float(np.mean(np.diff(grid.z)))
+    pts_per_collision = float(n_z) / LLW if LLW > 0 else float("inf")
+    time_window = float(grid.t[-1] - grid.t[0])
+    total_walkoff = float(grid.dgd) * L
+    walkoff_fraction = total_walkoff / time_window if time_window > 0 else float("inf")
+
     metadata = {
         "dgd": grid.dgd,
         "gvda": grid.gvda,
@@ -338,9 +418,13 @@ def compute_xpm_kernel_fft(
         "baud_rate": grid.baud_rate,
         "z_min": float(grid.z[0]),
         "z_max": float(grid.z[-1]),
-        "n_z": int(grid.z.size),
+        "n_z": n_z,
         "n_t": int(grid.t.size),
         "dt": grid.dt,
+        "dz": dz_mean,
+        "LLW": float(LLW),
+        "pts_per_collision": float(pts_per_collision),
+        "walkoff_fraction": float(walkoff_fraction),
         "h_values": h_values.copy(),
         "r_values": r_values.copy(),
         "m_values": m_values.copy(),
