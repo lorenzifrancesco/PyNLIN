@@ -819,3 +819,93 @@ Implementation mapping (Dar NLIN):
 - The geometric sum across spans is modeled by the factor
   $(1-e^{i n_{span} \beta_2 \Delta z})/(1-e^{i \beta_2 \Delta z})$
   inside each sampled term.
+
+### Prefactor-free generic-$X_{hkm}$ sums
+
+The optional FFT generic-collision workflow stores the tensor convention
+
+$$X[h,r,m]=X_{h,m+r,m}, \qquad r=k-m.$$
+
+It contracts this tensor into
+
+$$N_1=\sum_{h,r,m}|X[h,r,m]|^2,$$
+
+and
+
+$$N_2=\sum_{h,m}|X[h,0,m]|^2.$$
+
+These quantities are named $N_1$ and $N_2$ because they correspond to the
+collision-sum parts of Dar-style $\chi_1$ and $\chi_2$ without the physical
+prefactors. Stored curves use the S1 normalization $T^2/L^2$ and the
+walk-off axis $L/L_W$. The existing $X_{0mm}$ S1 workflow remains unchanged.
+The saved diagnostics also separate 2PC, 3PCa ($h=0,k\ne m$), 3PCb
+($h\ne0,k=m$), residual 3PC edge coincidences, and 4PC sectors.
+
+In the high-walk-off limit the generic coefficients approach a complete-
+collision factorization of the form
+
+$$X_{h,m+r,m}
+\propto
+\frac{1}{|\Delta\beta_1|}
+\langle g(t),g(t-hT)\rangle
+\langle g(t-rT),g(t)\rangle.$$
+
+Therefore the high-walk-off class decomposition depends on pulse
+orthogonality. For Nyquist sinc pulses, symbol-spaced shifts are
+orthogonal, so the shifted overlaps vanish for $h\ne0$ or $r\ne0$ and
+
+$$N_1 \simeq N_2 \simeq N_{2PC}$$
+
+at large $L/L_W$. Gaussian pulses are not orthogonal under symbol-spaced
+shifts, so 3PCa, 3PCb, and 4PC sectors retain finite high-walk-off
+prefactors. Their curves then share the same large-walk-off scaling as the
+2PC term but do not merge with it.
+
+With strong dispersion the generic-collision sums become much more sensitive
+to the finite collision support used in the numerical contraction. The
+horizontal axis $L/L_W$ uses the input symbol time $T$, but the relevant
+collision overlap is set by the dispersed pulse width,
+
+$$T_{\mathrm{eff}}(z) \sim T\sqrt{1 + (z/L_D)^2}.$$
+
+For $L/L_D \gg 1$, pulses broaden substantially during the span. Terms whose
+nominal collision centers lie outside the fiber can still contribute through
+their dispersive tails and through partial collisions near the fiber edges.
+Therefore the support in $m$ must include enough outside-centered partial
+collisions, and the support in $h$ and $r=k-m$ must include enough neighboring
+symbol offsets. Aggressively truncated sums, for example using only
+$h,r\in[-1,1]$ with a small $m$ margin, can show an apparent broad maximum
+around
+
+$$L/L_W = O(L/L_D),$$
+
+because the retained center-inside collisions and the omitted edge/outside
+partial collisions scale differently with walk-off. In the higher-support
+calculations using $h,r\in[-5,5]$ and an $m$ margin of 10, this upward bump is
+removed from the Nyquist high-dispersion curves, showing that the previous
+feature was primarily a finite-support artifact rather than a robust physical
+maximum. The high-dispersion regime should therefore be reported together
+with the truncation metadata, and convergence in $h$, $r$, and the partial-
+collision margin should be checked before interpreting local extrema.
+
+An important consequence of high dispersion is that the $N_1$ and $N_2$ curves
+do **not** merge in the large-walk-off limit, even for Nyquist pulses. The
+dispersive broadening breaks the symbol-spaced orthogonality of the
+ideal sinc pulse: the dispersed pulse $\tilde g(z,t)$ has non-zero overlap
+$\langle\tilde g(z,t),\tilde g(z,t-hT)\rangle$ for $h\neq0$, and similarly
+for the $r=k-m$ index. This keeps the $h\neq0$ or $r\neq0$ sectors
+(3PCa, 3PCb, 4PC) finite at arbitrarily large $L/L_W$, so $N_2$ (which only
+retains $r=0$) permanently carries a smaller fraction of the total collision
+power than $N_1$. For $L/L_D=10$ at $L/L_W=40$ the ratio is already
+$N_2/N_1\approx0.55$, well within the numerically reliable regime.
+
+When extending the walk-off range much beyond $L/L_W\sim80$ with the
+direct FFT kernel, the finite $z$ resolution becomes a concern. The
+collision width $w=T/\Delta\beta_1$ shrinks as $w=L/(L/L_W)$, so at
+$L/L_W=5000$ the width is only $0.08$~m. If the $z$ grid in the numerical
+integration is coarser than this width, the collision integrals are severely
+undersampled and the curves show artificial splits or flattening. The
+extended-range plots mark the region where this resolution limit applies.
+These plots should be interpreted with caution; production-quality
+convergence at very high walk-off requires an adaptive $z$ grid or analytic
+integration.

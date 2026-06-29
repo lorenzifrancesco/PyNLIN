@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+
+import numpy as np
 
 
 def pulse_name(*, ipulse: int | None = None, pulse_shape: str | None = None) -> str:
@@ -26,6 +29,41 @@ def s1_ref_nlin_curve_path(
 ) -> Path:
     pulse = pulse_name(ipulse=ipulse, pulse_shape=pulse_shape)
     return Path(directory) / f"s1_ref_nlin_curve_{pulse}_{mode}_gvda{gvda}_gvdb{gvdb}.npz"
+
+
+def _array_tag(values) -> str:
+    arr = np.asarray(values, dtype=int).reshape(-1)
+    digest = hashlib.sha1(arr.tobytes()).hexdigest()[:10]
+    if arr.size == 0:
+        return f"empty_{digest}"
+    return f"{arr[0]}to{arr[-1]}n{arr.size}_{digest}"
+
+
+def xhkm_sum_ref_curve_path(
+    *,
+    ipulse: int | None = None,
+    pulse_shape: str | None = None,
+    mode: str,
+    gvda: float,
+    gvdb: float,
+    h_values,
+    r_values,
+    partial_collisions_margin: int,
+    n_samples_numeric: int,
+    schema_version: int = 2,
+    directory: str | Path = "results",
+) -> Path:
+    pulse = pulse_name(ipulse=ipulse, pulse_shape=pulse_shape)
+    h_tag = _array_tag(h_values)
+    r_tag = _array_tag(r_values)
+    return (
+        Path(directory)
+        / (
+            f"xhkm_sum_ref_curve_{pulse}_{mode}_gvda{gvda}_gvdb{gvdb}"
+            f"_h{h_tag}_r{r_tag}_marg{int(partial_collisions_margin)}"
+            f"_n{int(n_samples_numeric)}_v{int(schema_version)}.npz"
+        )
+    )
 
 
 def s2a_lo_timeint_path(

@@ -5,7 +5,6 @@ import time
 from itertools import product
 from typing import List, Tuple
 
-import h5py
 import numpy as np
 import scipy.integrate
 import tqdm
@@ -50,6 +49,8 @@ def time_integrals_all_b_chans(
     """Compute the inner time integral of the expression for the XPM
     coefficients Xhkm for each combination of frequencies in the supplied WDM
     grid."""
+    import h5py
+
     if isinstance(fiber, SMFiber):
         assert (a_chan[0] == 0)
 

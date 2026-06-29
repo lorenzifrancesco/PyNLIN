@@ -12,7 +12,7 @@ from scipy.interpolate import interp1d
 import pynlin.io_utils as cfg
 from pynlin.fiber_data.load_fiber_values import load_group_delay, load_rms_gvd
 from pynlin.log_init import init_logging
-from pynlin.methods.td.cache import s1_ref_nlin_curve_path
+from pynlin.methods.td.cache import s1_ref_nlin_curve_path, xhkm_sum_ref_curve_path
 from pynlin.methods.td.legacy_estimator import LLW_MAX, LLW_MIN, fit_nlin
 from pynlin.methods.td.estimation.ideal_fits import ideal_fit_coefficients
 from pynlin.methods.td.estimation.lo_correction import (
@@ -20,11 +20,18 @@ from pynlin.methods.td.estimation.lo_correction import (
     build_lookup_integral_table_with_raman,
     build_lookup_integral_table_with_raman_custom,
 )
-from pynlin.methods.td.reference_curves import load_s1_ref_dataset, save_s1_ref_nlin_curve
+from pynlin.methods.td.reference_curves import (
+    load_s1_ref_dataset,
+    load_xhkm_sum_reference_curves,
+    save_s1_ref_nlin_curve,
+    save_xhkm_sum_reference_curves,
+)
 from pynlin.methods.td.estimation.raman_integrals import load_fB, raman_integral
 from pynlin.collisions import get_collision_location, get_m_values
 from pynlin.fiber import *
 from pynlin.methods.td.time_integrals import X0mm_space_integral, compute_all_collisions_time_integrals
+from pynlin.methods.td.xhkm_sums import compute_xhkm_sums
+from pynlin.methods.td.xpm_kernel import compute_xpm_kernel_fft
 from pynlin.pulses import *
 
 init_logging()
@@ -110,7 +117,7 @@ def compute_numeric_nlin(gvda: float,
         group_delay=beta1_params,
         length=cf.fiber_length,
         n_modes=cf.n_modes
-    )
+                )
 
     if ipulse == 0:
         dgd2 = nc.dgd2_g
@@ -294,6 +301,161 @@ def compute_asymptotic_nlin(ipulse) -> Tuple[np.ndarray, np.ndarray]:
     nlin_hi[nlin_hi > 1e100] = np.nan
     nlin_lo[nlin_lo > 1e100] = np.nan
     return nlin_hi, nlin_lo
+
+def compute_numeric_xhkm_sum_curves(
+    gvda: float,
+    gvdb: float,
+    ipulse: int,
+    *,
+    h_values: np.ndarray,
+    r_values: np.ndarray,
+    recompute: bool = False,
+    perfect_only: bool = True,
+    partial_collisions_margin: int = 5,
+    n_z_points: int = 200,
+):
+    """Compute prefactor-free Dar-style ``N1``/``N2`` curves from Xhkm.
+
+    This is an opt-in generic-Xhkm validation workflow. It does not change the
+    existing S1 ``X0mm`` reference-curve generation.
+    """
+    if not perfect_only:
+        raise NotImplementedError(
+            "Generic Xhkm sum curves currently support only the flat profile."
+        )
+    h_values = np.asarray(h_values, dtype=int).reshape(-1)
+    r_values = np.asarray(r_values, dtype=int).reshape(-1)
+    if h_values.size == 0 or r_values.size == 0:
+        raise ValueError("h_values and r_values must be non-empty")
+
+    cf_path = "./input/studies.toml"
+    cf = _load_cf_with_legacy_support(cf_path)
+    nc = _numerics_from_config(cf)
+
+    nc.dgd1 = LLW_MIN / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_n = LLW_MAX / (cf.fiber_length * cf.baud_rate)
+    nc.dgd2_g = nc.dgd2_n
+
+    oi_fit = np.load('results/oi_fit.npy')
+    beta1_params = load_group_delay()
+    fiber = MMFiber(
+        effective_area=cf.effective_area,
+        overlap_integrals=oi_fit,
+        group_delay=beta1_params,
+        length=cf.fiber_length,
+        n_modes=cf.n_modes
+    )
+
+    if ipulse == 0:
+        dgd2 = nc.dgd2_g
+        n_samples_numeric = nc.n_samples_numeric_g
+        pulse = GaussianPulse(
+            baud_rate=cf.baud_rate, num_symbols=1e2, samples_per_symbol=2**5)
+        pulse_shape = "gaussian"
+    else:
+        dgd2 = nc.dgd2_n
+        n_samples_numeric = nc.n_samples_numeric_n
+        pulse = NyquistPulse(
+            baud_rate=cf.baud_rate, num_symbols=1e3, samples_per_symbol=2**5, rolloff=0.0)
+        pulse_shape = "nyquist"
+
+    out_path = xhkm_sum_ref_curve_path(
+        pulse_shape=pulse_shape,
+        mode="perfect",
+        gvda=gvda,
+        gvdb=gvdb,
+        h_values=h_values,
+        r_values=r_values,
+        partial_collisions_margin=partial_collisions_margin,
+        n_samples_numeric=n_samples_numeric,
+    )
+    if out_path.exists() and not recompute:
+        load_xhkm_sum_reference_curves(
+            out_path,
+            pulse_shape=pulse_shape,
+            mode="perfect",
+            gvda=gvda,
+            gvdb=gvdb,
+            h_values=h_values,
+            r_values=r_values,
+        )
+        return out_path
+
+    dgds_numeric = np.logspace(
+        np.log10(nc.dgd1), np.log10(dgd2), n_samples_numeric)
+    llw_numeric = dgds_numeric * cf.fiber_length * cf.baud_rate
+    z = np.linspace(0.0, cf.fiber_length, int(n_z_points))
+
+    raw_n1 = np.empty(n_samples_numeric, dtype=float)
+    raw_n2 = np.empty(n_samples_numeric, dtype=float)
+    raw_n_2pc = np.empty(n_samples_numeric, dtype=float)
+    raw_n_3pc_total = np.empty(n_samples_numeric, dtype=float)
+    raw_n_3pca = np.empty(n_samples_numeric, dtype=float)
+    raw_n_3pcb = np.empty(n_samples_numeric, dtype=float)
+    raw_n_3pc_other = np.empty(n_samples_numeric, dtype=float)
+    raw_n_3pc_k_eq_m = np.empty(n_samples_numeric, dtype=float)
+    raw_n_4pc = np.empty(n_samples_numeric, dtype=float)
+    raw_n_k_neq_m = np.empty(n_samples_numeric, dtype=float)
+
+    for idx, dgd in enumerate(dgds_numeric):
+        m_values = get_m_values(
+            fiber,
+            pulse,
+            partial_collisions_margin,
+            float(dgd),
+        )[::-1]
+        result = compute_xpm_kernel_fft(
+            pulse,
+            z,
+            h_values,
+            r_values,
+            m_values,
+            dgd=float(dgd),
+            gvda=gvda,
+            gvdb=gvdb,
+        )
+        sums = compute_xhkm_sums(
+            result.X,
+            result.h_values,
+            result.r_values,
+            result.m_values,
+        )
+        raw_n1[idx] = sums.n1
+        raw_n2[idx] = sums.n2
+        raw_n_2pc[idx] = sums.n_2pc
+        raw_n_3pc_total[idx] = sums.n_3pc_total
+        raw_n_3pca[idx] = sums.n_3pca
+        raw_n_3pcb[idx] = sums.n_3pcb
+        raw_n_3pc_other[idx] = sums.n_3pc_other
+        raw_n_3pc_k_eq_m[idx] = sums.n_3pc_k_eq_m
+        raw_n_4pc[idx] = sums.n_4pc
+        raw_n_k_neq_m[idx] = sums.n_k_neq_m
+
+    return save_xhkm_sum_reference_curves(
+        out_path,
+        llw_grid=llw_numeric,
+        raw_n1=raw_n1,
+        raw_n2=raw_n2,
+        raw_n_2pc=raw_n_2pc,
+        raw_n_3pc_total=raw_n_3pc_total,
+        raw_n_3pca=raw_n_3pca,
+        raw_n_3pcb=raw_n_3pcb,
+        raw_n_3pc_other=raw_n_3pc_other,
+        raw_n_3pc_k_eq_m=raw_n_3pc_k_eq_m,
+        raw_n_4pc=raw_n_4pc,
+        raw_n_k_neq_m=raw_n_k_neq_m,
+        fiber_length=cf.fiber_length,
+        baud_rate=cf.baud_rate,
+        pulse_shape=pulse_shape,
+        mode="perfect",
+        gvda=gvda,
+        gvdb=gvdb,
+        h_values=h_values,
+        r_values=r_values,
+        partial_collisions_margin=partial_collisions_margin,
+        n_samples_numeric=n_samples_numeric,
+    )
+
 
 def simple_plot_threshold(gvda: float = 0.0,
                           gvdb: float = 0.0,

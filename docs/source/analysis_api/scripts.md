@@ -16,6 +16,16 @@ run directly from the repository root rather than imported as library modules.
 - `analysis/psd_system.py`: PSD, bispectrum, and fourth-order proxy diagnostics for pulse/constellation settings.
 - `analysis/mc_nlin.py`: MC method benchmark: plot chi1/chi2 decomposition results from studies.
 - `analysis/benchmark.py`: runtime benchmarking for TD-NLIN precompute and reduction stages.
+- `analysis/standalone_numerical/plot_xhkm_sum_curves.py`: plot prefactor-free
+  Dar-style `N1`/`N2` curves computed from generic FFT `X[h,r,m]` collision tensors.
+- `analysis/standalone_numerical/generate_xhkm_sum_curves.py`: generate the
+  higher-support Xhkm demo datasets and plots, using `h,r=-5..5`, `m` margin
+  `10`, and a small truncation annotation on each plot.
+- `analysis/standalone_numerical/generate_xhkm_extended_range.py`: extend the
+  Nyquist Xhkm curves up to $L/L_W=5000$ with adaptive $z$ resolution, and
+  plot the comparison between no-dispersion and $L/L_D=1,5,10$ cases.
+  The plot marks the region where the finite $z$ grid may not resolve the
+  collision widths.
 
 ## Additional utilities
 

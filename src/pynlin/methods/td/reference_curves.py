@@ -29,6 +29,46 @@ _S1_REQUIRED_KEYS = {
 
 _TIME_INTEGRAL_BACKENDS = {"direct", "x0mm_fft"}
 
+_XHKM_SCHEMA_VERSION = 2
+_XHKM_REQUIRED_KEYS = {
+    "llw_grid",
+    "raw_n1",
+    "raw_n2",
+    "raw_n_2pc",
+    "raw_n_3pc_total",
+    "raw_n_3pca",
+    "raw_n_3pcb",
+    "raw_n_3pc_other",
+    "raw_n_3pc_k_eq_m",
+    "raw_n_4pc",
+    "raw_n_k_neq_m",
+    "ref_n1",
+    "ref_n2",
+    "ref_n_2pc",
+    "ref_n_3pc_total",
+    "ref_n_3pca",
+    "ref_n_3pcb",
+    "ref_n_3pc_other",
+    "ref_n_3pc_k_eq_m",
+    "ref_n_4pc",
+    "ref_n_k_neq_m",
+    "n2_over_n1",
+    "fiber_length",
+    "baud_rate",
+    "x_norm",
+    "pulse_shape",
+    "mode",
+    "gvda",
+    "gvdb",
+    "h_values",
+    "r_values",
+    "partial_collisions_margin",
+    "n_samples_numeric",
+    "time_integral_backend",
+    "schema_version",
+    "calculation",
+}
+
 
 def normalize_time_integral_backend(value: str = "direct") -> str:
     backend = str(value).strip().lower()
@@ -53,6 +93,224 @@ def _scalar_value(value):
     if arr.ndim == 0:
         return arr.item()
     raise ValueError(f"Expected scalar metadata value, got shape {arr.shape}")
+
+
+def _as_1d_curve(name: str, value: np.ndarray, shape: tuple[int, ...] | None = None) -> np.ndarray:
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional, got shape {arr.shape}")
+    if shape is not None and arr.shape != shape:
+        raise ValueError(f"{name} shape {arr.shape} does not match expected {shape}")
+    return arr
+
+
+def save_xhkm_sum_reference_curves(
+    path: str | Path,
+    *,
+    llw_grid: np.ndarray,
+    raw_n1: np.ndarray,
+    raw_n2: np.ndarray,
+    raw_n_2pc: np.ndarray,
+    raw_n_3pc_total: np.ndarray,
+    raw_n_3pca: np.ndarray,
+    raw_n_3pcb: np.ndarray,
+    raw_n_3pc_other: np.ndarray,
+    raw_n_3pc_k_eq_m: np.ndarray,
+    raw_n_4pc: np.ndarray,
+    raw_n_k_neq_m: np.ndarray,
+    fiber_length: float,
+    baud_rate: float,
+    pulse_shape: str,
+    mode: str,
+    gvda: float,
+    gvdb: float,
+    h_values: np.ndarray,
+    r_values: np.ndarray,
+    partial_collisions_margin: int,
+    n_samples_numeric: int,
+    schema_version: int = _XHKM_SCHEMA_VERSION,
+) -> Path:
+    """Save prefactor-free Dar-style ``N1``/``N2`` Xhkm curves atomically."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    llw_grid = _as_1d_curve("llw_grid", llw_grid)
+    shape = llw_grid.shape
+    raw_n1 = _as_1d_curve("raw_n1", raw_n1, shape)
+    raw_n2 = _as_1d_curve("raw_n2", raw_n2, shape)
+    raw_n_2pc = _as_1d_curve("raw_n_2pc", raw_n_2pc, shape)
+    raw_n_3pc_total = _as_1d_curve("raw_n_3pc_total", raw_n_3pc_total, shape)
+    raw_n_3pca = _as_1d_curve("raw_n_3pca", raw_n_3pca, shape)
+    raw_n_3pcb = _as_1d_curve("raw_n_3pcb", raw_n_3pcb, shape)
+    raw_n_3pc_other = _as_1d_curve("raw_n_3pc_other", raw_n_3pc_other, shape)
+    raw_n_3pc_k_eq_m = _as_1d_curve("raw_n_3pc_k_eq_m", raw_n_3pc_k_eq_m, shape)
+    raw_n_4pc = _as_1d_curve("raw_n_4pc", raw_n_4pc, shape)
+    raw_n_k_neq_m = _as_1d_curve("raw_n_k_neq_m", raw_n_k_neq_m, shape)
+    h_values = np.asarray(h_values, dtype=int).reshape(-1)
+    r_values = np.asarray(r_values, dtype=int).reshape(-1)
+
+    x_norm = float(fiber_length) * float(baud_rate)
+    if not np.isfinite(x_norm) or x_norm <= 0.0:
+        raise ValueError(f"Invalid x_norm derived from fiber_length/baud_rate: {x_norm}")
+    normalization = x_norm ** (-2)
+    ref_n1 = raw_n1 * normalization
+    ref_n2 = raw_n2 * normalization
+    ref_n_2pc = raw_n_2pc * normalization
+    ref_n_3pc_total = raw_n_3pc_total * normalization
+    ref_n_3pca = raw_n_3pca * normalization
+    ref_n_3pcb = raw_n_3pcb * normalization
+    ref_n_3pc_other = raw_n_3pc_other * normalization
+    ref_n_3pc_k_eq_m = raw_n_3pc_k_eq_m * normalization
+    ref_n_4pc = raw_n_4pc * normalization
+    ref_n_k_neq_m = raw_n_k_neq_m * normalization
+    n2_over_n1 = np.divide(
+        raw_n2,
+        raw_n1,
+        out=np.full_like(raw_n1, np.nan, dtype=float),
+        where=raw_n1 > 0.0,
+    )
+
+    with tempfile.NamedTemporaryFile(dir=target.parent, suffix=".npz", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        np.savez(
+            tmp_path,
+            llw_grid=llw_grid,
+            raw_n1=raw_n1,
+            raw_n2=raw_n2,
+            raw_n_2pc=raw_n_2pc,
+            raw_n_3pc_total=raw_n_3pc_total,
+            raw_n_3pca=raw_n_3pca,
+            raw_n_3pcb=raw_n_3pcb,
+            raw_n_3pc_other=raw_n_3pc_other,
+            raw_n_3pc_k_eq_m=raw_n_3pc_k_eq_m,
+            raw_n_4pc=raw_n_4pc,
+            raw_n_k_neq_m=raw_n_k_neq_m,
+            ref_n1=ref_n1,
+            ref_n2=ref_n2,
+            ref_n_2pc=ref_n_2pc,
+            ref_n_3pc_total=ref_n_3pc_total,
+            ref_n_3pca=ref_n_3pca,
+            ref_n_3pcb=ref_n_3pcb,
+            ref_n_3pc_other=ref_n_3pc_other,
+            ref_n_3pc_k_eq_m=ref_n_3pc_k_eq_m,
+            ref_n_4pc=ref_n_4pc,
+            ref_n_k_neq_m=ref_n_k_neq_m,
+            n2_over_n1=n2_over_n1,
+            fiber_length=np.array(float(fiber_length)),
+            baud_rate=np.array(float(baud_rate)),
+            x_norm=np.array(x_norm),
+            pulse_shape=np.array(str(pulse_shape)),
+            mode=np.array(str(mode)),
+            gvda=np.array(float(gvda)),
+            gvdb=np.array(float(gvdb)),
+            h_values=h_values,
+            r_values=r_values,
+            partial_collisions_margin=np.array(int(partial_collisions_margin)),
+            n_samples_numeric=np.array(int(n_samples_numeric)),
+            time_integral_backend=np.array("xhkm_fft"),
+            schema_version=np.array(int(schema_version)),
+            calculation=np.array("prefactor_free_dar_n1_n2_from_xhkm"),
+        )
+        os.replace(tmp_path, target)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+    return target
+
+
+def load_xhkm_sum_reference_curves(
+    path: str | Path,
+    *,
+    pulse_shape: str | None = None,
+    mode: str | None = None,
+    gvda: float | None = None,
+    gvdb: float | None = None,
+    h_values: np.ndarray | None = None,
+    r_values: np.ndarray | None = None,
+) -> dict[str, np.ndarray | float | int | str | Path]:
+    """Load and validate prefactor-free Xhkm ``N1``/``N2`` curves."""
+    target = Path(path)
+    with np.load(target, allow_pickle=False) as dataset:
+        missing = _XHKM_REQUIRED_KEYS.difference(dataset.files)
+        if missing:
+            raise ValueError(f"Xhkm sum dataset {target} is missing keys: {sorted(missing)}")
+        out = {name: np.asarray(dataset[name]) for name in dataset.files}
+
+    llw_grid = _as_1d_curve("llw_grid", out["llw_grid"])
+    shape = llw_grid.shape
+    raw_names = [
+        "raw_n1",
+        "raw_n2",
+        "raw_n_2pc",
+        "raw_n_3pc_total",
+        "raw_n_3pca",
+        "raw_n_3pcb",
+        "raw_n_3pc_other",
+        "raw_n_3pc_k_eq_m",
+        "raw_n_4pc",
+        "raw_n_k_neq_m",
+    ]
+    ref_names = [name.replace("raw_", "ref_") for name in raw_names]
+    for name in raw_names + ref_names + ["n2_over_n1"]:
+        out[name] = _as_1d_curve(name, out[name], shape)
+
+    fiber_length = float(_scalar_value(out["fiber_length"]))
+    baud_rate = float(_scalar_value(out["baud_rate"]))
+    x_norm = float(_scalar_value(out["x_norm"]))
+    saved_pulse = str(_scalar_value(out["pulse_shape"]))
+    saved_mode = str(_scalar_value(out["mode"]))
+    saved_gvda = float(_scalar_value(out["gvda"]))
+    saved_gvdb = float(_scalar_value(out["gvdb"]))
+    saved_h = np.asarray(out["h_values"], dtype=int).reshape(-1)
+    saved_r = np.asarray(out["r_values"], dtype=int).reshape(-1)
+    saved_backend = str(_scalar_value(out["time_integral_backend"]))
+    schema_version = int(_scalar_value(out["schema_version"]))
+    calculation = str(_scalar_value(out["calculation"]))
+
+    if saved_backend != "xhkm_fft":
+        raise ValueError(f"Xhkm sum dataset {target} has backend={saved_backend!r}")
+    if schema_version != _XHKM_SCHEMA_VERSION:
+        raise ValueError(f"Xhkm sum dataset {target} has schema_version={schema_version}")
+    if calculation != "prefactor_free_dar_n1_n2_from_xhkm":
+        raise ValueError(f"Xhkm sum dataset {target} has calculation={calculation!r}")
+    if pulse_shape is not None and saved_pulse != str(pulse_shape):
+        raise ValueError(f"Xhkm sum dataset {target} has pulse_shape={saved_pulse!r}, expected {pulse_shape!r}.")
+    if mode is not None and saved_mode != str(mode):
+        raise ValueError(f"Xhkm sum dataset {target} has mode={saved_mode!r}, expected {mode!r}.")
+    if gvda is not None and not np.isclose(saved_gvda, float(gvda)):
+        raise ValueError(f"Xhkm sum dataset {target} has gvda={saved_gvda}, expected {gvda}.")
+    if gvdb is not None and not np.isclose(saved_gvdb, float(gvdb)):
+        raise ValueError(f"Xhkm sum dataset {target} has gvdb={saved_gvdb}, expected {gvdb}.")
+    if h_values is not None and not np.array_equal(saved_h, np.asarray(h_values, dtype=int).reshape(-1)):
+        raise ValueError(f"Xhkm sum dataset {target} has incompatible h_values.")
+    if r_values is not None and not np.array_equal(saved_r, np.asarray(r_values, dtype=int).reshape(-1)):
+        raise ValueError(f"Xhkm sum dataset {target} has incompatible r_values.")
+    if not np.isclose(x_norm, fiber_length * baud_rate):
+        raise ValueError(f"Xhkm sum dataset {target} has inconsistent x_norm metadata.")
+    for raw_name, ref_name in zip(raw_names, ref_names):
+        if not np.allclose(out[ref_name], out[raw_name] * x_norm ** (-2), rtol=1e-12, atol=0.0):
+            raise ValueError(f"Xhkm sum dataset {target} has inconsistent {ref_name} data.")
+
+    return {
+        **out,
+        "fiber_length": fiber_length,
+        "baud_rate": baud_rate,
+        "x_norm": x_norm,
+        "pulse_shape": saved_pulse,
+        "mode": saved_mode,
+        "gvda": saved_gvda,
+        "gvdb": saved_gvdb,
+        "h_values": saved_h,
+        "r_values": saved_r,
+        "partial_collisions_margin": int(_scalar_value(out["partial_collisions_margin"])),
+        "n_samples_numeric": int(_scalar_value(out["n_samples_numeric"])),
+        "time_integral_backend": saved_backend,
+        "schema_version": schema_version,
+        "calculation": calculation,
+        "path": target,
+    }
 
 
 def save_s1_ref_nlin_curve(

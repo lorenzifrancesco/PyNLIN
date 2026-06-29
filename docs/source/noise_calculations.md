@@ -52,6 +52,66 @@ is fundamentally a function of normalized walk-off.
 
 ## 2. TD Noise Calculation
 
+### Generic Xhkm prefactor-free sums
+
+The optional generic-collision workflow uses the FFT evaluator
+`compute_xpm_kernel_fft` to compute
+
+$$X[h,r,m] = X_{h,m+r,m},$$
+
+where $r=k-m$. The first contractions built on this tensor are named
+$N_1$ and $N_2$ to make clear that physical prefactors have not yet been
+applied:
+
+$$N_1 = \sum_{h,r,m} |X[h,r,m]|^2,$$
+
+$$N_2 = \sum_{h,m} |X[h,0,m]|^2.$$
+
+These are the prefactor-free collision-sum parts corresponding to the
+Dar-style $\chi_1$ and $\chi_2$ terms. The saved reference curves use the
+same normalization as the S1 curves,
+
+$$\widetilde N_j = N_j\frac{T^2}{L^2},$$
+
+and the same walk-off axis $L/L_W=L|\Delta\beta_1|R_s$. The calculation is
+opt-in and does not alter the existing S1 $X_{0mm}$ workflow. Because the
+generic tensor is truncated in $h$, $r$, and $m$, convergence with respect
+to those finite windows must be checked before treating a curve as
+reference-quality.
+
+This caveat is especially important at high dispersion. Dispersive pulse
+broadening makes partial collisions with nominal centers outside the fiber
+contribute through their tails and through the span edges. If the $m$ margin
+or the $h,r$ windows are too small, the curve can show artificial local
+features, such as an upward bump around $L/L_W=O(L/L_D)$. The higher-support
+plots therefore record their finite support explicitly, e.g. $h,r\in[-5,5]$
+and $m$ margin 10.
+
+For diagnostics the tensor is also decomposed into collision classes:
+
+$$N_{2PC}=\sum_m |X[0,0,m]|^2,$$
+
+$$N_{3PCa}=\sum_{r\ne0,m}|X[0,r,m]|^2,$$
+
+$$N_{3PCb}=\sum_{h\ne0,m}|X[h,0,m]|^2.$$
+
+A separate 3PC-other bucket contains the remaining $h=k$ or $h=m$ edge
+coincidences, and the 4PC bucket contains the sector where all symbol
+indices are distinct.
+
+At large walk-off, complete collisions approximately factorize into
+symbol-spaced pulse overlaps,
+
+$$X_{h,m+r,m}\propto
+|\Delta\beta_1|^{-1}
+\langle g(t),g(t-hT)\rangle
+\langle g(t-rT),g(t)\rangle.$$
+
+Consequently, Nyquist pulses drive all shifted-overlap sectors to zero and
+make $N_1$, $N_2$, and $N_{2PC}$ merge. Gaussian pulses are not
+symbol-spaced orthogonal, so non-2PC sectors keep finite asymptotic
+prefactors and the decomposed curves remain separated.
+
 ### Passage 1: build collision coefficients
 
 The TD path starts by computing collision coefficients

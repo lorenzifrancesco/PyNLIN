@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import numpy as np
 
-import pynlin.methods.td.estimator as nlin_uwb
 from pynlin.constellation_stats import qam_mu0
 from pynlin.system import System
 from pynlin.utils import dBm2watt
+
+
+def _nlin_uwb():
+    import pynlin.methods.td.estimator as nlin_uwb
+
+    return nlin_uwb
 
 
 def _qam_mu0(order: int) -> float:
@@ -15,6 +20,7 @@ def _qam_mu0(order: int) -> float:
 
 def _td_prefactor_coeffs(mode_a: int, mode_b: int, n_modes: int) -> tuple[float, float]:
     """Return (a, b) so prefactor = a * mu0 + b."""
+    nlin_uwb = _nlin_uwb()
     if n_modes == 1:
         mode_a = mode_b = 0
     if mode_a == mode_b:
@@ -61,6 +67,7 @@ def _td_modulation_components(
             )
 
     freqs = system.wdm.frequency_grid()
+    nlin_uwb = _nlin_uwb()
     gamma2 = nlin_uwb._gamma_matrix_uwb(system, freqs) ** 2
     constant_prefactor = (power_in**3) / (baud_rate**2)
 
