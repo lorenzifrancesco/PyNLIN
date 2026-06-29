@@ -337,6 +337,29 @@ def compute_x0mm_fft(
     return scipy.integrate.trapezoid(I, z, axis=1)
 
 
+def _refine_z_grid(
+    grid: XPMKernelGrid,
+    pulse: Pulse,
+    *,
+    min_pts_per_collision: float = 3.0,
+    max_z_points: int = 2000,
+) -> XPMKernelGrid:
+    """Densify the ``z`` grid so that ``n_z / LLW >= min_pts_per_collision``."""
+    L = float(grid.z[-1] - grid.z[0])
+    LLW = L * float(grid.baud_rate) * float(grid.dgd)
+    n_z = grid.z.size
+    pts_per_coll = float(n_z) / LLW if LLW > 0 else float("inf")
+    if pts_per_coll >= min_pts_per_collision:
+        return grid
+    needed_nz = min(max_z_points, max(n_z, int(np.ceil(min_pts_per_collision * LLW))))
+    if needed_nz <= n_z:
+        return grid
+    z = np.linspace(float(grid.z[0]), float(grid.z[-1]), needed_nz)
+    new = kernel_grid_from_pulse(pulse, z, dgd=grid.dgd, gvda=grid.gvda, gvdb=grid.gvdb)
+    print(f"  [auto-refine z] {n_z} → {needed_nz} pts  (pts/coll {pts_per_coll:.2f} → {float(needed_nz)/LLW:.2f})")
+    return new
+
+
 def compute_xpm_kernel_fft(
     pulse: Pulse,
     z: np.ndarray,
@@ -348,8 +371,10 @@ def compute_xpm_kernel_fft(
     gvda: float,
     gvdb: float,
     amplification_function: Callable[[np.ndarray], np.ndarray] | None = None,
+    auto_refine: bool = False,
     discretization_action: str = "warn",
     min_pts_per_collision: float = 3.0,
+    max_z_points: int = 2000,
     max_walkoff_fraction: float = 0.8,
 ) -> XPMKernelResult:
     """Compute a finite ``X[h,r,m] = X_{h,m+r,m}`` table by FFT overlaps.
@@ -359,14 +384,27 @@ def compute_xpm_kernel_fft(
 
     Parameters
     ----------
+    auto_refine : bool
+        Automatically densify the ``z`` grid when ``n_z / LLW`` is below
+        ``min_pts_per_collision`` (capped at ``max_z_points``).
     discretization_action : ``"warn"``, ``"assert"``, or ``"silent"``
-        How to handle discretization-limit violations.
+        How to handle any remaining discretization-limit violations after
+        auto-refinement.
     min_pts_per_collision : float
         Minimum acceptable ratio ``n_z / (L/L_W)``.
+    max_z_points : int
+        Hard cap on the number of ``z`` points after auto-refinement.
     max_walkoff_fraction : float
         Maximum acceptable fraction of the time window consumed by walk-off.
     """
     grid = kernel_grid_from_pulse(pulse, z, dgd=dgd, gvda=gvda, gvdb=gvdb)
+    if auto_refine:
+        grid = _refine_z_grid(
+            grid,
+            pulse,
+            min_pts_per_collision=min_pts_per_collision,
+            max_z_points=max_z_points,
+        )
     _check_discretization_limits(
         grid,
         action=discretization_action,

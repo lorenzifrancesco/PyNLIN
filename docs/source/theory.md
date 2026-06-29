@@ -904,8 +904,20 @@ direct FFT kernel, the finite $z$ resolution becomes a concern. The
 collision width $w=T/\Delta\beta_1$ shrinks as $w=L/(L/L_W)$, so at
 $L/L_W=5000$ the width is only $0.08$~m. If the $z$ grid in the numerical
 integration is coarser than this width, the collision integrals are severely
-undersampled and the curves show artificial splits or flattening. The
-extended-range plots mark the region where this resolution limit applies.
-These plots should be interpreted with caution; production-quality
-convergence at very high walk-off requires an adaptive $z$ grid or analytic
-integration.
+undersampled and the curves show artificial splits or flattening.
+
+The kernel includes an **auto-refinement** mode (`auto_refine=True` in
+`compute_xpm_kernel_fft`) that automatically densifies the $z$ grid to
+maintain at least `min_pts_per_collision` points per collision width.
+It caps at `max_z_points=500` to keep computation practical. For
+$L/L_W\lesssim100$ this ensures adequate resolution ($\gtrsim3$ pts/coll.).
+For higher $L/L_W$ the cap is reached and warnings fire; the extended-range
+plots mark this region as under-resolved.  The $z$-axis warning can be
+upgraded to an `AssertionError` via `discretization_action="assert"`.
+
+A separate **time-window** check warns when the total walk-off
+$|dgd|\times L$ exceeds the pulse time window, indicating that the FFT
+wrap-around may miss physical collisions. This check is non-fatal by default
+because the computational cost of a fully adequate time window (many
+thousands of symbols at high $L/L_W$) is prohibitive with the uniform-grid
+FFT approach.

@@ -52,7 +52,8 @@ def _annotate(ax: plt.Axes) -> None:
 
 
 def _extended_points() -> np.ndarray:
-    return np.geomspace(max(LLW_OLD_MAX, 1.0), LLW_NEW_MAX, N_EXTRA)
+    # Start just above LLW_OLD_MAX to avoid duplicating the standard-range point.
+    return np.geomspace(max(LLW_OLD_MAX, 1.0) * 1.05, LLW_NEW_MAX, N_EXTRA)
 
 
 def compute_extended(case: dict) -> Path:
@@ -77,13 +78,16 @@ def compute_extended(case: dict) -> Path:
 
     # Append extended points.
     for llw in _extended_points():
-        n_z = min(500, int(81 + (float(llw) - 40.0) * 0.08))
-        z = np.linspace(0.0, L, n_z)
         dgd = float(llw / (L * B))
+        T = 1.0 / B
+
+        # Auto-refine z-grid inside compute_xpm_kernel_fft via auto_refine=True.
+        z = np.linspace(0.0, L, 81)  # coarse seed; kernel densifies as needed (cap 500)
         m_values = get_m_values(FIBER, pulse, MARGIN, dgd)[::-1]
         result = compute_xpm_kernel_fft(
             pulse, z, h_values, r_values, m_values,
             dgd=dgd, gvda=float(case["gvda"]), gvdb=float(case["gvdb"]),
+            auto_refine=True, max_z_points=500,
         )
         sums = compute_xhkm_sums(result.X, result.h_values, result.r_values, result.m_values)
         raw["raw_n1"].append(sums.n1)
@@ -97,7 +101,7 @@ def compute_extended(case: dict) -> Path:
         raw["raw_n_4pc"].append(sums.n_4pc)
         raw["raw_n_k_neq_m"].append(sums.n_k_neq_m)
         llw_list.append(float(llw))
-        print(f"  {case['key']}: llw={float(llw):.2e}, n_z={n_z}, n_m={len(m_values)}")
+        print(f"  {case['key']}: llw={float(llw):.2e}, n_z={result.metadata['n_z']}, n_m={len(m_values)}")
 
     llw_grid = np.array(llw_list)
     return save_xhkm_sum_reference_curves(
@@ -131,7 +135,9 @@ def _discretization_annotation() -> str:
         "Shaded: $L/L_W>80$ where\n"
         "no-disp. collision width\n"
         "$<\\Delta z$; curves there\n"
-        "may be under-resolved"
+        "may be under-resolved\n"
+        "(auto-refine capped at\n"
+        "500 $z$-points)"
     )
 
 
