@@ -902,7 +902,7 @@ $N_2/N_1\approx0.55$, well within the numerically reliable regime.
 When extending the walk-off range much beyond $L/L_W\sim80$ with the
 direct FFT kernel, the finite $z$ resolution becomes a concern. The
 collision width $w=T/\Delta\beta_1$ shrinks as $w=L/(L/L_W)$, so at
-$L/L_W=5000$ the width is only $0.08$~m. If the $z$ grid in the numerical
+$L/L_W=300$ the width is $1.3$~m. If the $z$ grid in the numerical
 integration is coarser than this width, the collision integrals are severely
 undersampled and the curves show artificial splits or flattening.
 

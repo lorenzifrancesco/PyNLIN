@@ -26,7 +26,7 @@ MARGIN = 10
 NUM_SYMBOLS = 220
 SPS = 16
 LLW_OLD_MAX = 40.0
-LLW_NEW_MAX = 5000.0
+LLW_NEW_MAX = 300.0
 N_EXTRA = 6
 
 FIBER = SMFiber(length=L, beta2=0.0)
@@ -133,11 +133,10 @@ def compute_extended(case: dict) -> Path:
 def _discretization_annotation() -> str:
     return (
         "Shaded: $L/L_W>80$ where\n"
-        "no-disp. collision width\n"
-        "$<\\Delta z$; curves there\n"
-        "may be under-resolved\n"
+        "collision width $<\\Delta z$;\n"
+        "last 2 pts are marginal\n"
         "(auto-refine capped at\n"
-        "500 $z$-points)"
+        "500 $z$-pts)"
     )
 
 
@@ -153,7 +152,7 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     ax.plot(llw, d["ref_n1"], lw=1.0, label=r"$N_1$")
     ax.plot(llw, d["ref_n2"], lw=1.0, label=r"$N_2$")
     ax.plot(llw, d["ref_n_2pc"], lw=1.0, label="2PC")
-    ax.axvspan(80, 8000, color="grey", alpha=0.06)
+    ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N\,T^2/L^2$")
     ax.set_title(desc)
@@ -176,7 +175,7 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     ax.plot(llw, d["ref_n_3pcb"], lw=1.0, marker="s", ms=3, label="3PCb: h!=0, k=m")
     ax.plot(llw, d["ref_n_3pc_other"], lw=0.9, marker="^", ms=3, label="3PC other")
     ax.plot(llw, d["ref_n_4pc"], lw=1.0, marker="D", ms=3, label="4PC")
-    ax.axvspan(80, 8000, color="grey", alpha=0.06)
+    ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N\,T^2/L^2$")
     ax.set_title(f"{desc} — decomposition")
@@ -201,7 +200,7 @@ def _plot_n2pc_comparison(colors, paths, subdir) -> None:
         ax.plot(llw, d["ref_n_2pc"], color=color, lw=1.2, marker="*", ms=4,
                 label=label)
     ax.axvline(LLW_OLD_MAX, color="grey", lw=0.5, ls="--", alpha=0.5)
-    ax.axvspan(80, 8000, color="grey", alpha=0.06)
+    ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N_{2PC}\,T^2/L^2$")
     ax.set_title("2PC: converging at large $L/L_W$ across dispersion levels")
@@ -234,11 +233,11 @@ def _plot_combined_n1_n2_n2pc(colors, paths, subdir) -> None:
         ax.plot(llw, d["ref_n_2pc"], color=color, marker="*", ms=3.5, lw=0.9,
                 ls=":", label=f"{label} 2PC")
     ax.axvline(LLW_OLD_MAX, color="grey", lw=0.5, ls="--", alpha=0.5)
-    ax.axvspan(RELIABILITY_LLW, 8000,
+    ax.axvspan(RELIABILITY_LLW, 500,
                color="grey", alpha=0.06, label=r"z-res. limit")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N\,T^2/L^2$")
-    ax.set_title("Nyquist Xhkm sums: extended range")
+    ax.set_title(r"Nyquist Xhkm sums: extended range $\leq 300$")
     ax.grid(True, which="both", alpha=0.25)
     leg = ax.legend(fontsize=5.6, ncol=2)
     _annotate(ax)
@@ -262,7 +261,7 @@ def _plot_ratio_comparison(colors, paths, subdir) -> None:
         llw = d["llw_grid"]
         ax.plot(llw, d["n2_over_n1"], color=color, marker="o", ms=2.5, lw=1.0, label=label)
     ax.axvline(LLW_OLD_MAX, color="grey", lw=0.5, ls="--", alpha=0.5)
-    ax.axvspan(80, 8000, color="grey", alpha=0.06)
+    ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.axhline(1.0, color="k", lw=0.4, ls="-", alpha=0.3)
     ax.set_xscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N_2/N_1$")
