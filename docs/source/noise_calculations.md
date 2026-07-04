@@ -79,6 +79,26 @@ generic tensor is truncated in $h$, $r$, and $m$, convergence with respect
 to those finite windows must be checked before treating a curve as
 reference-quality.
 
+The companion prefactor-free Monte-Carlo diagnostic in
+`pynlin.methods.td.xhkm_mc` estimates the same two fundamental quantities as
+$N_1^{MC}$ and $N_2^{MC}$ directly from the reduced Dar inter-channel
+integrands. It deliberately omits physical constants such as nonlinear
+coefficients, launch powers, modulation cumulants, and polarization factors.
+Those constants belong to later NLIN assembly, not to the collision-sum
+definitions. The MC diagnostic also rejects non-flat signal power profiles,
+because otherwise the sampled Dar integrands would not correspond to the same
+flat-profile sums computed from the deterministic $X_{hkm}$ tensor.
+
+The validation script `analysis/standalone_numerical/compare_mc_xhkm_sums.py`
+uses the `[mc_validation]` TOML section to compute both the MC estimates and
+finite-window deterministic sums from `compute_xpm_kernel_fft` plus
+`compute_xhkm_sums`. It saves raw values and basic comparison plots under
+`media/mc-validation`. The first diagnostic plots include a single fitted
+scale factor for the MC curves, because this reduced MC path and the finite
+time-domain tensor still expose different absolute normalization conventions;
+the shape and ratio trends are therefore the primary comparison until that
+remaining normalization bridge is fixed.
+
 This caveat is especially important at high dispersion. Dispersive pulse
 broadening makes partial collisions with nominal centers outside the fiber
 contribute through their tails and through the span edges. If the $m$ margin

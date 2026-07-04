@@ -3,7 +3,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from loguru import logger as lg
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import LogFormatter, ScalarFormatter
+
 
 from pynlin.methods import pcfm
 from pynlin.methods.pcfm import PcfmConfig
@@ -41,8 +42,15 @@ AXIS_LABEL_SIZE = 9.5
 LEGEND_SIZE = 8.5
 NLIN_POWER_XLIM_THZ = (184.0, 204.0)
 
-plt.rcParams["xtick.labelsize"] = 8
-plt.rcParams["ytick.labelsize"] = 8
+plt.rcParams["xtick.labelsize"] = 9
+plt.rcParams["ytick.labelsize"] = 9
+plt.rcParams["text.usetex"] = False
+plt.rcParams["mathtext.fontset"] = "cm"
+
+
+def _set_plain_log_ticks(ax: plt.Axes) -> None:
+    """Placeholder — no-op kept for compatibility."""
+    pass
 
 
 def _disable_dbm_axis_grouping(ax: plt.Axes, which: str = "y") -> None:
@@ -663,3 +671,224 @@ def plot_pcfm_diagnostics(
     _save_figure(fig, out_dir / "fiber_params.pdf", dpi=300)
     lg.success(f"Saved fiber parameters plot to {out_dir / 'fiber_params.pdf'}")
     plt.close(fig)
+
+
+BAND_COLORS = {
+    "O": "#1f77b4",
+    "E": "#2ca02c",
+    "S": "#ff7f0e",
+    "C": "#d62728",
+    "L": "#9467bd",
+    "U": "#8c564b",
+}
+
+BAND_ORDER = ["O", "E", "S", "C", "L", "U"]
+
+
+def plot_band_dgd_gvd_histograms(
+    system: System,
+    out_dir: Path,
+    bands: list[str] | None = None,
+) -> None:
+    """Plot DGD (L/LW) and GVD (L/LD) histograms per optical band.
+
+    For each band defined in the WDM configuration, extracts the channel
+    indices via ``_band_slices`` and computes:
+
+    - **DGD histogram**: :math:`L/L_W = |\\beta_{1,i} - \\beta_{1,j}| \\cdot L \\cdot R_b`
+      for every unique channel pair *within* the band.
+    - **GVD histogram**: :math:`L/L_D = |\\beta_2| \\cdot L \\cdot R_b^2`
+      for every channel *within* the band.
+
+    Two figures are saved to *out_dir*:
+    ``dgd_histogram_per_band.pdf`` and ``gvd_histogram_per_band.pdf``.
+
+    Parameters
+    ----------
+    system :
+        Loaded system (must have a ``wdm`` with ``_band_slices``, e.g. from
+        an ``IrregularWDM``).
+    out_dir :
+        Output directory for the saved figures.
+    bands :
+        Optional list of band names to plot (e.g. ``["O"]`` for O-band only).
+        When *None* (default), every band present in ``_band_slices`` is
+        plotted.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    freqs = system.wdm.frequency_grid()
+    beta1, beta2 = system.beta_grids(freqs=freqs)
+    beta1 = np.asarray(beta1, dtype=float)
+    beta2 = np.asarray(beta2, dtype=float)
+
+    if beta1.ndim == 2 and beta1.shape[0] == 1:
+        beta1 = beta1[0]
+    if beta2.ndim == 2 and beta2.shape[0] == 1:
+        beta2 = beta2[0]
+
+    length_m = float(system.fiber_length)
+    baud_rate_hz = float(system.baud_rate)
+
+    band_slices = (
+        getattr(system.wdm, "_band_slices", {})
+        if hasattr(system.wdm, "_band_slices")
+        else {}
+    )
+    if not band_slices:
+        lg.warning(
+            "No band slices found in WDM configuration — cannot plot per-band histograms. "
+            "Use an IrregularWDM config (e.g. from uwb_struct.toml)."
+        )
+        return
+
+    band_order = {b: i for i, b in enumerate(BAND_ORDER)}
+    selected = sorted(
+        ((name, slc) for name, slc in band_slices.items()
+         if bands is None or name.upper() in {b.upper() for b in bands}),
+        key=lambda x: band_order.get(x[0].upper(), 99),
+    )
+    if not selected:
+        lg.warning("No matching bands found in WDM configuration.")
+        return
+
+    # ---- DGD histogram (L/LW per channel pair within each band) ----
+    fig_dgd, ax_dgd = plt.subplots(figsize=scale_figsize_to_ieee_column(4.0, 2.6))
+
+    for band_name, slc in selected:
+        b1_band = beta1[slc]
+        b1_diff = np.abs(b1_band[:, None] - b1_band[None, :])
+        pair_mask = np.triu(np.ones(b1_diff.shape, dtype=bool), k=1)
+        l_over_lw = (b1_diff[pair_mask] * length_m * baud_rate_hz).reshape(-1)
+        l_over_lw = l_over_lw[np.isfinite(l_over_lw) & (l_over_lw > 0.0)]
+
+        if l_over_lw.size:
+            color = BAND_COLORS.get(band_name.upper(), "gray")
+            bins = _safe_histogram_bins(l_over_lw, 40, log_scale=True)
+            ax_dgd.hist(
+                l_over_lw,
+                bins=bins,
+                histtype="stepfilled",
+                alpha=0.45,
+                color=color,
+                edgecolor=color,
+                linewidth=0.8,
+                label=f"{band_name}  ({slc.stop - slc.start} ch)",
+            )
+
+    ax_dgd.set_xscale("log")
+    _set_plain_log_ticks(ax_dgd)
+    ax_dgd.set_xlabel(r"$\mathnormal{L/L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax_dgd.set_ylabel("channel-pair count", fontsize=AXIS_LABEL_SIZE)
+    ax_dgd.grid(False)
+    _ordered_legend(ax_dgd, [], loc="upper left", fontsize=LEGEND_SIZE, framealpha=0.85)
+    _save_figure(fig_dgd, out_dir / "dgd_histogram_per_band.pdf", dpi=300)
+    lg.success(f"Saved DGD per-band histogram → {out_dir / 'dgd_histogram_per_band.pdf'}")
+    plt.close(fig_dgd)
+
+    # ---- GVD histogram (per-channel L/LD within each band) ----
+    fig_gvd, ax_gvd = plt.subplots(figsize=scale_figsize_to_ieee_column(4.0, 2.6))
+
+    for band_name, slc in selected:
+        b2_band = beta2[slc]
+        l_over_ld = np.abs(b2_band) * length_m * (baud_rate_hz ** 2)
+        l_over_ld = l_over_ld[np.isfinite(l_over_ld) & (l_over_ld > 0.0)]
+
+        if l_over_ld.size:
+            color = BAND_COLORS.get(band_name.upper(), "gray")
+            bins = _safe_histogram_bins(l_over_ld, 30, log_scale=True)
+            ax_gvd.hist(
+                l_over_ld,
+                bins=bins,
+                histtype="stepfilled",
+                alpha=0.45,
+                color=color,
+                edgecolor=color,
+                linewidth=0.8,
+                label=f"{band_name}  ({slc.stop - slc.start} ch)",
+            )
+
+    ax_gvd.set_xscale("log")
+    _set_plain_log_ticks(ax_gvd)
+    ax_gvd.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
+    ax_gvd.set_ylabel("channel count", fontsize=AXIS_LABEL_SIZE)
+    ax_gvd.grid(False)
+    _ordered_legend(ax_gvd, [], loc="upper left", fontsize=LEGEND_SIZE, framealpha=0.85)
+    _save_figure(fig_gvd, out_dir / "gvd_histogram_per_band.pdf", dpi=300)
+    lg.success(f"Saved GVD per-band histogram → {out_dir / 'gvd_histogram_per_band.pdf'}")
+    plt.close(fig_gvd)
+
+    # ---- 2D histogram: L/LDa vs L/LDb (GVD dispersion pairs per band) ----
+    fig_2d, ax_2d = plt.subplots(figsize=scale_figsize_to_ieee_column(4.0, 2.6))
+    for band_name, slc in selected:
+        b2_band = np.abs(beta2[slc]) * length_m * (baud_rate_hz ** 2)
+        X, Y = np.meshgrid(b2_band, b2_band, indexing="xy")
+        X_flat = X.ravel()
+        Y_flat = Y.ravel()
+        if X_flat.size:
+            color = BAND_COLORS.get(band_name.upper(), "gray")
+            ax_2d.scatter(
+                X_flat, Y_flat, s=0.5, alpha=0.15, color=color,
+                label=f"{band_name}  ({slc.stop - slc.start} ch)",
+                rasterized=True,
+            )
+    ax_2d.set_aspect("equal")
+    ax_2d.set_xlabel(r"$\mathnormal{L/L_{Da}}$", fontsize=AXIS_LABEL_SIZE)
+    ax_2d.set_ylabel(r"$\mathnormal{L/L_{Db}}$", fontsize=AXIS_LABEL_SIZE)
+    ax_2d.grid(False)
+    _ordered_legend(
+        ax_2d, [], loc="upper left", bbox_to_anchor=(1.02, 1),
+        fontsize=LEGEND_SIZE, framealpha=0.85, markerscale=4,
+    )
+    fig_2d.subplots_adjust(right=0.78)
+    _save_figure(fig_2d, out_dir / "gvdab_scatter_per_band.pdf", dpi=300)
+    lg.success(f"Saved GVD 2D scatter per-band → {out_dir / 'gvdab_scatter_per_band.pdf'}")
+    plt.close(fig_2d)
+
+    # ---- 2D histogram: LW/LDa vs LW/LDb (walk-off / GVD ratio per band) ----
+    fig_lw, ax_lw = plt.subplots(figsize=scale_figsize_to_ieee_column(4.0, 2.6))
+    for band_name, slc in selected:
+        b1_band = beta1[slc]
+        b2_band = np.abs(beta2[slc])
+        b1_diff = np.abs(b1_band[:, None] - b1_band[None, :])
+        i_idx, j_idx = np.where(np.ones(b1_diff.shape, dtype=bool))
+        diag_mask = i_idx != j_idx
+        i_idx = i_idx[diag_mask]
+        j_idx = j_idx[diag_mask]
+
+        if i_idx.size == 0:
+            continue
+
+        num = b1_diff[i_idx, j_idx]  # |beta1_i - beta1_j|
+        den_a = b2_band[i_idx] * baud_rate_hz  # |beta2_i| * Rb
+        den_b = b2_band[j_idx] * baud_rate_hz  # |beta2_j| * Rb
+
+        lda_lw = np.maximum(den_a, 1e-30) / num
+        ldb_lw = np.maximum(den_b, 1e-30) / num
+
+        valid = np.isfinite(lda_lw) & np.isfinite(ldb_lw) & (lda_lw > 0) & (ldb_lw > 0)
+        lda_lw = lda_lw[valid]
+        ldb_lw = ldb_lw[valid]
+
+        if lda_lw.size:
+            color = BAND_COLORS.get(band_name.upper(), "gray")
+            ax_lw.scatter(
+                lda_lw, ldb_lw, s=0.5, alpha=0.15, color=color,
+                label=f"{band_name}  ({slc.stop - slc.start} ch)",
+                rasterized=True,
+            )
+    ax_lw.set_xscale("log")
+    ax_lw.set_yscale("log")
+    _set_plain_log_ticks(ax_lw)
+    ax_lw.set_xlabel(r"$\mathnormal{L_{Da} / L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax_lw.set_ylabel(r"$\mathnormal{L_{Db} / L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax_lw.grid(False)
+    _ordered_legend(
+        ax_lw, [], loc="upper left", bbox_to_anchor=(1.02, 1),
+        fontsize=LEGEND_SIZE, framealpha=0.85, markerscale=4,
+    )
+    fig_lw.subplots_adjust(right=0.78)
+    _save_figure(fig_lw, out_dir / "lw_lda_ldb_scatter_per_band.pdf", dpi=300)
+    lg.success(f"Saved LW/LD scatter per-band → {out_dir / 'lw_lda_ldb_scatter_per_band.pdf'}")
+    plt.close(fig_lw)

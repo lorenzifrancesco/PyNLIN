@@ -12,6 +12,12 @@ class XhkmSums:
     ``n1`` and ``n2`` correspond to the collision-sum parts of the Dar
     ``chi1`` and ``chi2`` terms. Physical prefactors are intentionally not
     included here.
+
+    3PC classification follows the FWM degeneracy rule: only ``h=0``
+    (same pump symbol, 3PCa) or ``k=m`` (same signal/probe symbol, 3PCb)
+    create a genuine 3PC.  The ``h=k`` and ``h=m`` cases (formerly named
+    ``n_3pc_other``) are non-degenerate FWM entries that happen to share
+    a symbol index by chance; they belong to the 4PC sector.
     """
 
     n1: float
@@ -20,6 +26,7 @@ class XhkmSums:
     n_3pc_total: float
     n_3pca: float
     n_3pcb: float
+    # DEPRECATED: kept for back-compat with old .npz files; always 0.
     n_3pc_other: float
     n_3pc_k_eq_m: float
     n_4pc: float
@@ -74,13 +81,14 @@ def compute_xhkm_sums(
     mask_2pc = np.broadcast_to((H == 0) & (R == 0), shape)
     mask_3pca = np.broadcast_to((H == 0) & (R != 0), shape)
     mask_3pcb = np.broadcast_to((H != 0) & (R == 0), shape)
-    mask_3pc_other = (~mask_2pc) & (~mask_3pca) & (~mask_3pcb) & ((H == K) | (H == M))
-    mask_3pc = mask_3pca | mask_3pcb | mask_3pc_other
+    # h=k / h=m cases (formerly 3PC other) are non-degenerate FWM —
+    # they belong to the 4PC sector, not to 3PC.
+    mask_3pc = mask_3pca | mask_3pcb
     mask_4pc = ~(mask_2pc | mask_3pc)
 
     n_3pca = float(np.sum(abs2[mask_3pca]))
     n_3pcb = float(np.sum(abs2[mask_3pcb]))
-    n_3pc_other = float(np.sum(abs2[mask_3pc_other]))
+    n_3pc_other = 0.0  # DEPRECATED — always 0
     n_3pc_total = float(np.sum(abs2[mask_3pc]))
     n_4pc = float(np.sum(abs2[mask_4pc]))
 

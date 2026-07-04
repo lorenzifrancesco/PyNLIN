@@ -193,6 +193,9 @@ def compute_case(case: dict[str, object], *, recompute: bool = False) -> Path:
             dgd=dgd,
             gvda=float(case["gvda"]),
             gvdb=float(case["gvdb"]),
+            auto_refine=True,
+            min_pts_per_collision=3.0,
+            discretization_action="silent",
         )
         sums = compute_xhkm_sums(result.X, result.h_values, result.r_values, result.m_values)
         raw["n1"].append(sums.n1)
@@ -269,7 +272,6 @@ def plot_decomposition(path: Path, title: str, stem: str) -> None:
     ax.plot(llw, data["ref_n_2pc"], marker="*", ms=5, lw=0.9, label="2PC")
     ax.plot(llw, data["ref_n_3pca"], marker="o", ms=3, lw=1.0, label="3PCa")
     ax.plot(llw, data["ref_n_3pcb"], marker="s", ms=3, lw=1.0, label="3PCb")
-    ax.plot(llw, data["ref_n_3pc_other"], marker="^", ms=3, lw=0.9, label="3PC other")
     ax.plot(llw, data["ref_n_4pc"], marker="D", ms=3, lw=1.0, label="4PC")
     ax.set_xscale("log")
     ax.set_yscale("log")

@@ -765,6 +765,53 @@ constructed from mode tuples and permutation signs $p$. Intersections of
 this plane with the frequency cube identify FWM-relevant combinations
 (see `analysis/phase_matching.py` and `analysis/fwm_efficiency.py`).
 
+The reference time-domain evaluator `pynlin.methods.td.fwm_kernel` computes
+generic wideband coefficients without requiring exact channel-center
+frequency matching. For the product convention $A_a A_b A_c^* \to A_d$ it
+uses
+
+$$X^{abc\to d}_{hkm}=
+\int_0^L dz\,f_{abcd}(z)\int dt\,
+g_{d,z}^*(t)
+g_{a,z}(t-hT-\tau_a z)
+g_{b,z}(t-kT-\tau_b z)
+g_{c,z}^*(t-mT-\tau_c z)
+e^{i\Delta\beta_0 z-i\Delta\omega t},$$
+
+where
+
+$$\Delta\omega=\omega_a+\omega_b-\omega_c-\omega_d,$$
+
+and
+
+$$\Delta\beta_0=\beta_{0,a}+\beta_{0,b}-\beta_{0,c}-\beta_{0,d}.$$
+
+Thus off-center FWM tuples are computed and suppressed by the oscillatory
+time integral rather than discarded. The direct implementation is a
+reference backend with cost $O(N_hN_kN_mN_zN_t)$. Resolving large detunings
+requires $dt \ll 1/|\Delta\omega|$, and resolving strong phase mismatch
+requires $dz \ll 1/|\Delta\beta_0|$.
+
+For finite numerical contractions, the integer radius $R$ denotes the
+symmetric pulse-index window retained around the observed pulse $d$:
+
+$$h,k,m \in \{-R,-R+1,\ldots,R-1,R\}.$$
+
+The center of this cube is $h=k=m=0$. The observed/reference $d$ pulse is
+fixed at symbol index zero; $h$, $k$, and $m$ are the symbol offsets of the
+$a$, $b$, and conjugated $c$ pulses relative to that reference. Therefore
+$X^{abc\to d}_{000}$ is the fully aligned collision, while larger $|h|$,
+$|k|$, or $|m|$ represent interactions with neighboring symbols.
+
+For example, the diagnostic plot `wideband_fwm_ab_symmetry` compares
+finite-window sums of the form
+
+$$\sum_{h=-R}^{R}\sum_{k=-R}^{R}\sum_{m=-R}^{R}
+|X^{abc\to d}_{hkm}|^2,$$
+
+usually for two adjacent radii, $R$ and $R+1$, to check whether the plotted
+FWM-combination weights are stable as the retained collision support grows.
+
 #### Fiber properties
 
 **Overlap integrals.** Spatial overlap integrals (OI) between modes are

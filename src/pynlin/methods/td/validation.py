@@ -313,6 +313,9 @@ def compute_numeric_xhkm_sum_curves(
     perfect_only: bool = True,
     partial_collisions_margin: int = 5,
     n_z_points: int = 200,
+    auto_refine: bool = True,
+    min_pts_per_collision: float = 3.0,
+    max_z_points: int = 2000,
 ):
     """Compute prefactor-free Dar-style ``N1``/``N2`` curves from Xhkm.
 
@@ -413,6 +416,10 @@ def compute_numeric_xhkm_sum_curves(
             dgd=float(dgd),
             gvda=gvda,
             gvdb=gvdb,
+            auto_refine=auto_refine,
+            min_pts_per_collision=min_pts_per_collision,
+            max_z_points=max_z_points,
+            discretization_action="warn",
         )
         sums = compute_xhkm_sums(
             result.X,

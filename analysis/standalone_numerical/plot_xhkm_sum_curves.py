@@ -46,9 +46,8 @@ def plot_xhkm_sum_curves(path: str | Path, out_dir: str | Path = "media/n-PC") -
 
     fig, ax = plt.subplots(figsize=(3.8, 2.8))
     ax.plot(llw, dataset["ref_n_2pc"], lw=1.0, marker="*", ms=5, label="2PC")
-    ax.plot(llw, dataset["ref_n_3pca"], lw=1.0, marker="o", ms=3, label="3PCa: h=0, k!=m")
-    ax.plot(llw, dataset["ref_n_3pcb"], lw=1.0, marker="s", ms=3, label="3PCb: h!=0, k=m")
-    ax.plot(llw, dataset["ref_n_3pc_other"], lw=0.9, marker="^", ms=3, label="3PC other")
+    ax.plot(llw, dataset["ref_n_3pca"], lw=1.0, marker="o", ms=3, label="3PCa: h=0, r!=0")
+    ax.plot(llw, dataset["ref_n_3pcb"], lw=1.0, marker="s", ms=3, label="3PCb: h!=0, r=0")
     ax.plot(llw, dataset["ref_n_4pc"], lw=1.0, marker="D", ms=3, label="4PC")
     ax.set_xscale("log")
     ax.set_yscale("log")

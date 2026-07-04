@@ -3,6 +3,18 @@ from __future__ import annotations
 import numpy as np
 
 from pynlin.constellation_stats import qam_mu0
+from pynlin.methods.td.fwm_kernel import (
+    FWMChannels,
+    FWMKernelResult,
+    compute_fwm_coefficient_direct,
+    compute_fwm_kernel_direct,
+)
+from pynlin.methods.td.fwm_mc import (
+    FWMDarMCSum,
+    FWMTermMCSum,
+    estimate_fwm_term_sum_dar_mc,
+    estimate_fwm_term_sum_mc,
+)
 from pynlin.system import System
 from pynlin.utils import dBm2watt
 

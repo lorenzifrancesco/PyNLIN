@@ -54,14 +54,14 @@ def test_xhkm_sums_separates_other_3pc_and_4pc():
     r_values = np.array([-1, 0, 2])
     m_values = np.array([-1, 0])
     X = np.zeros((3, 3, 2), dtype=complex)
-    X[1, 2, 0] = 2.0  # 3PC other: h=k, h!=0, k!=m
-    X[2, 0, 1] = 3.0  # 4PC: h=2, k=-1, m=0
+    X[1, 2, 0] = 2.0  # h=1, r=2, m=-1 → k=1, h=k → 4PC (not 3PC)
+    X[2, 0, 1] = 3.0  # h=2, r=-1, m=0 → all distinct → 4PC
 
     sums = compute_xhkm_sums(X, h_values, r_values, m_values)
 
-    assert sums.n_3pc_other == pytest.approx(4.0)
-    assert sums.n_4pc == pytest.approx(9.0)
-    assert sums.n_3pc_total == pytest.approx(4.0)
+    assert sums.n_3pc_other == pytest.approx(0.0)  # deprecated — always 0
+    assert sums.n_4pc == pytest.approx(13.0)        # both entries → 4PC
+    assert sums.n_3pc_total == pytest.approx(0.0)
 
 
 def test_xhkm_sums_validates_indices_and_shape():

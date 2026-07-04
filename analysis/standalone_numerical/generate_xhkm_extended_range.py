@@ -171,9 +171,8 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     # Decomposition
     fig, ax = plt.subplots(figsize=(3.8, 2.8))
     ax.plot(llw, d["ref_n_2pc"], lw=1.0, marker="*", ms=5, label="2PC")
-    ax.plot(llw, d["ref_n_3pca"], lw=1.0, marker="o", ms=3, label="3PCa: h=0, k!=m")
-    ax.plot(llw, d["ref_n_3pcb"], lw=1.0, marker="s", ms=3, label="3PCb: h!=0, k=m")
-    ax.plot(llw, d["ref_n_3pc_other"], lw=0.9, marker="^", ms=3, label="3PC other")
+    ax.plot(llw, d["ref_n_3pca"], lw=1.0, marker="o", ms=3, label="3PCa: h=0, r!=0")
+    ax.plot(llw, d["ref_n_3pcb"], lw=1.0, marker="s", ms=3, label="3PCb: h!=0, r=0")
     ax.plot(llw, d["ref_n_4pc"], lw=1.0, marker="D", ms=3, label="4PC")
     ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.set_xscale("log"); ax.set_yscale("log")
