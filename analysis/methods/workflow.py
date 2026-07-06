@@ -31,8 +31,9 @@ from .io import (
     _save_nlin_csv,
     _write_flat_profile,
 )
-from .models import _load_or_compute_gn, _load_or_compute_gn_direct, _load_or_compute_pcfm_I
+from .models import _load_or_compute_fullband_mc, _load_or_compute_gn, _load_or_compute_gn_direct
 from .models import _load_or_compute_pcfm_general
+from pynlin.methods.td.fullband_mc import FullbandMCDiagnostic
 from .plotting import (
     plot_pcfm_diagnostics,
     plot_pcfm_gsnr,
@@ -92,6 +93,7 @@ def run_pcfm_workflow(
     pcfm_mode: str | None = None,
     gn_mode: str | None = None,
     gn_direct_mode: str | None = None,
+    mc_mode: str | None = None,
     pcfm_numeric_sci: bool | None = None,
     pcfm_numeric_xci: bool | None = None,
     pcfm_degree: int | None = None,
@@ -157,6 +159,70 @@ def run_pcfm_workflow(
     compute_gn_direct = gn_direct_mode != "off"
     recompute_gn_direct = gn_direct_mode == "recompute"
     do_plot = plot_mode == "on"
+
+    # Load MC engine config from system to decide whether to run fullband MC
+    mc_cfg = getattr(system, "raw_config", {})
+    if isinstance(mc_cfg, dict) and "methods" in mc_cfg:
+        mc_methods = mc_cfg["methods"]
+        if isinstance(mc_methods, dict):
+            mc_section = mc_methods.get("mc", {})
+            if isinstance(mc_section, dict):
+                if mc_mode is None:
+                    mc_mode = str(mc_section.get("mode", "off"))
+                mc_engine = str(mc_section.get("engine", "ssfm"))
+                mc_channel_decimation = int(mc_section.get("channel_decimation", 1))
+                mc_target_decimation = int(mc_section.get("target_decimation", 1))
+                mc_target_offset = int(mc_section.get("target_offset", 0))
+                mc_target_limit = mc_section.get("target_limit")
+                if mc_target_limit is not None:
+                    mc_target_limit = int(mc_target_limit)
+                mc_xpm_samples = int(mc_section.get("xpm_samples", 10000))
+                mc_fwm_samples = int(mc_section.get("fwm_samples", 5000))
+                mc_fwm_seed = int(mc_section.get("seed", 1234))
+                mc_max_fwm_tuples = mc_section.get("max_fwm_tuples_per_target")
+                if mc_max_fwm_tuples is not None:
+                    mc_max_fwm_tuples = int(mc_max_fwm_tuples)
+                mc_fwm_tuple_selection = str(mc_section.get("fwm_tuple_selection", "phase_proxy"))
+            else:
+                mc_mode = "off"
+                mc_engine = "ssfm"
+                mc_channel_decimation = 1
+                mc_target_decimation = 1
+                mc_target_offset = 0
+                mc_target_limit = None
+                mc_xpm_samples = 10000
+                mc_fwm_samples = 5000
+                mc_fwm_seed = 1234
+                mc_max_fwm_tuples = None
+                mc_fwm_tuple_selection = "phase_proxy"
+        else:
+            mc_mode = "off"
+            mc_engine = "ssfm"
+            mc_channel_decimation = 1
+            mc_target_decimation = 1
+            mc_target_offset = 0
+            mc_target_limit = None
+            mc_xpm_samples = 10000
+            mc_fwm_samples = 5000
+            mc_fwm_seed = 1234
+            mc_max_fwm_tuples = None
+            mc_fwm_tuple_selection = "phase_proxy"
+    else:
+        mc_mode = "off"
+        mc_engine = "ssfm"
+        mc_channel_decimation = 1
+        mc_target_decimation = 1
+        mc_target_offset = 0
+        mc_target_limit = None
+        mc_xpm_samples = 10000
+        mc_fwm_samples = 5000
+        mc_fwm_seed = 1234
+        mc_max_fwm_tuples = None
+        mc_fwm_tuple_selection = "phase_proxy"
+    mc_mode = _normalize_mode("mc_mode", mc_mode, {"off", "cached", "recompute"})
+    compute_mc = mc_mode != "off"
+    recompute_mc = mc_mode == "recompute"
+    use_fullband_mc = compute_mc and mc_engine.lower() == "fullband"
 
     pcfm_numeric_sci = (
         bool(runtime_cfg["pcfm_numeric_sci"])
@@ -575,15 +641,92 @@ def run_pcfm_workflow(
                 denom = np.maximum(output_signal_power_w, 1e-18)
                 nlin_gn_direct_xci_ratio[label] = nlin_gn_direct_xci_output_w / denom
 
+    ############
+    # Fullband MC
+    ############
+    nlin_fullband_mc_output_w = None
+    fullband_mc_diagnostic: FullbandMCDiagnostic | None = None
+    if use_fullband_mc:
+        from pynlin.methods.td.fullband_mc import decimated_frequency_grid, gamma_grid
+
+        kept, _ = decimated_frequency_grid(system, mc_channel_decimation)
+        out_path = (
+            Path("results")
+            / f"fullband_mc_{Path(profile_path).stem}_{model_cache_tag}.npz"
+        )
+        diagnostic = _load_or_compute_fullband_mc(
+            system,
+            output_path=out_path,
+            channel_decimation=mc_channel_decimation,
+            target_indices=None,
+            xpm_samples=mc_xpm_samples,
+            fwm_samples=mc_fwm_samples,
+            seed=mc_fwm_seed,
+            max_fwm_tuples_per_target=mc_max_fwm_tuples,
+            fwm_tuple_selection=mc_fwm_tuple_selection,
+            recompute=recompute_mc,
+        )
+        fullband_mc_diagnostic = diagnostic
+
+        gamma = gamma_grid(system, freqs)
+        mean_launch = float(np.mean(launch_powers))
+        fmc_launch_nlin = np.zeros_like(diagnostic.total, dtype=float)
+        for i, grid_idx in enumerate(diagnostic.target_indices):
+            P_j = float(launch_powers[int(grid_idx)])
+            kappa2 = float(gamma[int(grid_idx)]) ** 2 * (16.0 / 81.0)
+            fmc_launch_nlin[i] = kappa2 * P_j * mean_launch * float(diagnostic.total[i])
+        if kept.size > 0 and diagnostic.target_indices.size > 0:
+            fmc_full = np.full(kept.size, np.nan, dtype=float)
+            for di, gi in enumerate(diagnostic.target_indices):
+                if 0 <= int(gi) < fmc_full.size:
+                    fmc_full[int(gi)] = fmc_launch_nlin[di]
+            fmc_interp = np.interp(
+                np.arange(freqs.size, dtype=float),
+                kept.astype(float),
+                np.nan_to_num(fmc_full, nan=0.0),
+                left=0.0,
+                right=0.0,
+            )
+        else:
+            fmc_interp = np.zeros(freqs.size, dtype=float)
+        nlin_fullband_mc_output_w = _launch_referenced_nlin_to_output_power(
+            fmc_interp,
+            output_over_launch_signal_power_ratio,
+        )
+        xpm_ratio = float(np.nansum(diagnostic.xpm) / max(float(np.nansum(diagnostic.total)), 1e-30))
+        fwm_ratio = float(np.nansum(diagnostic.fwm) / max(float(np.nansum(diagnostic.total)), 1e-30))
+        lg.info(
+            "Fullband MC NLIN (approx): output W min/med/max = {:.3e} / {:.3e} / {:.3e}".format(
+                float(np.nanmin(nlin_fullband_mc_output_w)),
+                float(np.nanmedian(nlin_fullband_mc_output_w)),
+                float(np.nanmax(nlin_fullband_mc_output_w)),
+            )
+        )
+        lg.info(
+            "Fullband MC diagnostic: XPM {:.1f}%, FWM {:.1f}% of total (by prefactor-free sum)".format(
+                xpm_ratio * 100.0, fwm_ratio * 100.0
+            )
+        )
+        lg.info(
+            "Fullband MC targets: {:d} channels (decimation {}), xpm_samples={:d}, fwm_samples={:d}".format(
+                int(diagnostic.target_indices.size), mc_channel_decimation, mc_xpm_samples, mc_fwm_samples
+            )
+        )
+
     if td_modulations and nlin_pcfm_xci:
         _log_td_gn_vs_pcfm_xci_diff_stats(td_modulations=td_modulations, nlin_pcfm_xci=nlin_pcfm_xci)
 
-    if nlin_td_output_w is None:
-        if do_plot:
-            lg.warning("Skipping GSNR/NLIN comparison plots because TD is disabled.")
+    if nlin_td_output_w is None and nlin_fullband_mc_output_w is None:
         return
 
-    gsnr_td = 10.0 * np.log10(output_signal_power_w / np.maximum(nlin_td_output_w, 1e-18))
+    gsnr_td = 10.0 * np.log10(output_signal_power_w / np.maximum(nlin_td_output_w, 1e-18)) if nlin_td_output_w is not None else None
+    gsnr_fullband_mc = None
+    if nlin_fullband_mc_output_w is not None:
+        gsnr_fullband_mc = {
+            "no_loss": 10.0 * np.log10(
+                output_signal_power_w / np.maximum(nlin_fullband_mc_output_w, 1e-18)
+            )
+        }
     if do_plot:
         plot_pcfm_gsnr(
             freqs_hz=freqs,
@@ -592,6 +735,7 @@ def run_pcfm_workflow(
             gsnr_gn=gsnr_gn,
             out_path=PCFM_MEDIA_DIR / "gsnr_nli.pdf",
             gsnr_gn_direct=gsnr_gn_direct,
+            gsnr_fullband_mc=gsnr_fullband_mc,
             plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
         )
         plot_pcfm_nlin_power(
@@ -607,6 +751,7 @@ def run_pcfm_workflow(
             nlin_gn_direct_xci_w=nlin_gn_direct_xci,
             gn_direct_is_ratio=False,
             gn_direct_xci_is_ratio=False,
+            nlin_fullband_mc_w=nlin_fullband_mc_output_w,
             out_path=PCFM_MEDIA_DIR / "nlin_power.pdf",
             plot_pcfm_total_and_sci=plot_pcfm_total_and_sci,
         )

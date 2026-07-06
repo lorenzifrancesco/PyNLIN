@@ -10,6 +10,11 @@ from pynlin.methods.pcfm import (
     compute_gn_numeric,
     compute_pcfm_nlin,
 )
+from pynlin.methods.td.fullband_mc import (
+    FullbandMCDiagnostic,
+    compute_fullband_prefactor_free_mc,
+    decimated_frequency_grid,
+)
 from pynlin.system import System
 
 _NLIN_CACHE_VERSION = 2
@@ -227,3 +232,100 @@ def _load_or_compute_gn_direct(
         return nlin, sci, xci
     _save(output_path, out)
     return out
+
+
+from pynlin.methods.td.fullband_mc import FWMPruningStats  # noqa: E402
+
+
+def _fullband_mc_target_indices(
+    system: System,
+    *,
+    channel_decimation: int = 1,
+    target_decimation: int = 1,
+    target_offset: int = 0,
+    target_limit: int | None = None,
+) -> np.ndarray:
+    """Select target indices on the decimated grid."""
+    indices, _ = decimated_frequency_grid(system, channel_decimation)
+    base = np.arange(indices.size, dtype=int)[target_offset::target_decimation]
+    if target_limit is not None:
+        base = base[:max(int(target_limit), 0)]
+    return base
+
+
+def _load_or_compute_fullband_mc(
+    system: System,
+    output_path: Path,
+    *,
+    channel_decimation: int = 1,
+    target_indices: np.ndarray | None = None,
+    xpm_samples: int = 10000,
+    fwm_samples: int = 5000,
+    seed: int = 1234,
+    max_fwm_tuples_per_target: int | None = None,
+    fwm_tuple_selection: str = "phase_proxy",
+    recompute: bool = False,
+) -> FullbandMCDiagnostic:
+    """Compute or load a prefactor-free fullband MC diagnostic NPZ."""
+    if output_path.exists() and not recompute:
+        lg.debug(f"Loading cached fullband MC diagnostic from {output_path}")
+        try:
+            data = np.load(output_path, allow_pickle=True)
+            meta = {k[len("meta_"):]: data[k].item() for k in data.files if k.startswith("meta_")}
+            return FullbandMCDiagnostic(
+                target_indices=data["target_indices"],
+                target_frequencies=data["target_frequencies"],
+                xpm=data["xpm"],
+                fwm=data["fwm"],
+                total=data["total"],
+                fwm_tuple_count=data["fwm_tuple_count"],
+                fwm_support_count=data["fwm_support_count"],
+                pruning=FWMPruningStats(
+                    naive_tuples=int(data["naive_tuples"].item()),
+                    support_survivors=int(data["support_survivors"].item()),
+                    evaluated_tuples=int(data["evaluated_tuples"].item()),
+                ),
+                metadata=meta,
+            )
+        except Exception:
+            lg.warning(f"Stale or invalid cache at {output_path}; recomputing.")
+
+    lg.info("Computing fullband prefactor-free MC diagnostic")
+    if target_indices is None:
+        target_indices = _fullband_mc_target_indices(
+            system,
+            channel_decimation=channel_decimation,
+        )
+    diagnostic = compute_fullband_prefactor_free_mc(
+        system,
+        decimation=channel_decimation,
+        target_indices=target_indices,
+        include_xpm=True,
+        include_fwm=True,
+        xpm_samples=xpm_samples,
+        fwm_samples=fwm_samples,
+        seed=seed,
+        max_fwm_tuples_per_target=max_fwm_tuples_per_target,
+        fwm_tuple_selection=fwm_tuple_selection,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        output_path,
+        target_indices=diagnostic.target_indices,
+        target_frequencies=diagnostic.target_frequencies,
+        xpm=diagnostic.xpm,
+        fwm=diagnostic.fwm,
+        total=diagnostic.total,
+        fwm_tuple_count=diagnostic.fwm_tuple_count,
+        fwm_support_count=diagnostic.fwm_support_count,
+        naive_tuples=np.array([diagnostic.pruning.naive_tuples]),
+        support_survivors=np.array([diagnostic.pruning.support_survivors]),
+        evaluated_tuples=np.array([diagnostic.pruning.evaluated_tuples]),
+        **{f"meta_{k}": np.array([v]) for k, v in diagnostic.metadata.items() if v is not None},
+    )
+    lg.success(
+        "Fullband MC diagnostic saved to {} ({} targets, {} XPM samples, {} FWM samples)".format(
+            output_path, len(diagnostic.target_indices), xpm_samples, fwm_samples
+        )
+    )
+    return diagnostic

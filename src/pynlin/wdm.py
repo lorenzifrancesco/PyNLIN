@@ -352,6 +352,7 @@ class IrregularWDM(BaseWDM):
 
         for name, spec in sorted(band_specs.items(), key=lambda kv: kv[1].start_nm):
             f_start = c / (spec.start_nm * 1e-9)
+            f_start = np.round(f_start / spacing) * spacing
             f_band = f_start - np.arange(spec.n_channels) * spacing
 
             # Overlap check against existing bands

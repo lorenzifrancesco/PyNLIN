@@ -92,7 +92,7 @@ Core method implementations live under `pynlin.methods`:
 
 - `pynlin.methods.td`: time-domain collision-coefficient NLIN.
 - `pynlin.methods.pcfm`: PCFM/GN kernels.
-- `pynlin.methods.mc`: chi1/chi2 reconstruction from TD collision coefficients.
+- `pynlin.methods.mc`: two backends — **SSFM** (reconstructs chi1/chi2 from TD collision coefficients) and **fullband** (evaluates 3PC/4PC tuples directly via Monte Carlo sampling).
 
 `analysis` is orchestration only: it resolves profiles, builds cache keys,
 runs selected methods, writes CSV/NPY outputs, and creates plots.
@@ -142,22 +142,50 @@ include_mci = false
 
 [methods.mc]
 mode = "off"                # off | cached | recompute
+engine = "ssfm"             # ssfm | fullband
 n_trials = 1
 rng_seed = 1234
+# SSFM backend (engine = "ssfm"):
+template = ""
+n_channels = 5
+# Fullband MC backend (engine = "fullband"):
+channel_decimation = 1      # keep every N-th channel for MC targets
+target_decimation = 1       # stride over decimated-grid targets
+target_offset = 0           # starting offset for target selection
+target_limit =              # max targets (null = all)
+xpm_samples = 20000         # XPM tuple samples per target
+fwm_samples = 10000         # FWM tuple samples per target
+max_fwm_tuples_per_target = # cap on FWM tuple evaluations (null = no cap)
+fwm_tuple_selection = "phase_proxy"  # phase_proxy | random
 ```
 
 `cached` reuses existing method outputs when the cache path exists. `recompute`
 forces regeneration. `off` disables the method even if a study lists it.
 
-MC requires TD because it reconstructs modulation-dependent NLIN from TD
-collision coefficients.
+Two MC backends are available:
+
+- **`engine = "ssfm"`** (default): reconstructs modulation-dependent NLIN from
+  TD collision coefficients via chi1/chi2. This backend **requires TD** — the
+  study must include `"td"` in its methods list (or be run after TD). Suitable
+  for systems where TD collision-coefficient computation is feasible.
+
+- **`engine = "fullband"`**: evaluates XPM (3PC) and FWM (4PC) contributions
+  directly by Monte Carlo sampling of interferer tuples on a decimated
+  frequency grid. Does **not** require TD — works independently on very wide
+  systems (OESCLU, >1000 channels) where TD collision coefficients are
+  prohibitively expensive. The prefactor-free sums are converted to an
+  approximate NLIN power via `γ²·(16/81)·Pj·Pavg·S`. Tuning `xpm_samples`,
+  `fwm_samples`, `channel_decimation`, and `max_fwm_tuples_per_target`
+  controls the accuracy vs. runtime trade-off.
 
 ## Study Types
 
 ### Full System
 
-`full_system` runs the end-to-end TD/PCFM workflow over all channels and can
-produce plots:
+`full_system` runs the study workflow over all channels. With `methods = ["mc"]`
+and `engine = "fullband"`, it runs the fullband MC on the decimated grid,
+interpolates to the full channel plan, estimates NLIN power and GSNR, and
+produces plots with green diamond markers for the fullband MC data:
 
 ```toml
 [studies.full_system]
@@ -171,7 +199,8 @@ This is the closest replacement for the old PCFM workflow scripts.
 ### Subset
 
 `subset` evaluates selected CUT/interferer channels and writes compact CSV
-summaries:
+summaries. When `engine = "fullband"`, the subset study runs the fullband MC
+runner directly on the decimated grid and reports NLIN power per channel:
 
 ```toml
 [studies.center_refined]
@@ -250,6 +279,15 @@ Sweep studies produce:
 sweep_<variable>.csv
 flat_profile_sweep_<variable>_<value>.npy
 pcfm_<cache-tag>.npy
+fullband_mc_<cache-tag>.npz               # when engine = "fullband"
+```
+
+Full-system studies produce:
+
+```text
+results/gsnr_nli.pdf
+results/nlin_power.pdf
+results/fullband_mc_<profile>_<cache-tag>.npz   # XPM, FWM, total per target
 ```
 
 The sweep CSV includes:
@@ -259,6 +297,7 @@ The sweep CSV includes:
 - TD NLIN power
 - PCFM NLIN power
 - MC `chi1`, `chi2`, `prefactor`, and 16-QAM reconstruction when enabled
+- fullband MC NLIN power when `engine = "fullband"`
 - output/launch signal-power ratio
 
 TD collision/NLIN cache files are named with method settings and content hashes
@@ -294,8 +333,43 @@ mode = "cached"
 mode = "cached"
 ```
 
+For a fullband-MC-only study (no TD, no PCFM):
+
+```toml
+[profiles]
+mode = "flat"
+
+[methods.td]
+mode = "off"
+
+[methods.pcfm]
+mode = "off"
+
+[methods.mc]
+mode = "recompute"
+engine = "fullband"
+channel_decimation = 4
+xpm_samples = 20000
+fwm_samples = 10000
+
+[studies.mc_only]
+type = "full_system"
+methods = ["mc"]
+plot = true
+```
+
 For publication-quality recomputation, set profile and method modes to
 `recompute` and verify the output directory is clean or intentionally reused.
+
+The fullband MC diagnostic (`.npz`) can be inspected from Python:
+
+```python
+import numpy as np
+d = np.load("results/fullband_mc_<profile>_<tag>.npz")
+print(d.files)              # ['xpm', 'fwm', 'total', 'target_indices', ...]
+xpm_frac = d['xpm'].sum() / d['total'].sum()
+print(f"XPM contribution: {xpm_frac:.1%}")
+```
 
 
 # Singularity images

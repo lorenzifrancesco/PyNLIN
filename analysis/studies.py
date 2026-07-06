@@ -22,7 +22,7 @@ from analysis.config import (  # noqa: E402
     load_studies_runtime_config,
 )
 from analysis.methods.io import _save_nlin_csv  # noqa: E402
-from analysis.runners.methods import TDResult, run_mc, run_pcfm, run_td  # noqa: E402
+from analysis.runners.methods import FullbandMCResult, TDResult, run_fullband_mc, run_mc, run_pcfm, run_td  # noqa: E402
 from analysis.runtime.cache import safe_tag  # noqa: E402
 from analysis.runtime.context import build_run_context  # noqa: E402
 from analysis.subset import resolve_subset  # noqa: E402
@@ -73,10 +73,12 @@ def _run_full_system(config_path: Path, cfg: StudiesRuntimeConfig, study: StudyC
     td = cfg.methods.td
     pcfm = cfg.methods.pcfm
     gn = cfg.methods.gn
+    mc = cfg.methods.mc
     td_mode = td.mode if "td" in study.methods else "off"
     pcfm_mode = pcfm.mode if "pcfm" in study.methods else "off"
     gn_mode = gn.mode if "gn" in study.methods else "off"
     gn_direct_mode = gn.direct_mode if "gn" in study.methods else "off"
+    mc_mode = mc.mode if "mc" in study.methods else "off"
     run_pcfm_workflow(
         cfg_path=config_path,
         profile_path=cfg.profiles.path,
@@ -86,6 +88,7 @@ def _run_full_system(config_path: Path, cfg: StudiesRuntimeConfig, study: StudyC
         pcfm_mode=pcfm_mode,
         gn_mode=gn_mode,
         gn_direct_mode=gn_direct_mode,
+        mc_mode=mc_mode,
         pcfm_numeric_sci=pcfm.numeric_sci,
         pcfm_numeric_xci=pcfm.numeric_xci,
         pcfm_degree=pcfm.degree,
@@ -160,7 +163,34 @@ def _run_subset(config_path: Path, system: System, cfg: StudiesRuntimeConfig, st
                 for idx in cut
             )
 
-    if "mc" in study.methods and cfg.methods.mc.mode != "off":
+    fullband_mc_result: FullbandMCResult | None = None
+    use_fullband_mc = (
+        "mc" in study.methods
+        and cfg.methods.mc.mode != "off"
+        and cfg.methods.mc.engine == "fullband"
+    )
+    use_td_mc = "mc" in study.methods and cfg.methods.mc.mode != "off" and not use_fullband_mc
+
+    if use_fullband_mc:
+        fullband_mc_result = run_fullband_mc(
+            context, cfg.methods.mc, cache_scope=f"{study.name}_{subset.tag}"
+        )
+        for idx in cut:
+            diag_idx = None
+            for di, gi in enumerate(fullband_mc_result.diagnostic.target_indices):
+                if int(gi) == idx:
+                    diag_idx = di
+                    break
+            rows.append(
+                {
+                    "channel_idx": idx,
+                    "method": "fullband_mc",
+                    "nlin_w": float(np.asarray(fullband_mc_result.nlin_output_w).reshape(-1)[diag_idx])
+                    if diag_idx is not None else float("nan"),
+                }
+            )
+
+    if use_td_mc:
         _require_td_for_mc(study, cfg)
         if td_result is None:
             td_result = run_td(context, cfg.methods.td, cache_scope=f"{study.name}_{subset.tag}")
@@ -287,7 +317,24 @@ def _run_sweep(config_path: Path, cfg: StudiesRuntimeConfig, study: StudyConfig)
         chi2_val = float("nan")
         prefactor_val = float("nan")
         nlin_16qam_w = float("nan")
-        if "mc" in study.methods and cfg.methods.mc.mode != "off":
+        fullband_mc_val = float("nan")
+        use_fullband_mc = (
+            "mc" in study.methods
+            and cfg.methods.mc.mode != "off"
+            and cfg.methods.mc.engine == "fullband"
+        )
+        use_td_mc = "mc" in study.methods and cfg.methods.mc.mode != "off" and not use_fullband_mc
+
+        if use_fullband_mc:
+            fmc_result = run_fullband_mc(
+                context, cfg.methods.mc, cache_scope=profile_tag
+            )
+            for di, gi in enumerate(fmc_result.diagnostic.target_indices):
+                if int(gi) == center_idx:
+                    fullband_mc_val = float(np.asarray(fmc_result.nlin_output_w).reshape(-1)[di])
+                    break
+
+        if use_td_mc:
             _require_td_for_mc(study, cfg)
             if td_result is None:
                 td_result = run_td(context, cfg.methods.td, cache_scope=profile_tag)
@@ -311,6 +358,7 @@ def _run_sweep(config_path: Path, cfg: StudiesRuntimeConfig, study: StudyConfig)
                 "prefactor": prefactor_val,
                 "output_ratio": float(context.output_over_launch_ratio[center_idx]),
                 "nlin_16qam_w": nlin_16qam_w,
+                "fullband_mc_nlin_w": fullband_mc_val,
             }
         )
 
@@ -328,6 +376,7 @@ def _run_sweep(config_path: Path, cfg: StudiesRuntimeConfig, study: StudyConfig)
         "prefactor",
         "output_ratio",
         "nlin_16qam_w",
+        "fullband_mc_nlin_w",
     ]
     data = np.array([[row[k] for k in fields] for row in rows], dtype=object)
     np.savetxt(path, data, delimiter=",", fmt="%s", header=",".join(fields), comments="")
@@ -343,10 +392,13 @@ def _run_sweep(config_path: Path, cfg: StudiesRuntimeConfig, study: StudyConfig)
         td_vals = [float(r["td_nlin_w"]) for r in rows]
         pcfm_vals = [float(r["pcfm_nlin_w"]) for r in rows]
         pcfm_eq18_vals = [float(r["pcfm_eq18_xci_w"]) for r in rows]
+        fullband_mc_vals = [float(r["fullband_mc_nlin_w"]) for r in rows]
         ax.plot(sweep_values, td_vals, marker="o", label="TD", lw=0.8)
         ax.plot(sweep_values, pcfm_vals, marker="^", label="PCFM", lw=0.8)
         if np.any(np.isfinite(pcfm_eq18_vals)):
             ax.plot(sweep_values, pcfm_eq18_vals, marker="s", label="PCFM Eq. 18 XCI", lw=0.8)
+        if np.any(np.isfinite(fullband_mc_vals)):
+            ax.plot(sweep_values, fullband_mc_vals, marker="D", label="FBMC", lw=0.8)
         ax.set_xlabel(xlabel)
         ax.set_ylabel("NLIN power [W]")
         ax.legend()

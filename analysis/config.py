@@ -60,6 +60,11 @@ class GNMethodConfig:
     direct_mode: str = "off"
 
 
+# FIXME(refactor): The MC engine currently bundles two independent backends:
+#   - "ssfm" / "td"  (TD collision-coeff → chi1/chi2 → NLIN)
+#   - "fullband"      (prefactor-free MC over 3PC/4PC/FWM tuples)
+# These should be split into separate MethodConfig classes when the
+# study/runner framework is next reworked.
 @dataclass(frozen=True)
 class MCMethodConfig:
     mode: str = "off"
@@ -68,6 +73,16 @@ class MCMethodConfig:
     rng_seed: int = 1234
     template: Path | None = None
     n_channels: int = 5
+    # Fullband-MC-specific fields (used when engine == "fullband")
+    channel_decimation: int = 1
+    target_decimation: int = 1
+    target_offset: int = 0
+    target_limit: int | None = None
+    xpm_samples: int = 10000
+    fwm_samples: int = 5000
+    seed: int = 1234
+    max_fwm_tuples_per_target: int | None = None
+    fwm_tuple_selection: str = "phase_proxy"
 
 
 @dataclass(frozen=True)
@@ -369,6 +384,23 @@ def _load_methods_config(system: System) -> MethodsConfig:
             rng_seed=_as_int(mc.get("rng_seed", 1234), "methods.mc.rng_seed"),
             template=_to_optional_path(mc.get("template")),
             n_channels=max(_as_int(mc.get("n_channels", 5), "methods.mc.n_channels"), 1),
+            channel_decimation=_normalize_nonnegative_int(
+                "methods.mc.channel_decimation", mc.get("channel_decimation", 1)
+            ),
+            target_decimation=_normalize_nonnegative_int(
+                "methods.mc.target_decimation", mc.get("target_decimation", 1)
+            ),
+            target_offset=_normalize_nonnegative_int(
+                "methods.mc.target_offset", mc.get("target_offset", 0)
+            ),
+            target_limit=_as_int(mc.get("target_limit"), "methods.mc.target_limit")
+            if mc.get("target_limit") is not None else None,
+            xpm_samples=max(_as_int(mc.get("xpm_samples", 10000), "methods.mc.xpm_samples"), 1),
+            fwm_samples=max(_as_int(mc.get("fwm_samples", 5000), "methods.mc.fwm_samples"), 1),
+            seed=_as_int(mc.get("seed", 1234), "methods.mc.seed"),
+            max_fwm_tuples_per_target=_as_int(mc.get("max_fwm_tuples_per_target"), "methods.mc.max_fwm_tuples_per_target")
+            if mc.get("max_fwm_tuples_per_target") is not None else None,
+            fwm_tuple_selection=str(mc.get("fwm_tuple_selection", "phase_proxy")),
         ),
     )
 

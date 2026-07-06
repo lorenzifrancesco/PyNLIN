@@ -119,11 +119,12 @@ def _safe_histogram_bins(values: np.ndarray, n_bins: int, *, log_scale: bool) ->
 
 def plot_pcfm_gsnr(
     freqs_hz: np.ndarray,
-    gsnr_td: np.ndarray,
+    gsnr_td: np.ndarray | None,
     gsnr_pcfm: dict[str, np.ndarray],
     gsnr_gn: dict[str, np.ndarray] | None,
     out_path: Path,
     gsnr_gn_direct: dict[str, np.ndarray] | None = None,
+    gsnr_fullband_mc: dict[str, np.ndarray] | None = None,
     title: str | None = None,
     plot_pcfm_total_and_sci: bool = False,
 ) -> None:
@@ -133,17 +134,18 @@ def plot_pcfm_gsnr(
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.8))
     if title:
         ax.set_title(title, fontsize=9)
-    ax.plot(
-        freqs_hz * 1e-12,
-        gsnr_td,
-        color=GNUPLOT_RED,
-        lw=0.45,
-        marker="o",
-        markersize=1.2,
-        markerfacecolor="none",
-        markeredgewidth=marker_lw,
-        label="TD",
-    )
+    if gsnr_td is not None:
+        ax.plot(
+            freqs_hz * 1e-12,
+            gsnr_td,
+            color=GNUPLOT_RED,
+            lw=0.45,
+            marker="o",
+            markersize=1.2,
+            markerfacecolor="none",
+            markeredgewidth=marker_lw,
+            label="TD",
+        )
 
     for label, gsnr in gsnr_pcfm.items():
         display = "" if label == "no_loss" else label
@@ -190,8 +192,23 @@ def plot_pcfm_gsnr(
                 label=f"GN dir{suffix}",
             )
 
-    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
-    ax.set_ylabel(r"$\mathnormal{GSNR_{NLI} \; [\mathrm{dB}]}$", fontsize=AXIS_LABEL_SIZE)
+    if gsnr_fullband_mc:
+        for label, gsnr in gsnr_fullband_mc.items():
+            display = "" if label == "no_loss" else label
+            suffix = f" {display}" if display else ""
+            ax.scatter(
+                freqs_hz * 1e-12,
+                gsnr,
+                s=8,
+                marker="D",
+                facecolors=GNUPLOT_GREEN,
+                edgecolors=GNUPLOT_GREEN,
+                linewidths=marker_lw,
+                label=f"FBMC{suffix}",
+            )
+
+    ax.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"${GSNR_{NLI} \; [\mathrm{dB}]}$", fontsize=AXIS_LABEL_SIZE)
     _set_freq_xlim_thz(ax)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -203,7 +220,7 @@ def plot_pcfm_gsnr(
 def plot_pcfm_nlin_power(
     freqs_hz: np.ndarray,
     signal_power_w: np.ndarray,
-    nlin_td_w: np.ndarray,
+    nlin_td_w: np.ndarray | None,
     nlin_pcfm_w: dict[str, np.ndarray],
     nlin_gn_w: dict[str, np.ndarray] | None,
     out_path: Path,
@@ -214,6 +231,7 @@ def plot_pcfm_nlin_power(
     nlin_gn_direct_xci_w: dict[str, np.ndarray] | None = None,
     gn_direct_is_ratio: bool = False,
     gn_direct_xci_is_ratio: bool = False,
+    nlin_fullband_mc_w: np.ndarray | None = None,
     plot_pcfm_total_and_sci: bool = False,
 ) -> None:
     """Plot NLIN absolute power (dBm) and normalized-to-output power (dB)."""
@@ -275,7 +293,7 @@ def plot_pcfm_nlin_power(
                     markeredgewidth=marker_lw,
                     label=f"TD {label}",
                 )
-        else:
+        elif nlin_td_w is not None:
             values = metric_fn(nlin_td_w)
             ax.plot(
                 freqs_hz * 1e-12,
@@ -388,7 +406,22 @@ def plot_pcfm_nlin_power(
                     label=f"GN dir XCI{suffix}",
                 )
 
-        ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+        if nlin_fullband_mc_w is not None:
+            fb_flat = np.asarray(nlin_fullband_mc_w, dtype=float).reshape(-1)
+            if fb_flat.size == freqs_hz.size:
+                values = metric_fn(fb_flat)
+                ax.scatter(
+                    freqs_hz * 1e-12,
+                    values,
+                    s=4,
+                    marker="D",
+                    facecolors=GNUPLOT_GREEN,
+                    edgecolors=GNUPLOT_GREEN,
+                    linewidths=marker_lw,
+                    label="FBMC",
+                )
+
+        ax.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
         ax.set_ylabel(ylabel, fontsize=AXIS_LABEL_SIZE)
         _set_freq_xlim_thz(ax)
         _disable_dbm_axis_grouping(ax)
@@ -434,8 +467,8 @@ def plot_pcfm_diagnostics(
 
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, launch_dbm, lw=0.8, color="black")
-    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
-    ax.set_ylabel(r"$\mathnormal{P_\mathrm{launch}\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"${P_\mathrm{launch}\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
     _set_freq_xlim_thz(ax)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
@@ -472,7 +505,7 @@ def plot_pcfm_diagnostics(
         bins = _safe_histogram_bins(l_over_lw_pairs, 40, log_scale=True)
         ax.hist(l_over_lw_pairs, bins=bins, color="tab:blue", edgecolor="black", linewidth=0.5)
         ax.set_xscale("log")
-    ax.set_xlabel(r"$\mathnormal{L/L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${L/L_W}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel("channel-pair count", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
     _save_figure(fig, out_dir / "l_over_lw_histogram.pdf", dpi=300)
@@ -498,7 +531,7 @@ def plot_pcfm_diagnostics(
         bins = _safe_histogram_bins(l_over_ld, 30, log_scale=True)
         ax.hist(l_over_ld, bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
         ax.set_xscale("log")
-    ax.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${L/L_D}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel("channel count", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
     _save_figure(fig, out_dir / "l_over_ld_histogram.pdf", dpi=300)
@@ -515,8 +548,8 @@ def plot_pcfm_diagnostics(
     fig, ax = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax.plot(freqs_thz, avg_dbm, lw=0.8, color="tab:blue", label="avg")
     ax.plot(freqs_thz, out_dbm, lw=0.8, color="tab:orange", label="out")
-    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
-    ax.set_ylabel(r"$\mathnormal{P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"${P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
     _set_freq_xlim_thz(ax)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
@@ -578,7 +611,7 @@ def plot_pcfm_diagnostics(
             arrowprops=dict(arrowstyle="->", lw=0.6),
         )
         first = False
-    ax.set_xlabel(r"$\mathnormal{z\;[\mathrm{km}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${z\;[\mathrm{km}]}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(r"normalized power", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -596,13 +629,13 @@ def plot_pcfm_diagnostics(
     )
     fig, ax1 = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax1.plot(freqs_thz, p_l, lw=0.8, color="tab:blue")
-    ax1.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
-    ax1.set_ylabel(r"$\mathnormal{p(L)}$", color="tab:blue", fontsize=AXIS_LABEL_SIZE)
+    ax1.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax1.set_ylabel(r"${p(L)}$", color="tab:blue", fontsize=AXIS_LABEL_SIZE)
     _set_freq_xlim_thz(ax1)
     ax2 = ax1.twinx()
     ax2.plot(freqs_thz, poly_sum, lw=0.8, color="tab:orange")
     ax2.set_ylabel(
-        r"$\mathnormal{\sum a_n a_k/(n+k+1)}$",
+        r"${\sum a_n a_k/(n+k+1)}$",
         color="tab:orange",
         fontsize=AXIS_LABEL_SIZE,
     )
@@ -638,8 +671,8 @@ def plot_pcfm_diagnostics(
             color="tab:red",
             label="pumps",
         )
-    ax.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
-    ax.set_ylabel(r"$\mathnormal{P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"${P\;[\mathrm{dBm}]}$", fontsize=AXIS_LABEL_SIZE)
     _set_freq_xlim_thz(ax)
     _disable_dbm_axis_grouping(ax)
     ax.grid(False)
@@ -653,9 +686,9 @@ def plot_pcfm_diagnostics(
     aeff = np.array([system.fiber.effective_area_at(float(w)) for w in wl], dtype=float)
     fig, ax1 = plt.subplots(figsize=scale_figsize_to_ieee_column(3.6, 2.4))
     ax1.plot(freqs_thz, beta2 * 1e24, lw=0.8, color="tab:blue")
-    ax1.set_xlabel(r"$\mathnormal{f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
+    ax1.set_xlabel(r"${f \; [\mathrm{THz}]}$", fontsize=AXIS_LABEL_SIZE)
     ax1.set_ylabel(
-        r"$\mathnormal{\beta_2\;[10^{-24}\,s^2/m]}$",
+        r"${\beta_2\;[10^{-24}\,s^2/m]}$",
         color="tab:blue",
         fontsize=AXIS_LABEL_SIZE,
     )
@@ -663,7 +696,7 @@ def plot_pcfm_diagnostics(
     ax2 = ax1.twinx()
     ax2.plot(freqs_thz, aeff * 1e12, lw=0.8, color="tab:orange")
     ax2.set_ylabel(
-        r"$\mathnormal{A_{eff}\;[\mu m^2]}$",
+        r"${A_{eff}\;[\mu m^2]}$",
         color="tab:orange",
         fontsize=AXIS_LABEL_SIZE,
     )
@@ -779,7 +812,7 @@ def plot_band_dgd_gvd_histograms(
 
     ax_dgd.set_xscale("log")
     _set_plain_log_ticks(ax_dgd)
-    ax_dgd.set_xlabel(r"$\mathnormal{L/L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax_dgd.set_xlabel(r"${L/L_W}$", fontsize=AXIS_LABEL_SIZE)
     ax_dgd.set_ylabel("channel-pair count", fontsize=AXIS_LABEL_SIZE)
     ax_dgd.grid(False)
     _ordered_legend(ax_dgd, [], loc="upper left", fontsize=LEGEND_SIZE, framealpha=0.85)
@@ -811,7 +844,7 @@ def plot_band_dgd_gvd_histograms(
 
     ax_gvd.set_xscale("log")
     _set_plain_log_ticks(ax_gvd)
-    ax_gvd.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
+    ax_gvd.set_xlabel(r"${L/L_D}$", fontsize=AXIS_LABEL_SIZE)
     ax_gvd.set_ylabel("channel count", fontsize=AXIS_LABEL_SIZE)
     ax_gvd.grid(False)
     _ordered_legend(ax_gvd, [], loc="upper left", fontsize=LEGEND_SIZE, framealpha=0.85)
@@ -834,8 +867,8 @@ def plot_band_dgd_gvd_histograms(
                 rasterized=True,
             )
     ax_2d.set_aspect("equal")
-    ax_2d.set_xlabel(r"$\mathnormal{L/L_{Da}}$", fontsize=AXIS_LABEL_SIZE)
-    ax_2d.set_ylabel(r"$\mathnormal{L/L_{Db}}$", fontsize=AXIS_LABEL_SIZE)
+    ax_2d.set_xlabel(r"${L/L_{Da}}$", fontsize=AXIS_LABEL_SIZE)
+    ax_2d.set_ylabel(r"${L/L_{Db}}$", fontsize=AXIS_LABEL_SIZE)
     ax_2d.grid(False)
     _ordered_legend(
         ax_2d, [], loc="upper left", bbox_to_anchor=(1.02, 1),
@@ -881,8 +914,8 @@ def plot_band_dgd_gvd_histograms(
     ax_lw.set_xscale("log")
     ax_lw.set_yscale("log")
     _set_plain_log_ticks(ax_lw)
-    ax_lw.set_xlabel(r"$\mathnormal{L_{Da} / L_W}$", fontsize=AXIS_LABEL_SIZE)
-    ax_lw.set_ylabel(r"$\mathnormal{L_{Db} / L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax_lw.set_xlabel(r"${L_{Da} / L_W}$", fontsize=AXIS_LABEL_SIZE)
+    ax_lw.set_ylabel(r"${L_{Db} / L_W}$", fontsize=AXIS_LABEL_SIZE)
     ax_lw.grid(False)
     _ordered_legend(
         ax_lw, [], loc="upper left", bbox_to_anchor=(1.02, 1),
