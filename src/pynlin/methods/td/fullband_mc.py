@@ -6,9 +6,8 @@ import numpy as np
 
 from pynlin.methods.td.fwm_kernel import FWMChannels
 from pynlin.methods.td.fwm_mc import estimate_fwm_term_sum_dar_mc
-from pynlin.methods.td.xhkm_mc import estimate_xhkm_sums_mc
 from pynlin.system import System
-from pynlin.utils import lambda2nu
+from pynlin.utils import lambda2nu, nu2lambda
 
 
 @dataclass(frozen=True)
@@ -69,6 +68,39 @@ def decimated_frequency_grid(system: System, factor: int = 1) -> tuple[np.ndarra
     if indices.size == 0:
         raise ValueError("decimation removed all channels")
     return indices, freqs[indices]
+
+
+def effective_area_grid(system: System, freqs: np.ndarray) -> np.ndarray:
+    """Return per-frequency effective area in m^2."""
+    freqs = np.asarray(freqs, dtype=float).reshape(-1)
+    wavelengths = np.asarray(nu2lambda(freqs), dtype=float)
+    fiber = system.fiber
+    if hasattr(fiber, "effective_area_at"):
+        return np.asarray([float(fiber.effective_area_at(float(wl))) for wl in wavelengths], dtype=float)
+    aeff = getattr(fiber, "effective_area", None)
+    if aeff is None:
+        aeff = system.effective_area
+    return np.full(freqs.size, float(aeff), dtype=float)
+
+
+def gamma_grid(system: System, freqs: np.ndarray) -> np.ndarray:
+    """Return per-frequency nonlinear coefficient using Aeff and carrier frequency.
+
+    The scalar fiber.gamma is treated as the reference value at the fiber's
+    scalar effective area and at the mean requested frequency. Frequency-
+    dependent Aeff then scales gamma as gamma(f) proportional to f / Aeff(f).
+    """
+    freqs = np.asarray(freqs, dtype=float).reshape(-1)
+    gamma_ref = float(getattr(system.fiber, "gamma", 1.3e-3))
+    aeff = effective_area_grid(system, freqs)
+    aeff_ref = float(getattr(system.fiber, "effective_area", np.nan))
+    if not np.isfinite(aeff_ref) or aeff_ref <= 0.0:
+        aeff_ref = float(np.nanmedian(aeff))
+    aeff = np.maximum(aeff, np.finfo(float).tiny)
+    freq_ref = float(np.nanmean(freqs))
+    if not np.isfinite(freq_ref) or freq_ref <= 0.0:
+        freq_ref = 1.0
+    return gamma_ref * (freqs / freq_ref) * (aeff_ref / aeff)
 
 
 def _beta0_offsets_from_fiber(system: System, freqs: np.ndarray, target: int, beta1: np.ndarray) -> np.ndarray:
@@ -228,6 +260,57 @@ def _propagator_abs2(delta_beta: np.ndarray, length: float, alpha: float) -> np.
         np.exp((1j * delta_beta[~near_zero] - float(alpha)) * float(length)) - 1.0
     ) / denom[~near_zero]
     return np.abs(out) ** 2
+
+
+def estimate_xpm_n1_local_taylor_mc(
+    *,
+    beta0_offsets: np.ndarray,
+    beta1: np.ndarray,
+    beta2: np.ndarray,
+    baud_rate: float,
+    length: float,
+    target: int,
+    interferer: int,
+    n_samples: int,
+    seed: int,
+    alpha: float = 0.0,
+) -> tuple[float, float]:
+    """Estimate the XPM N1 term using channel-local propagation constants.
+
+    This is the two-channel analogue of the FWM frequency-domain estimator:
+    sampled local frequencies are propagated with the target and interferer
+    channel Taylor coefficients instead of collapsing the pair to one beta2.
+    """
+    n_samples = int(n_samples)
+    if n_samples <= 0:
+        raise ValueError("n_samples must be positive")
+    rng = np.random.default_rng(seed)
+    r = 2.0 * np.pi * (rng.random((3, n_samples)) - 0.5)
+    omega_target_in = r[0] * float(baud_rate)
+    omega_interferer_1 = r[1] * float(baud_rate)
+    omega_interferer_2 = r[2] * float(baud_rate)
+    omega_target_out_norm = r[0] - r[1] + r[2]
+    mask = (omega_target_out_norm > -np.pi) & (omega_target_out_norm < np.pi)
+    omega_target_out = omega_target_out_norm * float(baud_rate)
+
+    t = int(target)
+    b = int(interferer)
+    delta_beta = (
+        beta1[t] * omega_target_out
+        + 0.5 * beta2[t] * omega_target_out**2
+        + beta0_offsets[b]
+        + beta1[b] * omega_interferer_1
+        + 0.5 * beta2[b] * omega_interferer_1**2
+        - beta1[t] * omega_target_in
+        - 0.5 * beta2[t] * omega_target_in**2
+        - beta0_offsets[b]
+        - beta1[b] * omega_interferer_2
+        - 0.5 * beta2[b] * omega_interferer_2**2
+    )
+    values = _propagator_abs2(delta_beta, length, alpha) * mask
+    mean = float(np.mean(values))
+    stderr = float(np.std(values, ddof=1) / np.sqrt(values.size)) if values.size > 1 else 0.0
+    return mean, stderr
 
 
 def estimate_target_fwm_joint_reservoir_mc(
@@ -404,8 +487,6 @@ def compute_fullband_prefactor_free_mc(
     beta1_grid, beta2_grid = system.beta_grids(freqs=freqs)
     beta1 = np.asarray(beta1_grid[0], dtype=float)
     beta2 = np.asarray(beta2_grid[0], dtype=float)
-    beta2_ref = float(np.median(beta2))
-    beta2_norm = beta2_ref / (1.0 / baud_rate) ** 2
 
     if target_indices is None:
         targets = np.arange(freqs.size, dtype=int)
@@ -429,17 +510,19 @@ def compute_fullband_prefactor_free_mc(
             for b in range(freqs.size):
                 if b == target:
                     continue
-                q = abs(float(freqs[b] - freqs[target])) / baud_rate
-                est = estimate_xhkm_sums_mc(
-                    beta2=beta2_norm,
+                est, _ = estimate_xpm_n1_local_taylor_mc(
+                    beta0_offsets=beta0_offsets,
+                    beta1=beta1,
+                    beta2=beta2,
+                    baud_rate=baud_rate,
                     alpha=0.0,
                     length=length,
-                    channel_spacing_over_baud=q,
                     n_samples=xpm_samples,
+                    target=int(target),
+                    interferer=int(b),
                     seed=seed + 10_000 * int(target) + int(b),
-                    system=system,
                 )
-                xpm[out_i] += est.n1
+                xpm[out_i] += est
 
         if include_fwm and fwm_tuple_selection == "exhaustive_support_mc":
             estimate, _, survivor_count, sampled_count = estimate_target_fwm_exhaustive_support_mc(
@@ -534,6 +617,8 @@ def compute_fullband_prefactor_free_mc(
             "baud_rate": baud_rate,
             "length": length,
             "zdw_frequency": estimate_zdw_frequency(system),
+            "gamma_model": "gamma_ref * (f/f_ref) * (Aeff_ref/Aeff(f))",
+            "xpm_beta_model": "channel_local_beta0_beta1_beta2",
             "xpm_samples": int(xpm_samples),
             "fwm_samples": int(fwm_samples),
             "seed": int(seed),
@@ -550,10 +635,13 @@ __all__ = [
     "FullbandMCDiagnostic",
     "compute_fullband_prefactor_free_mc",
     "decimated_frequency_grid",
+    "effective_area_grid",
     "estimate_zdw_frequency",
     "estimate_target_fwm_joint_reservoir_mc",
     "estimate_target_fwm_exhaustive_support_mc",
+    "estimate_xpm_n1_local_taylor_mc",
     "fwm_support_survives",
+    "gamma_grid",
     "collect_support_pruned_fwm_tuples",
     "iter_support_pruned_fwm_tuples",
 ]

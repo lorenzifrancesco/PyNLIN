@@ -8,6 +8,7 @@ from loguru import logger as lg
 from scipy.constants import speed_of_light as c0
 
 from pynlin.system import System
+from pynlin.methods.td.fullband_mc import gamma_grid
 from pynlin.utils import _toml_load
 
 _DEFAULT_GNLSE_NLI_PY = Path("/home/lorenzi/sw/gnlse-python/examples/nli/nli.py")
@@ -175,7 +176,7 @@ def _build_ssfm_runtime_config(
     fiber["wavelength_nm"] = float((c0 / center_freq) * 1e9)
     fiber["fiber_length_m"] = float(system.fiber_length)
 
-    gamma_raw = float(getattr(system.fiber, "gamma", 1.3e-3))
+    gamma_raw = float(gamma_grid(system, np.asarray([center_freq], dtype=float))[0])
     gamma_scaled = gamma_raw * (8.0 / 9.0)
     fiber["nonlinearity"] = gamma_scaled
     lg.warning(

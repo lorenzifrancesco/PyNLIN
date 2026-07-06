@@ -6,13 +6,14 @@ import numpy as np
 
 from analysis.config import MCMethodConfig, PCFMMethodConfig, TDMethodConfig
 from analysis.methods.io import _launch_referenced_nlin_to_output_power
-from analysis.methods.models import _load_or_compute_pcfm_I, _load_or_compute_pcfm_general
+from analysis.methods.models import _load_or_compute_fullband_mc, _load_or_compute_pcfm_I, _load_or_compute_pcfm_general
 from analysis.runtime.cache import method_cache_tag, td_cache_path
 from analysis.runtime.context import RunContext
 from pynlin.constellation_stats import qam_mu0
 from pynlin.methods.mc import compute_chi1_chi2, nlin_from_chi
 from pynlin.methods.pcfm import PcfmConfig
 from pynlin.methods.td.estimator import collision_coeffs_system_uwb, total_nlin_uwb
+from pynlin.methods.td.fullband_mc import FullbandMCDiagnostic, gamma_grid
 
 
 @dataclass(frozen=True)
@@ -138,3 +139,57 @@ def run_mc(context: RunContext, td: TDResult, td_config: TDMethodConfig, config:
         context.output_over_launch_ratio,
     )
     return MCResult(chi1, chi2, prefactor, nlin_16qam_output)
+
+
+@dataclass(frozen=True)
+class FullbandMCResult:
+    diagnostic: FullbandMCDiagnostic
+    nlin_output_w: np.ndarray
+
+
+def _fullband_mc_estimate_nlin(
+    system, diagnostic: FullbandMCDiagnostic, launch_powers_w: np.ndarray
+) -> np.ndarray:
+    """Rough NLIN estimate from prefactor-free fullband MC total.
+
+    N_j ≈ (16/81) * gamma² * P_j * P_avg * S_j
+    where S_j = XPM_j + FWM_j is the prefactor-free sum.
+    """
+    freqs = np.asarray(system.wdm.frequency_grid(), dtype=float)
+    gamma = gamma_grid(system, freqs)
+    mean_launch = float(np.mean(launch_powers_w))
+    nlin = np.zeros_like(diagnostic.total, dtype=float)
+    for i, grid_idx in enumerate(diagnostic.target_indices):
+        P_j = float(launch_powers_w[grid_idx])
+        kappa2 = float(gamma[int(grid_idx)]) ** 2 * (16.0 / 81.0)
+        nlin[i] = kappa2 * P_j * mean_launch * float(diagnostic.total[i])
+    return np.asarray(nlin, dtype=float)
+
+
+def run_fullband_mc(
+    context: RunContext, config: MCMethodConfig, *, cache_scope: str
+) -> FullbandMCResult:
+    cache_tag = method_cache_tag(
+        cache_scope, context.cache_tag,
+        f"dec{config.channel_decimation}",
+        f"td{config.target_decimation}_to{config.target_offset}",
+        f"xpm{config.xpm_samples}_fwm{config.fwm_samples}",
+        f"sel{config.fwm_tuple_selection}",
+    )
+    diagnostic = _load_or_compute_fullband_mc(
+        context.system,
+        output_path=context.out_dir / f"fullband_mc_{cache_tag}.npz",
+        channel_decimation=config.channel_decimation,
+        xpm_samples=config.xpm_samples,
+        fwm_samples=config.fwm_samples,
+        seed=config.seed,
+        max_fwm_tuples_per_target=config.max_fwm_tuples_per_target,
+        fwm_tuple_selection=config.fwm_tuple_selection,
+        recompute=config.mode == "recompute",
+    )
+    launch_nlin = _fullband_mc_estimate_nlin(context.system, diagnostic, context.launch_powers_w)
+    output_nlin = _launch_referenced_nlin_to_output_power(
+        launch_nlin,
+        context.output_over_launch_ratio[diagnostic.target_indices],
+    )
+    return FullbandMCResult(diagnostic, output_nlin)
