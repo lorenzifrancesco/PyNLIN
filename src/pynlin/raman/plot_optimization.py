@@ -100,8 +100,8 @@ def plot_profiles(signal_wavelengths,
     pass
     if plot_title:
         plt.title(plot_title)
-    plt.ylabel(r"$\mathnormal P$ [dBm]")
-    plt.xlabel(r"$\mathnormal z$ [km]")
+    plt.ylabel(r"$ P$ [dBm]")
+    plt.xlabel(r"$ z$ [km]")
     plt.ylim(bottom=-70)
     # plt.legend()
     plt.tight_layout()
@@ -140,8 +140,8 @@ def plot_profiles(signal_wavelengths,
                 plt.plot(z_plot,
                          watt2dBm(pump_solution[:, :, i]), color=cmap(i / cf.n_modes + 0.2), alpha=0.2)
         plt.grid(False)
-        plt.ylabel(r"$\mathnormal P$ [dBm]")
-        plt.xlabel(r"$\mathnormal z$ [km]")
+        plt.ylabel(r"$ P$ [dBm]")
+        plt.xlabel(r"$ z$ [km]")
         plt.ylim(bottom=-70)
         # plt.legend()
         plt.tight_layout()
@@ -167,7 +167,7 @@ def plot_profiles(signal_wavelengths,
                  color=cmap(i / cf.n_modes + 0.2))
     plt.legend()
     plt.axhline(on_off_gain, ls="--", color="black")
-    plt.xlabel(r"$\mathnormal \lambda$ [$\mu$ m]")
+    plt.xlabel(r"$ \lambda$ [$\mu$ m]")
     plt.ylabel("On Off Gain [dB]")
     plt.tight_layout()
     name = get_next_filename(

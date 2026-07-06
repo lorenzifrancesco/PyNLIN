@@ -635,7 +635,7 @@ def plot_case_study_noise(
             linewidths=scatter_lw,
             label=labels[i],
         )
-    ax_snr.set_xlabel(r'$\mathnormal{f} \; [\mathrm{THz}]$')
+    ax_snr.set_xlabel(r'${f} \; [\mathrm{THz}]$')
     ax_snr.set_ylabel(r'$\mathrm{SNR}\;[\mathrm{dB}]$')
     ax_snr.grid(grid)
     _nudge_offset(ax_snr)

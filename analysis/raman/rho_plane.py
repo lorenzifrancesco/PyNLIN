@@ -485,8 +485,8 @@ def main() -> None:
     delta_beta = beta1 + beta2 - beta3 - beta0
     i1 = int(np.argmin(np.abs(omega1)))
     i2 = int(np.argmin(np.abs(omega2)))
-    _log_axis_phase_match(r"$\mathnormal f_1=0$", omega2, delta_beta[:, i1])
-    _log_axis_phase_match(r"$\mathnormal f_2=0$", omega1, delta_beta[i2, :])
+    _log_axis_phase_match(r"$ f_1=0$", omega2, delta_beta[:, i1])
+    _log_axis_phase_match(r"$ f_2=0$", omega1, delta_beta[i2, :])
     if args.rho_model == "attenuation":
         rho = rho_attenuation(alpha_s, delta_beta, fiber.length)
     else:
@@ -497,7 +497,7 @@ def main() -> None:
     if np.any(~np.isfinite(rho)):
         lg.warning("rho contains non-finite values ({} / {}).", np.sum(~np.isfinite(rho)), rho.size)
 
-    base_label = r"$\mathnormal \rho$"
+    base_label = r"$ \rho$"
     if args.db:
         rho_plot = 10.0 * np.log10(np.maximum(rho, args.db_floor))
         cbar_label = base_label + " [dB]"
@@ -533,12 +533,12 @@ def main() -> None:
             cmap="nipy_spectral",
         )
         ax_anim.set_aspect("equal", adjustable="box")
-        ax_anim.set_xlabel(r"$\mathnormal \Delta f_1$ [THz]")
-        ax_anim.set_ylabel(r"$\mathnormal \Delta f_2$ [THz]")
+        ax_anim.set_xlabel(r"$ \Delta f_1$ [THz]")
+        ax_anim.set_ylabel(r"$ \Delta f_2$ [THz]")
         txt_anim = ax_anim.text(
             0.02,
             0.98,
-            rf"$\mathnormal{{f}} = {f_center0:.0f}\,\mathrm{{THz}}$",
+            rf"${{f}} = {f_center0:.0f}\,\mathrm{{THz}}$",
             transform=ax_anim.transAxes,
             ha="left",
             va="top",
@@ -562,7 +562,7 @@ def main() -> None:
             im_anim.set_extent(extent_frame)
             ax_anim.set_xlim(extent_frame[0], extent_frame[1])
             ax_anim.set_ylim(extent_frame[2], extent_frame[3])
-            txt_anim.set_text(rf"$\mathnormal{{f}} = {f_center_frame:.0f}\,\mathrm{{THz}}$")
+            txt_anim.set_text(rf"${{f}} = {f_center_frame:.0f}\,\mathrm{{THz}}$")
             if args.db:
                 finite_frame = rho_frame[np.isfinite(rho_frame)]
                 if finite_frame.size:
@@ -630,8 +630,8 @@ def main() -> None:
             )
             lg.info("Plotted channel grid with {:.3f} GHz spacing ({} points).", spacing_thz * 1000.0, n_points)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel(r"$\mathnormal f_1$ [THz]")
-    ax.set_ylabel(r"$\mathnormal f_2$ [THz]")
+    ax.set_xlabel(r"$ f_1$ [THz]")
+    ax.set_ylabel(r"$ f_2$ [THz]")
     f_center_thz = omega_center / (2.0 * np.pi * 1e12)
     lg.info("Center absolute frequency at f={:.0f} THz.", f_center_thz)
     # line_color = "cyan"
@@ -649,7 +649,7 @@ def main() -> None:
     ax.text(
         0.02,
         0.98,
-        rf"$\mathnormal{{f}} = {f_center_thz:.0f}\,\mathrm{{THz}}$",
+        rf"${{f}} = {f_center_thz:.0f}\,\mathrm{{THz}}$",
         transform=ax.transAxes,
         ha="left",
         va="top",
@@ -741,10 +741,10 @@ def main() -> None:
         rho_f1 = _rho_line(_delta_beta_line(np.zeros_like(omega2_axis), omega2_axis))
         rho_f2 = _rho_line(_delta_beta_line(omega1_axis, np.zeros_like(omega1_axis)))
         fig_diag, ax_diag = plt.subplots()
-        ax_diag.plot(f_diag_thz, rho_diag[valid], label=r"$\mathnormal f_1+f_2=0$")
-        ax_diag.plot(f2_thz, rho_f1, label=r"$\mathnormal f_1=0$")
-        ax_diag.plot(f1_thz, rho_f2, label=r"$\mathnormal f_2=0$")
-        ax_diag.set_xlabel(r"$\mathnormal f$ [THz]")
+        ax_diag.plot(f_diag_thz, rho_diag[valid], label=r"$ f_1+f_2=0$")
+        ax_diag.plot(f2_thz, rho_f1, label=r"$ f_1=0$")
+        ax_diag.plot(f1_thz, rho_f2, label=r"$ f_2=0$")
+        ax_diag.set_xlabel(r"$ f$ [THz]")
         ax_diag.set_ylabel(cbar_label)
         ax_diag.legend(fontsize=8)
         fig_diag.tight_layout()
@@ -802,10 +802,10 @@ def main() -> None:
 
             f_check_thz = omega_grid_check / (2.0 * np.pi * 1e12)
             fig_cmp, ax_cmp = plt.subplots()
-            ax_cmp.plot(f_diag_thz, delta_diag_valid, label=r"$\mathnormal \Delta\beta$ (diag)")
-            ax_cmp.plot(f_check_thz, delta_threewave, ls="--", label=r"$\mathnormal \Delta\beta$ (3-wave)")
-            ax_cmp.set_xlabel(r"$\mathnormal f$ [THz]")
-            ax_cmp.set_ylabel(r"$\mathnormal \Delta\beta$ [1/m]")
+            ax_cmp.plot(f_diag_thz, delta_diag_valid, label=r"$ \Delta\beta$ (diag)")
+            ax_cmp.plot(f_check_thz, delta_threewave, ls="--", label=r"$ \Delta\beta$ (3-wave)")
+            ax_cmp.set_xlabel(r"$ f$ [THz]")
+            ax_cmp.set_ylabel(r"$ \Delta\beta$ [1/m]")
             ax_cmp.legend(fontsize=8)
             fig_cmp.tight_layout()
             out_cmp = out_path.with_name(out_path.stem + "_deltabeta_diag_compare" + out_path.suffix)

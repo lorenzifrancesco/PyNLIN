@@ -544,16 +544,16 @@ def main() -> None:
         f_xlim_max_thz = f_max_ghz / 1000.0
     plt.figure()
     if args.rho_model == "attenuation":
-        label3 = r"$\mathnormal \rho_{3\mathrm{-waves},\mathrm{att}}$"
+        label3 = r"$ \rho_{3\mathrm{-waves},\mathrm{att}}$"
     else:
-        label3 = r"$\mathnormal \rho_{3\mathrm{-waves}}$"
+        label3 = r"$ \rho_{3\mathrm{-waves}}$"
     if args.logy:
         plt.semilogy(f_ghz, rho3, label=label3)
     else:
         plt.plot(f_ghz, rho3, label=label3)
     plt.axvline(0.0, color="0.7", lw=1.0, ls="--")
-    plt.xlabel(r"$\mathnormal \Delta f_1 = \Delta f_2$ [GHz]")
-    plt.ylabel(r"$\mathnormal \rho$")
+    plt.xlabel(r"$ \Delta f_1 = \Delta f_2$ [GHz]")
+    plt.ylabel(r"$ \rho$")
     plt.xlim(f_xlim_min_ghz, f_xlim_max_ghz)
     plt.tight_layout()
 
@@ -571,30 +571,30 @@ def main() -> None:
         gridspec_kw={"height_ratios": [2.0, 1.0, 1.0]},
         figsize=(3.5, 4.2),
     )
-    ax2.plot(f_thz, delta_beta_3_exact, label=r"$\mathnormal \Delta\beta_{3\mathrm{-waves}}$ (exact)")
+    ax2.plot(f_thz, delta_beta_3_exact, label=r"$ \Delta\beta_{3\mathrm{-waves}}$ (exact)")
     ax2.plot(
         f_thz,
         delta_beta_3_quad,
         lw=1.0,
         ls="--",
-        label=r"$\mathnormal \Delta\beta_{3\mathrm{-waves}}$ ($\beta_2\Omega^2$)",
+        label=r"$ \Delta\beta_{3\mathrm{-waves}}$ ($\beta_2\Omega^2$)",
     )
     ax2.axhline(0.0, color="0.7", lw=1.0, ls="--")
-    ax2.set_xlabel(r"$\mathnormal f$ [THz]")
-    ax2.set_ylabel(r"$\mathnormal \Delta\beta$ [1/m]")
+    ax2.set_xlabel(r"$ f$ [THz]")
+    ax2.set_ylabel(r"$ \Delta\beta$ [1/m]")
     ax2.set_xlim(f_xlim_min_thz, f_xlim_max_thz)
     ax2.legend(fontsize=8)
 
     ax2_alpha.plot(f_thz, alpha_eff_db_m)
-    ax2_alpha.set_xlabel(r"$\mathnormal f$ [THz]")
-    ax2_alpha.set_ylabel(r"$\mathnormal \alpha$ [dB/m]")
+    ax2_alpha.set_xlabel(r"$ f$ [THz]")
+    ax2_alpha.set_ylabel(r"$ \alpha$ [dB/m]")
     ax2_alpha.set_xlim(f_xlim_min_thz, f_xlim_max_thz)
 
     ratio_mask = np.isfinite(f_thz) & np.isfinite(ratio_alpha)
     if np.any(ratio_mask):
         ax2_ratio.plot(f_thz[ratio_mask], ratio_alpha[ratio_mask])
-    ax2_ratio.set_xlabel(r"$\mathnormal f$ [THz]")
-    ax2_ratio.set_ylabel(r"$|\mathnormal \Delta\beta|/(2\alpha(f))$")
+    ax2_ratio.set_xlabel(r"$ f$ [THz]")
+    ax2_ratio.set_ylabel(r"$| \Delta\beta|/(2\alpha(f))$")
     ax2_ratio.set_xlim(f_xlim_min_thz, f_xlim_max_thz)
     fig2.tight_layout()
     out_beta = out_path.with_name(out_path.stem + "_deltabeta3-waves" + out_path.suffix)
@@ -650,9 +650,9 @@ def main() -> None:
     fig_ob, (ax_ob, ax_ob_diff) = plt.subplots(
         nrows=2, sharex=True, gridspec_kw={"height_ratios": [2.0, 1.0]}
     )
-    ax_ob.plot(freq_thz, beta_real, label=r"$\mathnormal \beta(\omega)$")
+    ax_ob.plot(freq_thz, beta_real, label=r"$ \beta(\omega)$")
     if beta_lin is not None:
-        ax_ob.plot(freq_thz, beta_lin, lw=1.0, ls="--", label=r"$\mathnormal \beta_{\mathrm{lin}}$")
+        ax_ob.plot(freq_thz, beta_lin, lw=1.0, ls="--", label=r"$ \beta_{\mathrm{lin}}$")
     ax_ob.axvline(f0_thz, color="0.5", lw=1.0, ls=":", label="ZDW")
     chan_freqs_thz = None
     try:
@@ -689,7 +689,7 @@ def main() -> None:
             fontsize=8,
         )
         lg.info("O-band plot includes {} channels.", ch_in.size)
-    ax_ob.set_ylabel(r"$\mathnormal \beta$ [1/m]")
+    ax_ob.set_ylabel(r"$ \beta$ [1/m]")
     if x_limits is not None:
         ax_ob.set_xlim(*x_limits)
     ax_ob.legend(fontsize=8)
@@ -758,11 +758,11 @@ def main() -> None:
         cmap=cmap_ob,
         norm=norm_b2,
     )
-    ax_b2map.set_xlabel(r"$\mathnormal f_{\mathrm{ref}}$ [THz]")
-    ax_b2map.set_ylabel(r"$\mathnormal f_{\mathrm{other}}$ [THz]")
-    ax_b2map.set_title(r"$\mathnormal \beta_2(f_{\mathrm{ref}})\,(f_{\mathrm{other}}-f_{\mathrm{ref}})^2$")
+    ax_b2map.set_xlabel(r"$ f_{\mathrm{ref}}$ [THz]")
+    ax_b2map.set_ylabel(r"$ f_{\mathrm{other}}$ [THz]")
+    ax_b2map.set_title(r"$ \beta_2(f_{\mathrm{ref}})\,(f_{\mathrm{other}}-f_{\mathrm{ref}})^2$")
     ax_b2map.set_aspect("equal", adjustable="box")
-    fig_b2.colorbar(cf, ax=ax_b2map, label=r"$\mathnormal \beta_2(\Delta f)^2$ [1/m]")
+    fig_b2.colorbar(cf, ax=ax_b2map, label=r"$ \beta_2(\Delta f)^2$ [1/m]")
     fig_b2.tight_layout()
     out_b2 = out_path.with_name(out_path.stem + f"_{band_label.lower()}band_beta2_deltaf" + out_path.suffix)
     fig_b2.savefig(out_b2, dpi=200, bbox_inches="tight")
@@ -802,41 +802,41 @@ def main() -> None:
         cmap=cmap_ob,
         norm=norm_db3,
     )
-    ax_db3.set_xlabel(r"$\mathnormal f_{\mathrm{ref}}$ [THz]")
-    ax_db3.set_ylabel(r"$\mathnormal f_{\mathrm{other}}$ [THz]")
-    ax_db3.set_title(r"$\mathnormal \Delta\beta_{3\mathrm{-waves}}$ (exact)")
+    ax_db3.set_xlabel(r"$ f_{\mathrm{ref}}$ [THz]")
+    ax_db3.set_ylabel(r"$ f_{\mathrm{other}}$ [THz]")
+    ax_db3.set_title(r"$ \Delta\beta_{3\mathrm{-waves}}$ (exact)")
     ax_db3.set_aspect("equal", adjustable="box")
-    fig_db3.colorbar(cf_db3, ax=ax_db3, label=r"$\mathnormal \Delta\beta$ [1/m]")
+    fig_db3.colorbar(cf_db3, ax=ax_db3, label=r"$ \Delta\beta$ [1/m]")
     fig_db3.tight_layout()
     out_db3 = out_path.with_name(out_path.stem + f"_{band_label.lower()}band_deltabeta3_exact" + out_path.suffix)
     fig_db3.savefig(out_db3, dpi=200, bbox_inches="tight")
     lg.info("Saved {}-band delta-beta3 exact contour to {}", band_label, out_db3)
 
     fig_diag, (ax_b1, ax_b2) = plt.subplots(nrows=2, sharex=True)
-    ax_b1.plot(freq_full_thz, beta1_num * 1e12, label=r"$\mathnormal d\beta/d\omega$")
+    ax_b1.plot(freq_full_thz, beta1_num * 1e12, label=r"$ d\beta/d\omega$")
     if beta1_prof is not None:
         ax_b1.plot(
             freq_full_thz,
             np.asarray(beta1_prof, dtype=float)[order_full] * 1e12,
             lw=1.0,
             ls="--",
-            label=r"$\mathnormal \beta_1$ profile",
+            label=r"$ \beta_1$ profile",
         )
-    ax_b1.set_ylabel(r"$\mathnormal \beta_1$ [ps/m]")
+    ax_b1.set_ylabel(r"$ \beta_1$ [ps/m]")
     ax_b1.legend(fontsize=8)
 
-    ax_b2.plot(freq_full_thz, beta2_num * 1e27, label=r"$\mathnormal d^2\beta/d\omega^2$")
+    ax_b2.plot(freq_full_thz, beta2_num * 1e27, label=r"$ d^2\beta/d\omega^2$")
     if beta2_prof is not None:
         ax_b2.plot(
             freq_full_thz,
             np.asarray(beta2_prof, dtype=float)[order_full] * 1e27,
             lw=1.0,
             ls="--",
-            label=r"$\mathnormal \beta_2$ profile",
+            label=r"$ \beta_2$ profile",
         )
     ax_b2.axhline(0.0, color="0.7", lw=1.0, ls="--")
     ax_b2.set_xlabel("Frequency [THz]")
-    ax_b2.set_ylabel(r"$\mathnormal \beta_2$ [ps$^2$/km]")
+    ax_b2.set_ylabel(r"$ \beta_2$ [ps$^2$/km]")
     ax_b2.legend(fontsize=8)
     fig_diag.tight_layout()
     out_diag = out_path.with_name(out_path.stem + "_dispersion_diag" + out_path.suffix)
@@ -845,8 +845,8 @@ def main() -> None:
 
     fig_sig, ax_sig = plt.subplots()
     ax_sig.plot(z_grid, signal_profile)
-    ax_sig.set_xlabel(r"$\mathnormal z$ [m]")
-    ax_sig.set_ylabel(r"$\mathnormal P_s$ [W]")
+    ax_sig.set_xlabel(r"$ z$ [m]")
+    ax_sig.set_ylabel(r"$ P_s$ [W]")
     fig_sig.tight_layout()
     out_sig = out_path.with_name(out_path.stem + "_signal_profile" + out_path.suffix)
     fig_sig.savefig(out_sig, dpi=200, bbox_inches="tight")

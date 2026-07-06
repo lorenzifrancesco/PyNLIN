@@ -354,10 +354,10 @@ class System:
         pump_powers_dbm = np.array([p.power_dbm for p in pump_specs]) if pump_specs else np.array([])
 
         plt.figure()
-        plt.scatter(freqs * 1e-12, sig_powers_dbm, s=2 if tiny_markers else 6, alpha=0.6, label=r"signals") # $\mathnormal P(z=0)$")
+        plt.scatter(freqs * 1e-12, sig_powers_dbm, s=2 if tiny_markers else 6, alpha=0.6, label=r"signals") # $ P(z=0)$")
         if pump_powers_dbm.size:
-            plt.scatter(pump_freqs * 1e-12, pump_powers_dbm, marker="x", color="red", s=12, label=r"pumps") # $\mathnormal P(z=L)$")
-        plt.xlabel(r"$\mathnormal f$ [THz]")
+            plt.scatter(pump_freqs * 1e-12, pump_powers_dbm, marker="x", color="red", s=12, label=r"pumps") # $ P(z=L)$")
+        plt.xlabel(r"$ f$ [THz]")
         plt.ylabel(r" Launch power [dBm]")
         plt.grid(True, alpha=0.2)
         plt.legend(loc="best")

@@ -639,9 +639,9 @@ def main() -> None:
     for ax in axes[n_sel:]:
         ax.axis("off")
 
-    axes[0].set_ylabel(r"$\mathnormal P$ [dBm]")
+    axes[0].set_ylabel(r"$ P$ [dBm]")
     for ax in axes[-ncols:]:
-        ax.set_xlabel(r"$\mathnormal z$ [km]")
+        ax.set_xlabel(r"$ z$ [km]")
     if n_sel:
         axes[0].legend(loc="lower center", fontsize=8)
 
@@ -675,8 +675,8 @@ def main() -> None:
                 legend_labels=False,
             )
         _apply_ylim_padding(ax2, pad_top=0.22, pad_bottom=0.08)
-        ax2.set_ylabel(r"$\mathnormal P$ [dBm]")
-        ax2.set_xlabel(r"$\mathnormal z$ [km]")
+        ax2.set_ylabel(r"$ P$ [dBm]")
+        ax2.set_xlabel(r"$ z$ [km]")
         legend_handles = [
             Line2D([0], [0], color="0.5", lw=1.2, ls="-"),
             Line2D([0], [0], color="0.5", lw=1.2, ls="--"),
@@ -715,8 +715,8 @@ def main() -> None:
             pump_eq = pump_power_coprop(z, pump_in_eq, alpha_p_eq)
         ax3.plot(z / 1e3, _to_dbm(pump_eq), lw=0.55, ls="--", color="black", label="equiv pump (mid ch)")
 
-        ax3.set_xlabel(r"$\mathnormal z$ [km]")
-        ax3.set_ylabel(r"$\mathnormal P$ [dBm]")
+        ax3.set_xlabel(r"$ z$ [km]")
+        ax3.set_ylabel(r"$ P$ [dBm]")
         ax3.legend(loc="lower center", fontsize=8)
         out_pump = out_path.with_name(out_path.stem + "_pumps" + out_path.suffix)
         fig3.tight_layout()

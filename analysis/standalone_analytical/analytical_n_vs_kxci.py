@@ -364,7 +364,7 @@ def _comparison_figure(
         y_k,
         color=COLOR_KXCI,
         linestyle="--",
-        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$",
+        label=r"${\mathcal{N}^{(\mathrm{PCFM-I})}}$",
     )
     if show_kxci_alternative:
         _plot_pcfm_style_line(
@@ -373,7 +373,7 @@ def _comparison_figure(
             y_k_eq18,
             color=COLOR_KXCI_EQ18,
             linestyle="-.",
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$",
+            label=r"${\mathcal{N}^{(\mathrm{PCFM-II})}}$",
         )
     if attenuation is not None:
         _plot_pcfm_style_line(
@@ -382,7 +382,7 @@ def _comparison_figure(
             attenuation["y_n"],
             color=COLOR_N,
             linestyle=ATTENUATED_LINESTYLE,
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$ att.",
+            label=r"${\mathcal{N}^{(\mathrm{TD})}}$ att.",
         )
         _plot_pcfm_style_line(
             ax,
@@ -390,7 +390,7 @@ def _comparison_figure(
             attenuation["y_k"],
             color=COLOR_KXCI,
             linestyle=ATTENUATED_LINESTYLE,
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$ att.",
+            label=r"${\mathcal{N}^{(\mathrm{PCFM-I})}}$ att.",
         )
         if show_kxci_alternative:
             _plot_pcfm_style_line(
@@ -399,7 +399,7 @@ def _comparison_figure(
                 attenuation["y_k_eq18"],
                 color=COLOR_KXCI_EQ18,
                 linestyle=ATTENUATED_LINESTYLE,
-                label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$ att.",
+                label=r"${\mathcal{N}^{(\mathrm{PCFM-II})}}$ att.",
             )
     if show_unity_guides:
         ax.axvline(1.0, color="0.5", linestyle=":", linewidth=LINE_LW)
@@ -424,9 +424,9 @@ def _comparison_figure(
 
     _add_reference_y_ticks(ax)
 
-    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        r"$\mathcal{N}$ (normalized)" if normalize else r"$\mathcal{N}\,\mathnormal{T^2L^{-2}}$",
+        r"$\mathcal{N}$ (normalized)" if normalize else r"$\mathcal{N}\,{T^2L^{-2}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -487,7 +487,7 @@ def _ratio_figure(
         ratio,
         color=COLOR_KXCI,
         linestyle="--",
-        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$",
+        label=r"${\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$",
     )
     if ratio_eq18 is not None:
         _plot_pcfm_style_line(
@@ -496,7 +496,7 @@ def _ratio_figure(
             ratio_eq18,
             color=COLOR_KXCI_EQ18,
             linestyle="-.",
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$",
+            label=r"${\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$",
         )
     if attenuation is not None:
         _plot_pcfm_style_line(
@@ -505,7 +505,7 @@ def _ratio_figure(
             attenuation["ratio"],
             color=COLOR_KXCI,
             linestyle=ATTENUATED_LINESTYLE,
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$ att.",
+            label=r"${\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$ att.",
         )
         if ratio_eq18 is not None:
             _plot_pcfm_style_line(
@@ -514,14 +514,14 @@ def _ratio_figure(
                 attenuation["ratio_eq18"],
                 color=COLOR_KXCI_EQ18,
                 linestyle=ATTENUATED_LINESTYLE,
-                label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$ att.",
+                label=r"${\mathcal{N}^{(\mathrm{PCFM-II})}/\mathcal{N}^{(\mathrm{TD})}}$ att.",
             )
     if crossover is not None and np.isfinite(crossover):
         ax.axvline(crossover, color="0.35", linestyle="--", linewidth=LINE_LW)
     _style_axes(ax, loglog=loglog)
-    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM})}/\mathcal{N}^{(\mathrm{TD})}}$",
+        r"${\mathcal{N}^{(\mathrm{PCFM})}/\mathcal{N}^{(\mathrm{TD})}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -548,7 +548,7 @@ def _lld_sweep_figure(
         y_k,
         color=COLOR_KXCI,
         linestyle="--",
-        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$",
+        label=r"${\mathcal{N}^{(\mathrm{PCFM-I})}}$",
     )
     _plot_pcfm_style_line(
         ax,
@@ -556,7 +556,7 @@ def _lld_sweep_figure(
         y_k_eq18,
         color=COLOR_KXCI_EQ18,
         linestyle="-.",
-        label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$",
+        label=r"${\mathcal{N}^{(\mathrm{PCFM-II})}}$",
     )
     if attenuation is not None:
         _plot_pcfm_style_line(
@@ -565,7 +565,7 @@ def _lld_sweep_figure(
             attenuation["y_n"],
             color=COLOR_N,
             linestyle=ATTENUATED_LINESTYLE,
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$ att.",
+            label=r"${\mathcal{N}^{(\mathrm{TD})}}$ att.",
         )
         _plot_pcfm_style_line(
             ax,
@@ -573,7 +573,7 @@ def _lld_sweep_figure(
             attenuation["y_k"],
             color=COLOR_KXCI,
             linestyle=ATTENUATED_LINESTYLE,
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$ att.",
+            label=r"${\mathcal{N}^{(\mathrm{PCFM-I})}}$ att.",
         )
         _plot_pcfm_style_line(
             ax,
@@ -581,13 +581,13 @@ def _lld_sweep_figure(
             attenuation["y_k_eq18"],
             color=COLOR_KXCI_EQ18,
             linestyle=ATTENUATED_LINESTYLE,
-            label=r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$ att.",
+            label=r"${\mathcal{N}^{(\mathrm{PCFM-II})}}$ att.",
         )
     ax.set_xscale("log")
     if loglog:
         ax.set_yscale("log")
-    ax.set_xlabel(r"$\mathnormal{L/L_D}$", fontsize=AXIS_LABEL_SIZE)
-    ax.set_ylabel(r"$\mathnormal{\mathcal{N}\,T^2L^{-2}}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${L/L_D}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(r"${\mathcal{N}\,T^2L^{-2}}$", fontsize=AXIS_LABEL_SIZE)
     ax.grid(False)
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
     fig.tight_layout()
@@ -609,10 +609,10 @@ def _combined_comparison_figure(
         _shade_pre_unity_region(ax, x)
 
     for idx, case in enumerate(cases):
-        label_n = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$" if idx == 0 else "_nolegend_"
-        label_k = r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$" if idx == 0 else "_nolegend_"
+        label_n = r"${\mathcal{N}^{(\mathrm{TD})}}$" if idx == 0 else "_nolegend_"
+        label_k = r"${\mathcal{N}^{(\mathrm{PCFM-I})}}$" if idx == 0 else "_nolegend_"
         label_k_eq18 = (
-            r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$" if idx == 0 else "_nolegend_"
+            r"${\mathcal{N}^{(\mathrm{PCFM-II})}}$" if idx == 0 else "_nolegend_"
         )
         _plot_pcfm_style_line(
             ax,
@@ -642,10 +642,10 @@ def _combined_comparison_figure(
             arrays.append(case["y_k_eq18"])
         if case.get("attenuation") is not None:
             att = case["attenuation"]
-            label_att_n = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$ att." if idx == 0 else "_nolegend_"
-            label_att_k = r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}}$ att." if idx == 0 else "_nolegend_"
+            label_att_n = r"${\mathcal{N}^{(\mathrm{TD})}}$ att." if idx == 0 else "_nolegend_"
+            label_att_k = r"${\mathcal{N}^{(\mathrm{PCFM-I})}}$ att." if idx == 0 else "_nolegend_"
             label_att_k_eq18 = (
-                r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-II})}}$ att." if idx == 0 else "_nolegend_"
+                r"${\mathcal{N}^{(\mathrm{PCFM-II})}}$ att." if idx == 0 else "_nolegend_"
             )
             _plot_pcfm_style_line(
                 ax,
@@ -684,9 +684,9 @@ def _combined_comparison_figure(
         pad = 0.06 * (ymax - ymin) if ymax > ymin else 0.1
         ax.set_ylim(ymin - pad, ymax + pad)
 
-    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        r"$\mathcal{N}$ (normalized)" if normalize else r"$\mathcal{N}\,\mathnormal{T^2L^{-2}}$",
+        r"$\mathcal{N}$ (normalized)" if normalize else r"$\mathcal{N}\,{T^2L^{-2}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -710,7 +710,7 @@ def _combined_ratio_figure(
             case["ratio"],
             color=COLOR_KXCI,
             linestyle="--",
-            label=rf"$\mathnormal{{\mathcal{{N}}^{{(\mathrm{{PCFM-I}})}}/\mathcal{{N}}^{{(\mathrm{{TD}})}}}}$, {case['case_label']}",
+            label=rf"${{\mathcal{{N}}^{{(\mathrm{{PCFM-I}})}}/\mathcal{{N}}^{{(\mathrm{{TD}})}}}}$, {case['case_label']}",
         )
         crossover = case["crossover"]
         if crossover is not None and np.isfinite(crossover):
@@ -723,13 +723,13 @@ def _combined_ratio_figure(
                 att["ratio"],
                 color=COLOR_KXCI,
                 linestyle=ATTENUATED_LINESTYLE,
-                label=rf"$\mathnormal{{\mathcal{{N}}^{{(\mathrm{{PCFM-I}})}}/\mathcal{{N}}^{{(\mathrm{{TD}})}}}}$ att., {case['case_label']}",
+                label=rf"${{\mathcal{{N}}^{{(\mathrm{{PCFM-I}})}}/\mathcal{{N}}^{{(\mathrm{{TD}})}}}}$ att., {case['case_label']}",
             )
 
     _style_axes(ax, loglog=loglog)
-    ax.set_xlabel(r"$\mathnormal{\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
+    ax.set_xlabel(r"${\Delta f / B}$", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(
-        r"$\mathnormal{\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$",
+        r"${\mathcal{N}^{(\mathrm{PCFM-I})}/\mathcal{N}^{(\mathrm{TD})}}$",
         fontsize=AXIS_LABEL_SIZE,
     )
     ax.legend(loc="best", fontsize=LEGEND_SIZE)
@@ -1355,7 +1355,7 @@ def main() -> None:
         y_n = y_n_paper
         y_n_reference = None
         attenuation_case: dict[str, np.ndarray] | None = None
-        n_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
+        n_label = r"${\mathcal{N}^{(\mathrm{TD})}}$"
         n_reference_label = None
         plateau_ideal = float("nan")
         lambda_ideal = float("nan")
@@ -1369,8 +1369,8 @@ def main() -> None:
             ps_corrected = _td_corrected_softplus_params_flat(l_over_leff, td_ctx)
             y_n = n_softplus_scaled(x, l_over_ld=l_over_leff, ps=ps_corrected)
             y_n_reference = y_n_paper
-            n_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
-            n_reference_label = r"$\mathnormal \mathcal{N}_{\mathrm{Eq.18}}(x)\,T^2L^{-2}$"
+            n_label = r"${\mathcal{N}^{(\mathrm{TD})}}$"
+            n_reference_label = r"$ \mathcal{N}_{\mathrm{Eq.18}}(x)\,T^2L^{-2}$"
             plateau_ideal, lambda_ideal, eta_ideal = ps_ideal
             plateau_corrected, lambda_corrected, eta_corrected = ps_corrected
 
@@ -1637,7 +1637,7 @@ def main() -> None:
             ],
             dtype=float,
         )
-        n_lld_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
+        n_lld_label = r"${\mathcal{N}^{(\mathrm{TD})}}$"
     else:
         y_n_lld = n_time_domain(
             x_fixed_grid,
@@ -1645,7 +1645,7 @@ def main() -> None:
             l_over_leff=lld_sweep,
             eta=args.eta,
         )
-        n_lld_label = r"$\mathnormal{\mathcal{N}^{(\mathrm{TD})}}$"
+        n_lld_label = r"${\mathcal{N}^{(\mathrm{TD})}}$"
     y_k_lld = k_xci(x_fixed_grid, leff_over_l=1.0 / lld_sweep)
     y_k_eq18_lld = k_xci_eq18_normalized(x_fixed_grid, l_over_leff=lld_sweep)
     attenuation_lld = None
