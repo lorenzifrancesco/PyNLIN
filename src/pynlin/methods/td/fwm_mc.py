@@ -67,8 +67,19 @@ def _propagator(delta_beta: np.ndarray, length: float, alpha: float) -> np.ndarr
     return out
 
 
-def _beta_local(beta0: float, beta1: float, gvd: float, omega_local: np.ndarray) -> np.ndarray:
-    return float(beta0) + float(beta1) * omega_local + 0.5 * float(gvd) * omega_local**2
+def _beta_local(
+    beta0: float,
+    beta1: float,
+    gvd: float,
+    beta3: float,
+    omega_local: np.ndarray,
+) -> np.ndarray:
+    return (
+        float(beta0)
+        + float(beta1) * omega_local
+        + 0.5 * float(gvd) * omega_local**2
+        + (float(beta3) / 6.0) * omega_local**3
+    )
 
 
 def estimate_fwm_term_sum_dar_mc(
@@ -122,10 +133,10 @@ def estimate_fwm_term_sum_dar_mc(
     omega_c = omega_c_norm * baud_rate
     omega_d = omega_d_norm * baud_rate
     delta_beta = (
-        _beta_local(channels.beta0_a, channels.beta1_a, channels.gvd_a, omega_a)
-        + _beta_local(channels.beta0_b, channels.beta1_b, channels.gvd_b, omega_b)
-        - _beta_local(channels.beta0_c, channels.beta1_c, channels.gvd_c, omega_c)
-        - _beta_local(channels.beta0_d, channels.beta1_d, channels.gvd_d, omega_d)
+        _beta_local(channels.beta0_a, channels.beta1_a, channels.gvd_a, channels.beta3_a, omega_a)
+        + _beta_local(channels.beta0_b, channels.beta1_b, channels.gvd_b, channels.beta3_b, omega_b)
+        - _beta_local(channels.beta0_c, channels.beta1_c, channels.gvd_c, channels.beta3_c, omega_c)
+        - _beta_local(channels.beta0_d, channels.beta1_d, channels.gvd_d, channels.beta3_d, omega_d)
     )
     kernel = _propagator(delta_beta, length, alpha)
     samples = np.abs(kernel) ** 2 * mask
@@ -145,6 +156,10 @@ def estimate_fwm_term_sum_dar_mc(
             "omega_c": float(channels.omega_c),
             "omega_d": float(channels.omega_d),
             "delta_omega": float(channels.delta_omega),
+            "beta3_a": float(channels.beta3_a),
+            "beta3_b": float(channels.beta3_b),
+            "beta3_c": float(channels.beta3_c),
+            "beta3_d": float(channels.beta3_d),
             "support_fraction": float(np.mean(mask)),
         },
     )

@@ -50,6 +50,10 @@ class FWMChannels:
     gvd_b: float = 0.0
     gvd_c: float = 0.0
     gvd_d: float = 0.0
+    beta3_a: float = 0.0
+    beta3_b: float = 0.0
+    beta3_c: float = 0.0
+    beta3_d: float = 0.0
 
     @property
     def delta_omega(self) -> float:
@@ -117,6 +121,10 @@ def _metadata(
         "gvd_b": float(channels.gvd_b),
         "gvd_c": float(channels.gvd_c),
         "gvd_d": float(channels.gvd_d),
+        "beta3_a": float(channels.beta3_a),
+        "beta3_b": float(channels.beta3_b),
+        "beta3_c": float(channels.beta3_c),
+        "beta3_d": float(channels.beta3_d),
         "n_t": int(t.size),
         "n_z": int(z.size),
         "dt": _uniform_dt(t),
@@ -149,6 +157,19 @@ def compute_fwm_coefficient_direct(
     tuples contribute according to their actual pulse spectra and numerical
     time window.
     """
+    if any(
+        value != 0.0
+        for value in (
+            channels.beta3_a,
+            channels.beta3_b,
+            channels.beta3_c,
+            channels.beta3_d,
+        )
+    ):
+        raise NotImplementedError(
+            "beta3 is supported by the Dar frequency-domain FWM estimator, "
+            "not by the direct time-domain pulse propagator"
+        )
     z = np.asarray(z, dtype=float).reshape(-1)
     if z.size == 0:
         raise ValueError("z grid must not be empty")
