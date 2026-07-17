@@ -1,6 +1,9 @@
 import copy
+from dataclasses import dataclass
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
 import sys
 
 import numpy as np
@@ -24,6 +27,64 @@ _SSFM_TOML_HEADER = [
     "The symbol rate follows the system baud rate; samples_per_symbol is recomputed per iteration.",
     "samples_per_symbol is set to the minimum integer that satisfies the Nyquist-band condition for the 5-channel plan.",
 ]
+
+
+@dataclass(frozen=True)
+class ScalarXPMN1Result:
+    trial_seeds: np.ndarray
+    full_nli_power_trials_w: np.ndarray
+    cut_only_nli_power_trials_w: np.ndarray
+    excess_power_trials_w: np.ndarray
+    excess_power_mean_w: float
+    excess_power_stderr_w: float
+    n1_ssfm_m2: float
+    n1_ssfm_stderr_m2: float
+    gamma_w_inv_m: float
+    full_payload: dict
+    cut_only_payload: dict
+
+
+@dataclass(frozen=True)
+class ScalarXPMSweepFit:
+    slope_w_inv: float
+    slope_stderr_w_inv: float
+    intercept_w: float
+    r_squared: float
+    n1_ssfm_m2: float
+    n1_ssfm_stderr_m2: float
+    mean_excess_power_w: np.ndarray
+    mean_excess_power_stderr_w: np.ndarray
+
+
+@dataclass(frozen=True)
+class ScalarFWMExcessResult:
+    trial_seeds: np.ndarray
+    full_nli_power_trials_w: np.ndarray
+    pump_control_nli_power_trials_w: np.ndarray
+    source_control_nli_power_trials_w: np.ndarray
+    idler_only_nli_power_trials_w: np.ndarray
+    excess_power_trials_w: np.ndarray
+    excess_power_mean_w: float
+    excess_power_stderr_w: float
+    c_ssfm_m2: float
+    c_ssfm_stderr_m2: float
+    gamma_w_inv_m: float
+    full_payload: dict
+    pump_control_payload: dict
+    source_control_payload: dict
+    idler_only_payload: dict
+
+
+@dataclass(frozen=True)
+class ScalarFWMSweepFit:
+    slope_w_inv2: float
+    slope_stderr_w_inv2: float
+    intercept_w: float
+    r_squared: float
+    c_ssfm_m2: float
+    c_ssfm_stderr_m2: float
+    mean_excess_power_w: np.ndarray
+    mean_excess_power_stderr_w: np.ndarray
 
 
 def _toml_value_to_text(value: object) -> str:
@@ -78,6 +139,37 @@ def _write_toml(path: Path, data: dict, comments: list[str] | None = None) -> No
 
 
 def _load_run_wdm_nli_simulation(nli_script_path: Path):
+    repo_root = nli_script_path.resolve().parents[2]
+    external_python = repo_root / ".venv" / "bin" / "python"
+    if external_python.exists():
+        marker = "__PYNLIN_SSFM_PAYLOAD__"
+
+        def run_external(config_path: Path):
+            code = (
+                "import json,sys; "
+                "from examples.nli.nli import run_wdm_nli_simulation; "
+                "payload=run_wdm_nli_simulation(sys.argv[1]); "
+                f"print('{marker}'+json.dumps(payload))"
+            )
+            completed = subprocess.run(
+                [str(external_python), "-c", code, str(Path(config_path).resolve())],
+                cwd=repo_root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                details = (completed.stderr or completed.stdout)[-4000:]
+                raise RuntimeError(
+                    f"External SSFM process failed with code {completed.returncode}:\n{details}"
+                )
+            marker_index = completed.stdout.rfind(marker)
+            if marker_index < 0:
+                raise RuntimeError("External SSFM process returned no JSON payload")
+            return json.loads(completed.stdout[marker_index + len(marker):])
+
+        return run_external
+
     module_name = "gnlse_examples_nli_runtime"
     module_dir = str(nli_script_path.parent)
     if module_dir not in sys.path:
@@ -210,6 +302,575 @@ def _build_ssfm_runtime_config(
     return cfg
 
 
+def _build_scalar_xpm_runtime_config(
+    *,
+    template_cfg: dict,
+    system: System,
+    cut_power_w: float,
+    interferer_power_w: float,
+    channel_idx: int,
+    interferer_idx: int,
+    out_dir: Path,
+    scenario_tag: str,
+    n_trials: int,
+    rng_seed: int,
+    n_symbols: int,
+    samples_per_symbol: int,
+    max_step_m: float,
+    max_nonlinear_phase_deg: float,
+    fiber_length_m: float | None = None,
+    target_frequency_hz: float | None = None,
+    interferer_frequency_hz: float | None = None,
+    dispersion_betas_ps_per_m: list[float] | None = None,
+    save_plots: bool = False,
+    symbol_distribution: str = "circular_complex_gaussian",
+) -> dict:
+    """Build a scalar, lossless three-slot XPM configuration."""
+    if channel_idx == interferer_idx:
+        raise ValueError("CUT and interferer indices must differ")
+    if cut_power_w <= 0.0 or interferer_power_w < 0.0:
+        raise ValueError("CUT power must be positive and interferer power non-negative")
+    if symbol_distribution not in {"qam", "circular_complex_gaussian"}:
+        raise ValueError(
+            "symbol_distribution must be 'qam' or 'circular_complex_gaussian'"
+        )
+
+    cfg = copy.deepcopy(template_cfg)
+    mod = cfg.setdefault("modulation", {})
+    mod.update({
+        "order": 16,
+        "symbol_distribution": str(symbol_distribution),
+        "symbol_rate_gbd": float(system.pulse.baud_rate * 1e-9),
+        "pulse_shape": "nyquist_rect",
+        "rrc_rolloff": 0.0,
+        "rrc_span_symbols": 12,
+        "n_symbols": int(n_symbols),
+    })
+
+    freqs = np.asarray(system.wdm.frequency_grid(), dtype=float)
+    has_virtual_frequencies = (
+        target_frequency_hz is not None or interferer_frequency_hz is not None
+    )
+    if has_virtual_frequencies:
+        if target_frequency_hz is None or interferer_frequency_hz is None:
+            raise ValueError("target and interferer frequencies must be provided together")
+        center_freq = float(target_frequency_hz)
+        interferer_freq = float(interferer_frequency_hz)
+    else:
+        center_freq = float(freqs[channel_idx])
+        interferer_freq = float(freqs[interferer_idx])
+    spacing_hz = abs(interferer_freq - center_freq)
+    min_sps = _compute_min_samples_per_symbol_for_nyquist(
+        symbol_rate_gbd=float(mod["symbol_rate_gbd"]),
+        channel_spacing_thz=spacing_hz * 1e-12,
+        n_channels=3,
+        pulse_shape="nyquist_rect",
+        rrc_rolloff=0.0,
+    )
+    mod["samples_per_symbol"] = max(int(samples_per_symbol), min_sps)
+
+    powers = [0.0, float(cut_power_w), 0.0]
+    powers[0 if interferer_freq < center_freq else 2] = float(interferer_power_w)
+    wdm = cfg.setdefault("wdm", {})
+    wdm.pop("power_per_channel_w", None)
+    wdm.update({
+        "n_channels": 3,
+        "channel_spacing_thz": spacing_hz * 1e-12,
+        "channel_powers_w": powers,
+    })
+
+    gamma = float(gamma_grid(system, np.asarray([center_freq], dtype=float))[0])
+    betas = (
+        [float(_safe_beta2_ps2_per_m(system, channel_idx))]
+        if dispersion_betas_ps_per_m is None
+        else [float(value) for value in dispersion_betas_ps_per_m]
+    )
+    fiber = cfg.setdefault("fiber", {})
+    fiber.update({
+        "wavelength_nm": float((c0 / center_freq) * 1e9),
+        "fiber_length_m": float(
+            system.fiber_length if fiber_length_m is None else fiber_length_m
+        ),
+        "nonlinearity": gamma,
+        "loss_db_per_m": 0.0,
+        "betas": betas,
+    })
+
+    cfg.setdefault("monte_carlo", {}).update({
+        "n_trials": int(n_trials),
+        "rng_seed": int(rng_seed),
+    })
+    cfg.setdefault("solver", {}).update({
+        "z_saves": 2,
+        "rtol": 1e-6,
+        "atol": 1e-8,
+        "ssfm_max_nonlinear_phase_deg": float(max_nonlinear_phase_deg),
+        "ssfm_max_step_m": float(max_step_m),
+        "propagation_backend": "custom_ssfm",
+    })
+    cfg.setdefault("output", {}).update({
+        "save_dir": str(Path(out_dir) / "ssfm" / scenario_tag),
+        "save_name": f"{scenario_tag}.png",
+        "show_plot": False,
+        "save_plots": bool(save_plots),
+    })
+    cfg.setdefault("cache", {})["mode"] = "recompute"
+    return cfg
+
+
+def _paired_trial_powers(full_payload: dict, cut_payload: dict) -> tuple[np.ndarray, ...]:
+    try:
+        full_trials = full_payload["trial_results"]["trials"]
+        cut_trials = cut_payload["trial_results"]["trials"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("SSFM payload lacks schema-v2 per-trial records") from exc
+    if len(full_trials) != len(cut_trials) or not full_trials:
+        raise ValueError("SSFM full/control trial counts do not match")
+
+    seeds = []
+    full_power = []
+    cut_power = []
+    for full, cut in zip(full_trials, cut_trials):
+        if full["seed"] != cut["seed"]:
+            raise ValueError("SSFM full/control trial seeds do not match")
+        if full["cut_tx_symbol_sha256"] != cut["cut_tx_symbol_sha256"]:
+            raise ValueError("SSFM full/control CUT symbols do not match")
+        if full["n_symbols_used"] != cut["n_symbols_used"]:
+            raise ValueError("SSFM full/control receiver symbol counts do not match")
+        seeds.append(int(full["seed"]))
+        full_power.append(float(full["center_nli_power_w"]))
+        cut_power.append(float(cut["center_nli_power_w"]))
+
+    arrays = tuple(np.asarray(values) for values in (seeds, full_power, cut_power))
+    if not all(np.all(np.isfinite(values)) for values in arrays):
+        raise ValueError("SSFM per-trial records contain non-finite values")
+    return arrays
+
+
+def compute_scalar_ssfm_xpm_n1(
+    ssfm_ctx: dict,
+    *,
+    system: System,
+    cut_power_w: float,
+    interferer_power_w: float,
+    channel_idx: int,
+    interferer_idx: int,
+    n_trials: int,
+    rng_seed: int,
+    sweep_tag: str,
+    n_symbols: int = 4096,
+    samples_per_symbol: int = 16,
+    max_step_m: float = 1000.0,
+    max_nonlinear_phase_deg: float = 0.05,
+    fiber_length_m: float | None = None,
+    target_frequency_hz: float | None = None,
+    interferer_frequency_hz: float | None = None,
+    dispersion_betas_ps_per_m: list[float] | None = None,
+    save_full_plots: bool = False,
+    symbol_distribution: str = "circular_complex_gaussian",
+) -> ScalarXPMN1Result:
+    """Run paired scalar SSFM cases and infer prefactor-free XPM N1."""
+    common = dict(
+        template_cfg=ssfm_ctx["template_cfg"],
+        system=system,
+        cut_power_w=cut_power_w,
+        channel_idx=channel_idx,
+        interferer_idx=interferer_idx,
+        out_dir=Path(ssfm_ctx["out_dir"]),
+        n_trials=n_trials,
+        rng_seed=rng_seed,
+        n_symbols=n_symbols,
+        samples_per_symbol=samples_per_symbol,
+        max_step_m=max_step_m,
+        max_nonlinear_phase_deg=max_nonlinear_phase_deg,
+        fiber_length_m=fiber_length_m,
+        target_frequency_hz=target_frequency_hz,
+        interferer_frequency_hz=interferer_frequency_hz,
+        dispersion_betas_ps_per_m=dispersion_betas_ps_per_m,
+        symbol_distribution=symbol_distribution,
+    )
+    full_cfg = _build_scalar_xpm_runtime_config(
+        **common,
+        interferer_power_w=interferer_power_w,
+        scenario_tag=f"{sweep_tag}_full",
+        save_plots=save_full_plots,
+    )
+    cut_cfg = _build_scalar_xpm_runtime_config(
+        **common,
+        interferer_power_w=0.0,
+        scenario_tag=f"{sweep_tag}_cut_only",
+        save_plots=False,
+    )
+
+    runtime_dir = Path(ssfm_ctx["out_dir"]) / "ssfm" / "runtime"
+    full_path = runtime_dir / f"{sweep_tag}_full.toml"
+    cut_path = runtime_dir / f"{sweep_tag}_cut_only.toml"
+    _write_toml(full_path, full_cfg, comments=_SSFM_TOML_HEADER)
+    _write_toml(cut_path, cut_cfg, comments=_SSFM_TOML_HEADER)
+    full_payload = ssfm_ctx["run_fn"](full_path)
+    cut_payload = ssfm_ctx["run_fn"](cut_path)
+
+    seeds, full_power, cut_power = _paired_trial_powers(full_payload, cut_payload)
+    excess = full_power - cut_power
+    excess_mean = float(np.mean(excess))
+    excess_stderr = (
+        float(np.std(excess, ddof=1) / np.sqrt(excess.size))
+        if excess.size > 1 else 0.0
+    )
+    center_freq = (
+        float(np.asarray(system.wdm.frequency_grid())[channel_idx])
+        if target_frequency_hz is None
+        else float(target_frequency_hz)
+    )
+    gamma = float(gamma_grid(system, np.asarray([center_freq]))[0])
+    denominator = 4.0 * gamma**2 * float(cut_power_w) * float(interferer_power_w)**2
+    if denominator <= 0.0:
+        raise ValueError("The N1 normalization requires a positive interferer power")
+
+    return ScalarXPMN1Result(
+        trial_seeds=seeds.astype(int),
+        full_nli_power_trials_w=full_power,
+        cut_only_nli_power_trials_w=cut_power,
+        excess_power_trials_w=excess,
+        excess_power_mean_w=excess_mean,
+        excess_power_stderr_w=excess_stderr,
+        n1_ssfm_m2=excess_mean / denominator,
+        n1_ssfm_stderr_m2=excess_stderr / denominator,
+        gamma_w_inv_m=gamma,
+        full_payload=full_payload,
+        cut_only_payload=cut_payload,
+    )
+
+
+def fit_scalar_ssfm_xpm_sweep(
+    results: list[ScalarXPMN1Result],
+    interferer_powers_w: np.ndarray,
+    *,
+    cut_power_w: float,
+) -> ScalarXPMSweepFit:
+    """Fit paired SSFM excess powers against interferer power squared."""
+    powers = np.asarray(interferer_powers_w, dtype=float)
+    if len(results) != powers.size or powers.size < 2:
+        raise ValueError("results and at least two interferer powers must match")
+    excess = np.stack([result.excess_power_trials_w for result in results])
+    if len({row.size for row in excess}) != 1:
+        raise ValueError("all SSFM sweep points must have the same trial count")
+    power_squared = powers**2
+    slopes = np.empty(excess.shape[1])
+    intercepts = np.empty(excess.shape[1])
+    for trial in range(excess.shape[1]):
+        slopes[trial], intercepts[trial] = np.polyfit(
+            power_squared, excess[:, trial], deg=1
+        )
+    slope = float(np.mean(slopes))
+    slope_stderr = (
+        float(np.std(slopes, ddof=1) / np.sqrt(slopes.size))
+        if slopes.size > 1 else 0.0
+    )
+    gamma = float(results[0].gamma_w_inv_m)
+    if not all(np.isclose(result.gamma_w_inv_m, gamma) for result in results):
+        raise ValueError("gamma changed within one SSFM power sweep")
+    denominator = 4.0 * gamma**2 * float(cut_power_w)
+    mean_excess = np.mean(excess, axis=1)
+    mean_intercept = float(np.mean(intercepts))
+    fitted = slope * power_squared + mean_intercept
+    residual_sum = float(np.sum((mean_excess - fitted) ** 2))
+    total_sum = float(np.sum((mean_excess - np.mean(mean_excess)) ** 2))
+    r_squared = 1.0 - residual_sum / total_sum if total_sum > 0.0 else float("nan")
+    point_stderr = (
+        np.std(excess, axis=1, ddof=1) / np.sqrt(excess.shape[1])
+        if excess.shape[1] > 1 else np.zeros(powers.size)
+    )
+    return ScalarXPMSweepFit(
+        slope_w_inv=slope,
+        slope_stderr_w_inv=slope_stderr,
+        intercept_w=mean_intercept,
+        r_squared=r_squared,
+        n1_ssfm_m2=slope / denominator,
+        n1_ssfm_stderr_m2=slope_stderr / denominator,
+        mean_excess_power_w=mean_excess,
+        mean_excess_power_stderr_w=point_stderr,
+    )
+
+
+def _build_scalar_fwm_runtime_config(
+    *,
+    template_cfg: dict,
+    system: System,
+    idler_power_w: float,
+    pump_power_w: float,
+    source_power_w: float,
+    target_frequency_hz: float,
+    spacing_hz: float,
+    out_dir: Path,
+    scenario_tag: str,
+    n_trials: int,
+    rng_seed: int,
+    n_symbols: int,
+    samples_per_symbol: int,
+    max_step_m: float,
+    max_nonlinear_phase_deg: float,
+    fiber_length_m: float | None = None,
+    dispersion_betas_ps_per_m: list[float] | None = None,
+    save_plots: bool = False,
+    symbol_distribution: str = "circular_complex_gaussian",
+) -> dict:
+    """Build a scalar, lossless five-slot degenerate-FWM configuration.
+
+    The idler/CUT sits on the center slot, the pump one spacing above, and the
+    source two spacings above, so the degenerate product 2*f_pump - f_source
+    lands exactly on the idler. The two slots below the idler stay dark.
+    """
+    if idler_power_w <= 0.0:
+        raise ValueError("The idler power must be positive (receiver center channel)")
+    if pump_power_w < 0.0 or source_power_w < 0.0:
+        raise ValueError("Pump and source powers must be non-negative")
+    if spacing_hz <= 0.0:
+        raise ValueError("The pump/source spacing must be positive")
+    if symbol_distribution not in {"qam", "circular_complex_gaussian"}:
+        raise ValueError(
+            "symbol_distribution must be 'qam' or 'circular_complex_gaussian'"
+        )
+
+    cfg = copy.deepcopy(template_cfg)
+    mod = cfg.setdefault("modulation", {})
+    mod.update({
+        "order": 16,
+        "symbol_distribution": str(symbol_distribution),
+        "symbol_rate_gbd": float(system.pulse.baud_rate * 1e-9),
+        "pulse_shape": "nyquist_rect",
+        "rrc_rolloff": 0.0,
+        "rrc_span_symbols": 12,
+        "n_symbols": int(n_symbols),
+    })
+    min_sps = _compute_min_samples_per_symbol_for_nyquist(
+        symbol_rate_gbd=float(mod["symbol_rate_gbd"]),
+        channel_spacing_thz=float(spacing_hz) * 1e-12,
+        n_channels=5,
+        pulse_shape="nyquist_rect",
+        rrc_rolloff=0.0,
+    )
+    mod["samples_per_symbol"] = max(int(samples_per_symbol), min_sps)
+
+    wdm = cfg.setdefault("wdm", {})
+    wdm.pop("power_per_channel_w", None)
+    wdm.update({
+        "n_channels": 5,
+        "channel_spacing_thz": float(spacing_hz) * 1e-12,
+        "channel_powers_w": [
+            0.0,
+            0.0,
+            float(idler_power_w),
+            float(pump_power_w),
+            float(source_power_w),
+        ],
+    })
+
+    center_freq = float(target_frequency_hz)
+    gamma = float(gamma_grid(system, np.asarray([center_freq], dtype=float))[0])
+    if dispersion_betas_ps_per_m is None:
+        raise ValueError("The FWM configuration requires explicit dispersion betas")
+    fiber = cfg.setdefault("fiber", {})
+    fiber.update({
+        "wavelength_nm": float((c0 / center_freq) * 1e9),
+        "fiber_length_m": float(
+            system.fiber_length if fiber_length_m is None else fiber_length_m
+        ),
+        "nonlinearity": gamma,
+        "loss_db_per_m": 0.0,
+        "betas": [float(value) for value in dispersion_betas_ps_per_m],
+    })
+
+    cfg.setdefault("monte_carlo", {}).update({
+        "n_trials": int(n_trials),
+        "rng_seed": int(rng_seed),
+    })
+    cfg.setdefault("solver", {}).update({
+        "z_saves": 2,
+        "rtol": 1e-6,
+        "atol": 1e-8,
+        "ssfm_max_nonlinear_phase_deg": float(max_nonlinear_phase_deg),
+        "ssfm_max_step_m": float(max_step_m),
+        "propagation_backend": "custom_ssfm",
+    })
+    cfg.setdefault("output", {}).update({
+        "save_dir": str(Path(out_dir) / "ssfm" / scenario_tag),
+        "save_name": f"{scenario_tag}.png",
+        "show_plot": False,
+        "save_plots": bool(save_plots),
+    })
+    cfg.setdefault("cache", {})["mode"] = "recompute"
+    return cfg
+
+
+def compute_scalar_ssfm_fwm_excess(
+    ssfm_ctx: dict,
+    *,
+    system: System,
+    idler_power_w: float,
+    pump_power_w: float,
+    source_power_w: float,
+    target_frequency_hz: float,
+    spacing_hz: float,
+    n_trials: int,
+    rng_seed: int,
+    sweep_tag: str,
+    n_symbols: int = 2048,
+    samples_per_symbol: int = 8,
+    max_step_m: float = 500.0,
+    max_nonlinear_phase_deg: float = 0.05,
+    fiber_length_m: float | None = None,
+    dispersion_betas_ps_per_m: list[float] | None = None,
+    idler_only_payload: dict | None = None,
+    save_full_plots: bool = False,
+    symbol_distribution: str = "circular_complex_gaussian",
+) -> ScalarFWMExcessResult:
+    """Isolate the degenerate FWM power via four seed-paired scalar SSFM runs.
+
+    The inclusion-exclusion
+    ``full - pump_control - source_control + idler_only``
+    cancels SCI and both XPM terms at first order, leaving the FWM excess.
+    A precomputed ``idler_only_payload`` (power-sweep invariant) is reused
+    across sweep points instead of rerunning the idler-only case.
+    """
+    if pump_power_w <= 0.0 or source_power_w <= 0.0:
+        raise ValueError("Pump and source powers must be positive for the full case")
+    common = dict(
+        template_cfg=ssfm_ctx["template_cfg"],
+        system=system,
+        idler_power_w=idler_power_w,
+        target_frequency_hz=target_frequency_hz,
+        spacing_hz=spacing_hz,
+        out_dir=Path(ssfm_ctx["out_dir"]),
+        n_trials=n_trials,
+        rng_seed=rng_seed,
+        n_symbols=n_symbols,
+        samples_per_symbol=samples_per_symbol,
+        max_step_m=max_step_m,
+        max_nonlinear_phase_deg=max_nonlinear_phase_deg,
+        fiber_length_m=fiber_length_m,
+        dispersion_betas_ps_per_m=dispersion_betas_ps_per_m,
+        symbol_distribution=symbol_distribution,
+    )
+    cases = {
+        "full": dict(
+            pump_power_w=pump_power_w,
+            source_power_w=source_power_w,
+            save_plots=save_full_plots,
+        ),
+        "pump_control": dict(
+            pump_power_w=pump_power_w, source_power_w=0.0, save_plots=False
+        ),
+        "source_control": dict(
+            pump_power_w=0.0, source_power_w=source_power_w, save_plots=False
+        ),
+        "idler_only": dict(pump_power_w=0.0, source_power_w=0.0, save_plots=False),
+    }
+    runtime_dir = Path(ssfm_ctx["out_dir"]) / "ssfm" / "runtime"
+    payloads: dict[str, dict] = {}
+    for case, overrides in cases.items():
+        if case == "idler_only" and idler_only_payload is not None:
+            payloads[case] = idler_only_payload
+            continue
+        cfg = _build_scalar_fwm_runtime_config(
+            **common, scenario_tag=f"{sweep_tag}_{case}", **overrides
+        )
+        path = runtime_dir / f"{sweep_tag}_{case}.toml"
+        _write_toml(path, cfg, comments=_SSFM_TOML_HEADER)
+        payloads[case] = ssfm_ctx["run_fn"](path)
+
+    seeds, full_power, pump_power = _paired_trial_powers(
+        payloads["full"], payloads["pump_control"]
+    )
+    _, _, source_power = _paired_trial_powers(
+        payloads["full"], payloads["source_control"]
+    )
+    _, _, idler_power = _paired_trial_powers(
+        payloads["full"], payloads["idler_only"]
+    )
+    excess = full_power - pump_power - source_power + idler_power
+    excess_mean = float(np.mean(excess))
+    excess_stderr = (
+        float(np.std(excess, ddof=1) / np.sqrt(excess.size))
+        if excess.size > 1 else 0.0
+    )
+    gamma = float(gamma_grid(system, np.asarray([float(target_frequency_hz)]))[0])
+    denominator = 2.0 * gamma**2 * float(pump_power_w) ** 2 * float(source_power_w)
+
+    return ScalarFWMExcessResult(
+        trial_seeds=seeds.astype(int),
+        full_nli_power_trials_w=full_power,
+        pump_control_nli_power_trials_w=pump_power,
+        source_control_nli_power_trials_w=source_power,
+        idler_only_nli_power_trials_w=idler_power,
+        excess_power_trials_w=excess,
+        excess_power_mean_w=excess_mean,
+        excess_power_stderr_w=excess_stderr,
+        c_ssfm_m2=excess_mean / denominator,
+        c_ssfm_stderr_m2=excess_stderr / denominator,
+        gamma_w_inv_m=gamma,
+        full_payload=payloads["full"],
+        pump_control_payload=payloads["pump_control"],
+        source_control_payload=payloads["source_control"],
+        idler_only_payload=payloads["idler_only"],
+    )
+
+
+def fit_scalar_ssfm_fwm_sweep(
+    results: list[ScalarFWMExcessResult],
+    pump_powers_w: np.ndarray,
+    source_powers_w: np.ndarray,
+) -> ScalarFWMSweepFit:
+    """Fit paired FWM excess powers against the cubic term P_pump^2 * P_source."""
+    pump_powers = np.asarray(pump_powers_w, dtype=float)
+    source_powers = np.asarray(source_powers_w, dtype=float)
+    if len(results) != pump_powers.size or pump_powers.size != source_powers.size:
+        raise ValueError("results, pump powers, and source powers must align")
+    if pump_powers.size < 2:
+        raise ValueError("at least two sweep points are required")
+    excess = np.stack([result.excess_power_trials_w for result in results])
+    if len({row.size for row in excess}) != 1:
+        raise ValueError("all SSFM sweep points must have the same trial count")
+    power_cubed = pump_powers**2 * source_powers
+    if np.unique(power_cubed).size != power_cubed.size:
+        raise ValueError("sweep points must have distinct P_pump^2 * P_source values")
+    slopes = np.empty(excess.shape[1])
+    intercepts = np.empty(excess.shape[1])
+    for trial in range(excess.shape[1]):
+        slopes[trial], intercepts[trial] = np.polyfit(
+            power_cubed, excess[:, trial], deg=1
+        )
+    slope = float(np.mean(slopes))
+    slope_stderr = (
+        float(np.std(slopes, ddof=1) / np.sqrt(slopes.size))
+        if slopes.size > 1 else 0.0
+    )
+    gamma = float(results[0].gamma_w_inv_m)
+    if not all(np.isclose(result.gamma_w_inv_m, gamma) for result in results):
+        raise ValueError("gamma changed within one SSFM power sweep")
+    denominator = 2.0 * gamma**2
+    mean_excess = np.mean(excess, axis=1)
+    mean_intercept = float(np.mean(intercepts))
+    fitted = slope * power_cubed + mean_intercept
+    residual_sum = float(np.sum((mean_excess - fitted) ** 2))
+    total_sum = float(np.sum((mean_excess - np.mean(mean_excess)) ** 2))
+    r_squared = 1.0 - residual_sum / total_sum if total_sum > 0.0 else float("nan")
+    point_stderr = (
+        np.std(excess, axis=1, ddof=1) / np.sqrt(excess.shape[1])
+        if excess.shape[1] > 1 else np.zeros(pump_powers.size)
+    )
+    return ScalarFWMSweepFit(
+        slope_w_inv2=slope,
+        slope_stderr_w_inv2=slope_stderr,
+        intercept_w=mean_intercept,
+        r_squared=r_squared,
+        c_ssfm_m2=slope / denominator,
+        c_ssfm_stderr_m2=slope_stderr / denominator,
+        mean_excess_power_w=mean_excess,
+        mean_excess_power_stderr_w=point_stderr,
+    )
+
+
 def _extract_ssfm_center_nli_w(payload: dict) -> float | None:
     try:
         value = payload["power_report"]["center_channel"]["nli_power_avg_w"]
@@ -238,9 +899,8 @@ def prepare_ssfm_runtime(out_dir: Path, runtime_toml_name: str = "ssfm.toml") ->
         cfg_template_path = _DEFAULT_GNLSE_WDM_CONFIG
     if not nli_script_path.exists() or not cfg_template_path.exists():
         lg.warning(
-            "SSFM disabled: missing gnlse resources. script={}, template={}",
-            nli_script_path,
-            cfg_template_path,
+            f"SSFM disabled: missing gnlse resources. script={nli_script_path}, "
+            f"template={cfg_template_path}"
         )
         return None
     try:
@@ -249,15 +909,13 @@ def prepare_ssfm_runtime(out_dir: Path, runtime_toml_name: str = "ssfm.toml") ->
         if not isinstance(template_cfg, dict):
             raise TypeError("Template TOML root is not a mapping")
     except Exception as exc:
-        lg.warning("SSFM disabled: could not initialize gnlse runner ({})", exc)
+        lg.warning(f"SSFM disabled: could not initialize gnlse runner ({exc})")
         return None
 
-    runtime_toml_path = Path(__file__).resolve().parents[2] / "input" / runtime_toml_name
+    runtime_toml_path = Path(out_dir) / "ssfm" / "runtime" / runtime_toml_name
     lg.info(
-        "SSFM enabled via gnlse: script={}, template={}, runtime_toml={}",
-        nli_script_path,
-        cfg_template_path,
-        runtime_toml_path,
+        f"SSFM enabled via gnlse: script={nli_script_path}, "
+        f"template={cfg_template_path}, runtime_toml={runtime_toml_path}"
     )
     return {
         "run_fn": run_fn,
@@ -285,9 +943,8 @@ def prepare_ssfm_runtime_with_template(
 
     if not nli_script_path.exists() or not cfg_template_path.exists():
         lg.warning(
-            "SSFM disabled: missing gnlse resources. script={}, template={}",
-            nli_script_path,
-            cfg_template_path,
+            f"SSFM disabled: missing gnlse resources. script={nli_script_path}, "
+            f"template={cfg_template_path}"
         )
         return None
     try:
@@ -296,15 +953,13 @@ def prepare_ssfm_runtime_with_template(
         if not isinstance(template_cfg, dict):
             raise TypeError("Template TOML root is not a mapping")
     except Exception as exc:
-        lg.warning("SSFM disabled: could not initialize gnlse runner ({})", exc)
+        lg.warning(f"SSFM disabled: could not initialize gnlse runner ({exc})")
         return None
 
-    runtime_toml_path = Path(__file__).resolve().parents[2] / "input" / runtime_toml_name
+    runtime_toml_path = Path(out_dir) / "ssfm" / "runtime" / runtime_toml_name
     lg.info(
-        "SSFM enabled via gnlse: script={}, template={}, runtime_toml={}",
-        nli_script_path,
-        cfg_template_path,
-        runtime_toml_path,
+        f"SSFM enabled via gnlse: script={nli_script_path}, "
+        f"template={cfg_template_path}, runtime_toml={runtime_toml_path}"
     )
     return {
         "run_fn": run_fn,
