@@ -241,11 +241,9 @@ def plot_xpm_sectors(data: dict[str, np.ndarray], out_dir: Path) -> list[Path]:
         )
     fig.tight_layout()
     pdf = out_dir / "xpm_hkm_sector_decomposition.pdf"
-    png = pdf.with_suffix(".png")
     fig.savefig(pdf, dpi=300)
-    fig.savefig(png, dpi=300)
     plt.close(fig)
-    return [pdf, png]
+    return [pdf]
 
 
 def _parse_args() -> argparse.Namespace:

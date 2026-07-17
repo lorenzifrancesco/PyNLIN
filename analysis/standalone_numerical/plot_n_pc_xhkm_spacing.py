@@ -14,7 +14,6 @@ from pynlin.pulses import RootRaisedCosinePulse
 
 OUT_DIR = Path("media/n-PC")
 OUT_PDF = OUT_DIR / "xhkm_spacing_sweep.pdf"
-OUT_PNG = OUT_DIR / "xhkm_spacing_sweep.png"
 OUT_CSV = OUT_DIR / "xhkm_spacing_sweep.csv"
 
 FIBER_LENGTH_M = 100e3
@@ -132,7 +131,6 @@ def main() -> None:
     average_speedup = float(np.mean(legacy_2pc_times / np.maximum(fft_2pc_times, 1e-12)))
     _plot(values, average_speedup)
     print(f"Saved {OUT_PDF}")
-    print(f"Saved {OUT_PNG}")
     print(f"Saved {OUT_CSV}")
 
 
@@ -202,7 +200,6 @@ def _plot(values: dict[str, np.ndarray], average_speedup: float) -> None:
     ax.legend(fontsize=6, loc="lower left", bbox_to_anchor=(0.02, 0.12), framealpha=0.85)
     fig.tight_layout()
     fig.savefig(OUT_PDF, bbox_inches="tight")
-    fig.savefig(OUT_PNG, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 

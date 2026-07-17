@@ -153,6 +153,7 @@ tests/reports/
 # results and media folders
 /results* 
 /media
+**/media/
 
 Pipfile
 Pipfile.lock
