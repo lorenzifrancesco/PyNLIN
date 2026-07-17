@@ -34,7 +34,12 @@ def _fullband_section(system: System) -> dict:
     raw = system.raw_config if isinstance(system.raw_config, dict) else {}
     methods = raw.get("methods", {}) if isinstance(raw, dict) else {}
     section = methods.get("fullband_mc", {}) if isinstance(methods, dict) else {}
-    return dict(section) if isinstance(section, dict) else {}
+    if isinstance(section, dict) and section:
+        return dict(section)
+    mc = methods.get("mc", {}) if isinstance(methods, dict) else {}
+    if isinstance(mc, dict) and str(mc.get("engine", "")).lower() == "fullband":
+        return dict(mc)
+    return {}
 
 
 def _select_targets_from_grid(
@@ -183,11 +188,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-band", type=str, default=None, help="Restrict COIs to an optical band: O, E, S, C, L, U.")
     parser.add_argument("--xpm-samples", type=int, default=None)
     parser.add_argument("--fwm-samples", type=int, default=None)
+    parser.add_argument("--fwm-frequency-samples", type=int, default=None)
+    parser.add_argument("--workers", type=int, default=None, help="Target-level worker processes; 0 uses all CPUs.")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--max-fwm-tuples-per-target", type=int, default=None)
     parser.add_argument(
         "--fwm-tuple-selection",
-        choices=("reservoir", "phase_proxy", "joint_reservoir", "exhaustive_support_mc"),
+        choices=("joint_reservoir", "exhaustive_support_mc", "reservoir", "phase_proxy"),
         default=None,
     )
     parser.add_argument("--no-xpm", action="store_true")
@@ -208,7 +215,13 @@ def main() -> None:
     target_band = args.target_band if args.target_band is not None else section.get("target_band")
     xpm_samples = int(args.xpm_samples if args.xpm_samples is not None else section.get("xpm_samples", 5000))
     fwm_samples = int(args.fwm_samples if args.fwm_samples is not None else section.get("fwm_samples", 2000))
+    fwm_frequency_samples = int(
+        args.fwm_frequency_samples
+        if args.fwm_frequency_samples is not None
+        else section.get("fwm_frequency_samples", 50)
+    )
     seed = int(args.seed if args.seed is not None else section.get("seed", 1234))
+    workers = int(args.workers if args.workers is not None else section.get("workers", 1))
     max_fwm_tuples = (
         args.max_fwm_tuples_per_target
         if args.max_fwm_tuples_per_target is not None
@@ -218,7 +231,7 @@ def main() -> None:
     fwm_tuple_selection = str(
         args.fwm_tuple_selection
         if args.fwm_tuple_selection is not None
-        else section.get("fwm_tuple_selection", "reservoir")
+        else section.get("fwm_tuple_selection", "joint_reservoir")
     )
     targets = _parse_targets(args.targets)
     if targets is None:
@@ -234,7 +247,8 @@ def main() -> None:
         f"fullband MC diagnostic: channel_decimation={channel_decimation}, targets={targets}, "
         f"target_band={target_band}, target_decimation={target_decimation}, "
         f"target_offset={target_offset}, target_limit={target_limit}, "
-        f"xpm_samples={xpm_samples}, fwm_samples={fwm_samples}, tuple_selection={fwm_tuple_selection}"
+        f"xpm_samples={xpm_samples}, fwm_samples={fwm_samples}, "
+        f"fwm_frequency_samples={fwm_frequency_samples}, tuple_selection={fwm_tuple_selection}, workers={workers}"
     )
     diagnostic = compute_fullband_prefactor_free_mc(
         system,
@@ -244,9 +258,11 @@ def main() -> None:
         include_fwm=not args.no_fwm,
         xpm_samples=xpm_samples,
         fwm_samples=fwm_samples,
+        fwm_frequency_samples=fwm_frequency_samples,
         seed=seed,
         max_fwm_tuples_per_target=max_fwm_tuples,
         fwm_tuple_selection=fwm_tuple_selection,
+        n_workers=workers,
     )
     args.out_dir.mkdir(parents=True, exist_ok=True)
     _save_npz(args.out_dir / "fullband_mc_prefactor_free.npz", diagnostic)

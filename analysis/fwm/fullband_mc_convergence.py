@@ -33,8 +33,10 @@ def run_convergence(
     caps: list[int],
     seeds: list[int],
     fwm_samples: int,
+    fwm_frequency_samples: int,
     decimation: int,
     selection_mode: str,
+    workers: int,
 ) -> dict[str, np.ndarray]:
     rows = []
     for target in targets:
@@ -52,9 +54,11 @@ def run_convergence(
                     include_fwm=True,
                     xpm_samples=1,
                     fwm_samples=fwm_samples,
+                    fwm_frequency_samples=fwm_frequency_samples,
                     seed=seed,
                     max_fwm_tuples_per_target=cap,
                     fwm_tuple_selection=selection_mode,
+                    n_workers=workers,
                 )
                 rows.append(
                     (
@@ -77,8 +81,10 @@ def run_convergence(
         "sampled_count": data[:, 5].astype(int),
         "target_frequency": data[:, 6],
         "fwm_samples": np.array([int(fwm_samples)]),
+        "fwm_frequency_samples": np.array([int(fwm_frequency_samples)]),
         "decimation": np.array([int(decimation)]),
         "selection_mode": np.array([selection_mode]),
+        "workers": np.array([int(workers)]),
     }
 
 
@@ -120,7 +126,10 @@ def plot_convergence(data: dict[str, np.ndarray], out_dir: Path) -> list[Path]:
         ax.grid(True, which="both", alpha=0.25)
     axes[-1].set_xlabel("sampled FWM tuples per COI")
     axes[-1].set_xscale("log")
-    fig.suptitle(f"Full-grid FWM tuple-sampling convergence, inner samples={int(data['fwm_samples'][0])}")
+    fig.suptitle(
+        "Full-grid FWM tuple-sampling convergence, "
+        f"frequency samples={int(data['fwm_frequency_samples'][0])}"
+    )
     fig.tight_layout()
     pdf = out_dir / "fullband_fwm_tuple_convergence.pdf"
     png = pdf.with_suffix(".png")
@@ -138,11 +147,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--caps", type=str, default="500,1000,2000,5000")
     parser.add_argument("--seeds", type=str, default="1234,2234,3234")
     parser.add_argument("--fwm-samples", type=int, default=2000)
+    parser.add_argument("--fwm-frequency-samples", type=int, default=50)
     parser.add_argument("--decimation", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=1, help="Target-level worker processes per run; 0 uses all CPUs.")
     parser.add_argument(
         "--selection-mode",
         choices=("reservoir", "phase_proxy", "joint_reservoir", "exhaustive_support_mc"),
-        default="reservoir",
+        default="joint_reservoir",
     )
     return parser.parse_args()
 
@@ -157,8 +168,10 @@ def main() -> None:
         caps=_parse_ints(args.caps),
         seeds=_parse_ints(args.seeds),
         fwm_samples=args.fwm_samples,
+        fwm_frequency_samples=args.fwm_frequency_samples,
         decimation=args.decimation,
         selection_mode=args.selection_mode,
+        workers=args.workers,
     )
     args.out_dir.mkdir(parents=True, exist_ok=True)
     npz = args.out_dir / "fullband_fwm_tuple_convergence.npz"
