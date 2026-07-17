@@ -1,18 +1,18 @@
-# analysis.raman package
+# analysis.fwm.fwm_efficiency package
 
 ## Submodules
 
-## analysis.raman.undepleted_fB module
+## analysis.fwm.fwm_efficiency.undepleted_fB module
 
-```{automodule} analysis.raman.undepleted_fB
+```{automodule} analysis.fwm.fwm_efficiency.undepleted_fB
 :members:
 :show-inheritance:
 :undoc-members:
 ```
 
-## analysis.raman.watch_convergence module
+## analysis.fwm.fwm_efficiency.watch_convergence module
 
-```{automodule} analysis.raman.watch_convergence
+```{automodule} analysis.fwm.fwm_efficiency.watch_convergence
 :members:
 :show-inheritance:
 :undoc-members:
@@ -20,7 +20,7 @@
 
 ## Module contents
 
-```{automodule} analysis.raman
+```{automodule} analysis.fwm.fwm_efficiency
 :members:
 :show-inheritance:
 :undoc-members:

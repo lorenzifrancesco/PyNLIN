@@ -8,7 +8,7 @@
 analysis.fiber_analysis
 analysis.fwm
 analysis.methods
-analysis.raman
+analysis.fwm.fwm_efficiency
 analysis.runners
 analysis.runtime
 analysis.sandbox

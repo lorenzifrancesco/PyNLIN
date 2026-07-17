@@ -31,4 +31,4 @@ run directly from the repository root rather than imported as library modules.
 
 - `analysis/fitting_power_profiles.py`: profile-fitting experiments and approximation comparisons.
 - `analysis/fwm/*.py`: FWM brute-force, efficiency, and phase-matching studies.
-- `analysis/raman/*.py`: Raman-response, plane/omega diagnostics, undepleted fits, and convergence monitors.
+- `analysis/fwm/fwm_efficiency/*.py`: Raman-assisted FWM efficiency, plane/omega diagnostics, undepleted fits, and convergence monitors.

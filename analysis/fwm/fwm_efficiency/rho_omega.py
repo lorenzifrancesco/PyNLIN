@@ -12,13 +12,13 @@ from matplotlib.colors import TwoSlopeNorm
 import numpy as np
 from scipy.constants import c as c0
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from analysis.log_init import init_logging
 from loguru import logger as lg
-from analysis.raman.rho_utils import (
+from analysis.fwm.fwm_efficiency.rho_utils import (
     effective_length,
     load_fwm_config,
     rho_attenuation,
