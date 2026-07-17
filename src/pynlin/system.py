@@ -242,11 +242,11 @@ class System:
                     np.asarray(b1_prof, dtype=float),
                 )[None, :]
             else:
-                beta1 = np.interp(wavelengths, wl_prof, b1_prof)[None, :]
+                beta1 = _interp_with_linear_extrapolation(wavelengths, wl_prof, b1_prof)[None, :]
         # Keep beta2 profile disabled when constant dispersion is requested.
         if not force_constant and getattr(self.fiber, "_beta2_profile", None) is not None:
             wl_prof, b2_prof = self.fiber._beta2_profile
-            beta2 = np.interp(wavelengths, wl_prof, b2_prof)[None, :]
+            beta2 = _interp_with_linear_extrapolation(wavelengths, wl_prof, b2_prof)[None, :]
 
         b1_raw = getattr(self.fiber, "beta1", None)
         if beta1 is None and b1_raw is not None:

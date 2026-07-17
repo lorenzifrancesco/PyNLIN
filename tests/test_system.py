@@ -12,7 +12,7 @@ from pynlin.methods.td.cache import (
     s3_pair_nlin_kernel_path,
 )
 from pynlin.methods.td.reference_curves import load_s1_ref_dataset, save_s1_ref_nlin_curve
-from pynlin.system import System
+from pynlin.system import System, _interp_with_linear_extrapolation
 
 
 def _input_path(name: str) -> Path:
@@ -49,6 +49,16 @@ def test_active_studies_toml_beta_grids_are_finite():
     assert beta2.shape == (system.n_modes, freqs.size)
     assert np.all(np.isfinite(beta1))
     assert np.all(np.isfinite(beta2))
+
+
+def test_profile_interpolation_extrapolates_linearly_at_both_ends():
+    result = _interp_with_linear_extrapolation(
+        np.array([-1.0, 0.5, 3.0]),
+        np.array([0.0, 1.0, 2.0]),
+        np.array([1.0, 3.0, 7.0]),
+    )
+
+    assert np.allclose(result, [-1.0, 2.0, 11.0])
 
 
 def test_pcfm_struct_merges_bands_and_singular_band_section():
