@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
 
 from pynlin.methods.td.fwm_kernel import FWMChannels
 from pynlin.methods.td.fwm_mc import estimate_fwm_term_sum_dar_mc
-from pynlin.system import System
+from pynlin.system import System, _interp_with_linear_extrapolation
 from pynlin.utils import lambda2nu, nu2lambda
+
+
+FULLBAND_MC_CACHE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,26 @@ class FullbandMCDiagnostic:
     fwm_support_count: np.ndarray
     pruning: FWMPruningStats
     metadata: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _FullbandTargetTask:
+    out_i: int
+    target: int
+    freqs: np.ndarray
+    beta0_abs: np.ndarray
+    beta1: np.ndarray
+    beta2: np.ndarray
+    baud_rate: float
+    length: float
+    include_xpm: bool
+    include_fwm: bool
+    xpm_samples: int
+    fwm_samples: int
+    fwm_frequency_samples: int
+    seed: int
+    max_fwm_tuples_per_target: int | None
+    fwm_tuple_selection: str
 
 
 def estimate_zdw_frequency(system: System) -> float | None:
@@ -103,16 +128,15 @@ def gamma_grid(system: System, freqs: np.ndarray) -> np.ndarray:
     return gamma_ref * (freqs / freq_ref) * (aeff_ref / aeff)
 
 
-def _beta0_offsets_from_fiber(system: System, freqs: np.ndarray, target: int, beta1: np.ndarray) -> np.ndarray:
+def _beta0_abs_from_fiber(system: System, freqs: np.ndarray, beta1: np.ndarray) -> np.ndarray:
     beta_profile = getattr(system.fiber, "_beta_profile", None)
     freq_profile = getattr(system.fiber, "_freq_profile", None)
     if beta_profile is not None and freq_profile is not None:
-        beta_abs = np.interp(
+        return _interp_with_linear_extrapolation(
             np.asarray(freqs, dtype=float),
             np.asarray(freq_profile, dtype=float),
             np.asarray(beta_profile[1], dtype=float),
         )
-        return beta_abs - float(beta_abs[int(target)])
 
     omega = 2.0 * np.pi * np.asarray(freqs, dtype=float)
     order = np.argsort(omega)
@@ -123,7 +147,7 @@ def _beta0_offsets_from_fiber(system: System, freqs: np.ndarray, target: int, be
     beta_sorted[1:] = np.cumsum(increments)
     beta_abs = np.empty_like(beta_sorted)
     beta_abs[order] = beta_sorted
-    return beta_abs - float(beta_abs[int(target)])
+    return beta_abs
 
 
 def _channel_params(
@@ -165,12 +189,26 @@ def fwm_support_survives(freqs: np.ndarray, baud_rate: float, target: int, a: in
     return abs(mismatch) <= 2.0 * float(baud_rate)
 
 
+def is_nondegenerate_fwm_tuple(target: int, a: int, b: int, c: int) -> bool:
+    """Return True for strict three-distinct-interferer FWM tuples.
+
+    XPM is accounted for separately as target plus one repeated interferer, so
+    the FWM component excludes every tuple with target overlap or repeated
+    channels to avoid double counting.
+    """
+    t = int(target)
+    vals = (int(a), int(b), int(c))
+    return t not in vals and len(set(vals)) == 3
+
+
 def iter_support_pruned_fwm_tuples(freqs: np.ndarray, baud_rate: float, target: int):
     n = int(freqs.size)
     for a in range(n):
         for b in range(n):
             for c in range(n):
-                if fwm_support_survives(freqs, baud_rate, target, a, b, c):
+                if is_nondegenerate_fwm_tuple(target, a, b, c) and fwm_support_survives(
+                    freqs, baud_rate, target, a, b, c
+                ):
                     yield a, b, c
 
 
@@ -193,9 +231,9 @@ def collect_support_pruned_fwm_tuples(
     ``|f_a + f_b - f_c - f_target| <= 2B``.
 
     This implementation sorts the channel frequencies once and uses binary
-    search to find all valid ``c`` indices for each ``(a,b)``. If
-    ``max_tuples`` is provided, it returns a uniform reservoir sample of the
-    support-surviving tuples instead of the first tuples in lexical order.
+    search to find all valid ``c`` indices for each ``(a,b)``. When
+    ``max_tuples`` is provided, ``selection_mode`` controls how the returned
+    subset is selected from the support-surviving tuples.
     """
     freqs = np.asarray(freqs, dtype=float).reshape(-1)
     n = int(freqs.size)
@@ -207,17 +245,61 @@ def collect_support_pruned_fwm_tuples(
     sorted_freqs = freqs[order]
     ft = float(freqs[int(target)])
     width = 2.0 * float(baud_rate)
-    if selection_mode not in {"reservoir", "phase_proxy"}:
-        raise ValueError("selection_mode must be 'reservoir' or 'phase_proxy'")
+    if selection_mode not in {"reservoir", "systematic", "phase_proxy"}:
+        raise ValueError("selection_mode must be 'reservoir', 'systematic', or 'phase_proxy'")
     if selection_mode == "phase_proxy" and beta0_offsets is None:
         raise ValueError("phase_proxy selection requires beta0_offsets")
     rng = np.random.default_rng(seed)
-    selected: list[tuple[int, int, int]] = []
     count = 0
 
     if selection_mode == "phase_proxy":
         beta0 = np.asarray(beta0_offsets, dtype=float).reshape(-1)
         scored: list[tuple[float, tuple[int, int, int]]] = []
+        selected: list[tuple[int, int, int]] = []
+    elif selection_mode == "systematic" and max_tuples is not None:
+        # Count first, then take an evenly spaced sample over the full support.
+        # This has much lower target-to-target jitter than reservoir sampling for
+        # heavy-tailed FWM tuple contributions.
+        for a in range(n):
+            fa = float(freqs[a])
+            for b in range(n):
+                center = fa + float(freqs[b]) - ft
+                lo = int(np.searchsorted(sorted_freqs, center - width, side="left"))
+                hi = int(np.searchsorted(sorted_freqs, center + width, side="right"))
+                if hi <= lo:
+                    continue
+                for c in order[lo:hi]:
+                    if is_nondegenerate_fwm_tuple(target, a, b, int(c)):
+                        count += 1
+        if count == 0:
+            return 0, []
+        if count <= max_tuples:
+            max_tuples = None
+            selected = []
+            count = 0
+        else:
+            offset = float(rng.random())
+            ranks = np.floor((np.arange(max_tuples, dtype=float) + offset) * count / max_tuples).astype(int)
+            rank_set = set(int(v) for v in ranks)
+            selected = []
+            seen = 0
+            for a in range(n):
+                fa = float(freqs[a])
+                for b in range(n):
+                    center = fa + float(freqs[b]) - ft
+                    lo = int(np.searchsorted(sorted_freqs, center - width, side="left"))
+                    hi = int(np.searchsorted(sorted_freqs, center + width, side="right"))
+                    if hi <= lo:
+                        continue
+                    for c in order[lo:hi]:
+                        if not is_nondegenerate_fwm_tuple(target, a, b, int(c)):
+                            continue
+                        if seen in rank_set:
+                            selected.append((a, b, int(c)))
+                        seen += 1
+            return count, selected
+    else:
+        selected = []
 
     for a in range(n):
         fa = float(freqs[a])
@@ -228,6 +310,8 @@ def collect_support_pruned_fwm_tuples(
             if hi <= lo:
                 continue
             for c in order[lo:hi]:
+                if not is_nondegenerate_fwm_tuple(target, a, b, int(c)):
+                    continue
                 tup = (a, b, int(c))
                 if selection_mode == "phase_proxy":
                     delta_beta0 = abs(float(beta0[a] + beta0[b] - beta0[int(c)] - beta0[int(target)]))
@@ -325,33 +409,36 @@ def estimate_target_fwm_joint_reservoir_mc(
     n_samples: int,
     seed: int,
     alpha: float = 0.0,
+    frequency_samples: int = 50,
 ) -> tuple[float, float, int, int]:
     """Unbiased joint tuple/frequency MC estimate for one target FWM sum."""
     n_samples = int(n_samples)
+    n_freq = max(int(frequency_samples), 1)
     survivor_count, survivors = collect_support_pruned_fwm_tuples(
         freqs,
         baud_rate,
         int(target),
         max_tuples=n_samples,
         seed=seed,
-        selection_mode="reservoir",
+        selection_mode="systematic",
     )
     if not survivors:
         return 0.0, 0.0, survivor_count, 0
 
     tuples = np.asarray(survivors, dtype=int)
+    n_tuples = tuples.shape[0]
     a = tuples[:, 0]
     b = tuples[:, 1]
     c = tuples[:, 2]
     t = int(target)
     rng = np.random.default_rng(seed + 17_171)
-    r = 2.0 * np.pi * (rng.random((3, tuples.shape[0])) - 0.5)
+    r = 2.0 * np.pi * (rng.random((3, n_tuples, n_freq)) - 0.5)
     omega_a_norm = r[0]
     omega_b_norm = r[1]
     omega_c_norm = r[2]
 
     delta_omega = 2.0 * np.pi * (freqs[a] + freqs[b] - freqs[c] - freqs[t])
-    omega_d_norm = omega_a_norm + omega_b_norm - omega_c_norm + delta_omega / float(baud_rate)
+    omega_d_norm = omega_a_norm + omega_b_norm - omega_c_norm + delta_omega[:, np.newaxis] / float(baud_rate)
     mask = (omega_d_norm > -np.pi) & (omega_d_norm < np.pi)
 
     omega_a = omega_a_norm * float(baud_rate)
@@ -359,23 +446,23 @@ def estimate_target_fwm_joint_reservoir_mc(
     omega_c = omega_c_norm * float(baud_rate)
     omega_d = omega_d_norm * float(baud_rate)
     delta_beta = (
-        beta0_offsets[a]
-        + beta1[a] * omega_a
-        + 0.5 * beta2[a] * omega_a**2
-        + beta0_offsets[b]
-        + beta1[b] * omega_b
-        + 0.5 * beta2[b] * omega_b**2
-        - beta0_offsets[c]
-        - beta1[c] * omega_c
-        - 0.5 * beta2[c] * omega_c**2
-        - beta1[t] * omega_d
-        - 0.5 * beta2[t] * omega_d**2
+        beta0_offsets[a, np.newaxis]
+        + beta1[a, np.newaxis] * omega_a
+        + 0.5 * beta2[a, np.newaxis] * omega_a**2
+        + beta0_offsets[b, np.newaxis]
+        + beta1[b, np.newaxis] * omega_b
+        + 0.5 * beta2[b, np.newaxis] * omega_b**2
+        - beta0_offsets[c, np.newaxis]
+        - beta1[c, np.newaxis] * omega_c
+        - 0.5 * beta2[c, np.newaxis] * omega_c**2
+        - beta1[t, np.newaxis] * omega_d
+        - 0.5 * beta2[t, np.newaxis] * omega_d**2
     )
     values = _propagator_abs2(delta_beta, length, alpha) * mask
     mean = float(np.mean(values))
     stderr = float(np.std(values, ddof=1) / np.sqrt(values.size)) if values.size > 1 else 0.0
     scale = float(survivor_count)
-    return scale * mean, scale * stderr, survivor_count, int(tuples.shape[0])
+    return scale * mean, scale * stderr, survivor_count, int(n_tuples)
 
 
 def _support_tuple_arrays(freqs: np.ndarray, baud_rate: float, target: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -397,6 +484,14 @@ def _support_tuple_arrays(freqs: np.ndarray, baud_rate: float, target: int) -> t
             if hi <= lo:
                 continue
             c_vals = order[lo:hi].astype(int, copy=False)
+            if c_vals.size:
+                keep = np.array(
+                    [is_nondegenerate_fwm_tuple(target, a, b, int(c)) for c in c_vals],
+                    dtype=bool,
+                )
+                c_vals = c_vals[keep]
+            if c_vals.size == 0:
+                continue
             a_parts.append(np.full(c_vals.size, a, dtype=int))
             b_parts.append(np.full(c_vals.size, b, dtype=int))
             c_parts.append(c_vals.copy())
@@ -468,6 +563,108 @@ def estimate_target_fwm_exhaustive_support_mc(
     return estimate, stderr, support_count, support_count
 
 
+def _compute_target_prefactor_free(task: _FullbandTargetTask) -> tuple[int, float, float, int, int]:
+    out_i = task.out_i
+    target = task.target
+    freqs = task.freqs
+    beta0_abs = task.beta0_abs
+    beta1 = task.beta1
+    beta2 = task.beta2
+    baud_rate = task.baud_rate
+    length = task.length
+    seed = task.seed
+    beta0_offsets = beta0_abs - float(beta0_abs[target])
+
+    xpm_value = 0.0
+    if task.include_xpm:
+        rng = np.random.default_rng(seed + 10_000 * target)
+        r = 2.0 * np.pi * (rng.random((3, task.xpm_samples)) - 0.5)
+        omega_in = r[0] * baud_rate
+        omega_1 = r[1] * baud_rate
+        omega_2 = r[2] * baud_rate
+        omega_out_norm = r[0] - r[1] + r[2]
+        mask = (omega_out_norm > -np.pi) & (omega_out_norm < np.pi)
+        omega_out = omega_out_norm * baud_rate
+
+        delta_beta_target = (
+            beta1[target] * (omega_out - omega_in)
+            + 0.5 * beta2[target] * (omega_out**2 - omega_in**2)
+        )
+        delta_omega = omega_1 - omega_2
+        omega_sq_diff = omega_1**2 - omega_2**2
+
+        total_xpm = 0.0
+        for b in range(freqs.size):
+            if b == target:
+                continue
+            db = delta_beta_target + beta1[b] * delta_omega + 0.5 * beta2[b] * omega_sq_diff
+            values = _propagator_abs2(db, length, 0.0) * mask
+            total_xpm += float(np.mean(values))
+        xpm_value = total_xpm
+
+    fwm_value = 0.0
+    survivor_count = 0
+    sampled_count = 0
+    if task.include_fwm and task.fwm_tuple_selection == "exhaustive_support_mc":
+        estimate, _, survivor_count, sampled_count = estimate_target_fwm_exhaustive_support_mc(
+            freqs=freqs,
+            beta0_offsets=beta0_offsets,
+            beta1=beta1,
+            beta2=beta2,
+            baud_rate=baud_rate,
+            length=length,
+            target=target,
+            n_frequency_samples=task.fwm_frequency_samples,
+            seed=seed + 999_983 * target,
+            alpha=0.0,
+        )
+        fwm_value = estimate
+    elif task.include_fwm and task.fwm_tuple_selection == "joint_reservoir":
+        estimate, _, survivor_count, sampled_count = estimate_target_fwm_joint_reservoir_mc(
+            freqs=freqs,
+            beta0_offsets=beta0_offsets,
+            beta1=beta1,
+            beta2=beta2,
+            baud_rate=baud_rate,
+            length=length,
+            target=target,
+            n_samples=int(task.max_fwm_tuples_per_target or task.fwm_samples),
+            seed=seed + 999_983 * target,
+            alpha=0.0,
+            frequency_samples=task.fwm_frequency_samples,
+        )
+        fwm_value = estimate
+    elif task.include_fwm:
+        survivor_count, survivors = collect_support_pruned_fwm_tuples(
+            freqs,
+            baud_rate,
+            target,
+            max_tuples=task.max_fwm_tuples_per_target,
+            seed=seed + 999_983 * target,
+            selection_mode=task.fwm_tuple_selection,
+            beta0_offsets=beta0_offsets,
+        )
+        sampled_count = len(survivors)
+        sampled_sum = 0.0
+        for tuple_i, (a, b, c) in enumerate(survivors):
+            channels = _channel_params(freqs, beta0_offsets, beta1, beta2, target, int(a), int(b), int(c))
+            est = estimate_fwm_term_sum_dar_mc(
+                channels=channels,
+                baud_rate=baud_rate,
+                length=length,
+                n_samples=task.fwm_samples,
+                alpha=0.0,
+                seed=seed + 1_000_000 * target + 10_000 * int(a) + 100 * int(b) + int(c) + tuple_i,
+            )
+            sampled_sum += est.total
+        if survivors and task.fwm_tuple_selection == "reservoir":
+            fwm_value = sampled_sum * float(survivor_count) / float(len(survivors))
+        elif survivors:
+            fwm_value = sampled_sum
+
+    return out_i, xpm_value, fwm_value, int(survivor_count), int(sampled_count)
+
+
 def compute_fullband_prefactor_free_mc(
     system: System,
     *,
@@ -477,9 +674,11 @@ def compute_fullband_prefactor_free_mc(
     include_fwm: bool = True,
     xpm_samples: int = 50_000,
     fwm_samples: int = 20_000,
+    fwm_frequency_samples: int = 50,
     seed: int = 1234,
     max_fwm_tuples_per_target: int | None = None,
-    fwm_tuple_selection: str = "reservoir",
+    fwm_tuple_selection: str = "joint_reservoir",
+    n_workers: int = 1,
 ) -> FullbandMCDiagnostic:
     kept_indices, freqs = decimated_frequency_grid(system, decimation)
     baud_rate = float(system.pulse.baud_rate)
@@ -487,6 +686,7 @@ def compute_fullband_prefactor_free_mc(
     beta1_grid, beta2_grid = system.beta_grids(freqs=freqs)
     beta1 = np.asarray(beta1_grid[0], dtype=float)
     beta2 = np.asarray(beta2_grid[0], dtype=float)
+    beta0_abs = _beta0_abs_from_fiber(system, freqs, beta1)
 
     if target_indices is None:
         targets = np.arange(freqs.size, dtype=int)
@@ -504,97 +704,43 @@ def compute_fullband_prefactor_free_mc(
     survivors_total = 0
     evaluated_total = 0
 
-    for out_i, target in enumerate(targets):
-        beta0_offsets = _beta0_offsets_from_fiber(system, freqs, int(target), beta1)
-        if include_xpm:
-            for b in range(freqs.size):
-                if b == target:
-                    continue
-                est, _ = estimate_xpm_n1_local_taylor_mc(
-                    beta0_offsets=beta0_offsets,
-                    beta1=beta1,
-                    beta2=beta2,
-                    baud_rate=baud_rate,
-                    alpha=0.0,
-                    length=length,
-                    n_samples=xpm_samples,
-                    target=int(target),
-                    interferer=int(b),
-                    seed=seed + 10_000 * int(target) + int(b),
-                )
-                xpm[out_i] += est
+    tasks = [
+        _FullbandTargetTask(
+            out_i=int(out_i),
+            target=int(target),
+            freqs=freqs,
+            beta0_abs=beta0_abs,
+            beta1=beta1,
+            beta2=beta2,
+            baud_rate=baud_rate,
+            length=length,
+            include_xpm=bool(include_xpm),
+            include_fwm=bool(include_fwm),
+            xpm_samples=int(xpm_samples),
+            fwm_samples=int(fwm_samples),
+            fwm_frequency_samples=int(fwm_frequency_samples),
+            seed=int(seed),
+            max_fwm_tuples_per_target=max_fwm_tuples_per_target,
+            fwm_tuple_selection=str(fwm_tuple_selection),
+        )
+        for out_i, target in enumerate(targets)
+    ]
+    workers = int(n_workers)
+    if workers < 1:
+        workers = os.cpu_count() or 1
+    if workers == 1 or len(tasks) <= 1:
+        results = [_compute_target_prefactor_free(task) for task in tasks]
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_compute_target_prefactor_free, tasks))
 
-        if include_fwm and fwm_tuple_selection == "exhaustive_support_mc":
-            estimate, _, survivor_count, sampled_count = estimate_target_fwm_exhaustive_support_mc(
-                freqs=freqs,
-                beta0_offsets=beta0_offsets,
-                beta1=beta1,
-                beta2=beta2,
-                baud_rate=baud_rate,
-                length=length,
-                target=int(target),
-                n_frequency_samples=int(fwm_samples),
-                seed=seed + 999_983 * int(target),
-                alpha=0.0,
-            )
-            survivors_total += survivor_count
-            fwm_support_counts[out_i] = survivor_count
-            fwm_counts[out_i] = sampled_count
-            evaluated_total += sampled_count
-            fwm[out_i] = estimate
-        elif include_fwm and fwm_tuple_selection == "joint_reservoir":
-            estimate, _, survivor_count, sampled_count = estimate_target_fwm_joint_reservoir_mc(
-                freqs=freqs,
-                beta0_offsets=beta0_offsets,
-                beta1=beta1,
-                beta2=beta2,
-                baud_rate=baud_rate,
-                length=length,
-                target=int(target),
-                n_samples=int(max_fwm_tuples_per_target or fwm_samples),
-                seed=seed + 999_983 * int(target),
-                alpha=0.0,
-            )
-            survivors_total += survivor_count
-            fwm_support_counts[out_i] = survivor_count
-            fwm_counts[out_i] = sampled_count
-            evaluated_total += sampled_count
-            fwm[out_i] = estimate
-        elif include_fwm:
-            survivor_count, survivors = collect_support_pruned_fwm_tuples(
-                freqs,
-                baud_rate,
-                int(target),
-                max_tuples=max_fwm_tuples_per_target,
-                seed=seed + 999_983 * int(target),
-                selection_mode=fwm_tuple_selection,
-                beta0_offsets=beta0_offsets,
-            )
-            survivors_total += survivor_count
-            fwm_support_counts[out_i] = survivor_count
-            fwm_counts[out_i] = len(survivors)
-            evaluated_total += len(survivors)
-            sampled_sum = 0.0
-            for tuple_i, (a, b, c) in enumerate(survivors):
-                channels = _channel_params(freqs, beta0_offsets, beta1, beta2, int(target), int(a), int(b), int(c))
-                est = estimate_fwm_term_sum_dar_mc(
-                    channels=channels,
-                    baud_rate=baud_rate,
-                    length=length,
-                    n_samples=fwm_samples,
-                    alpha=0.0,
-                    seed=seed + 1_000_000 * int(target) + 10_000 * int(a) + 100 * int(b) + int(c) + tuple_i,
-                )
-                sampled_sum += est.total
-            if survivors and fwm_tuple_selection == "reservoir":
-                # Uniform reservoir sampling estimates the full support-pruned
-                # FWM tuple sum by scaling the sampled mean by the survivor count.
-                fwm[out_i] = sampled_sum * float(survivor_count) / float(len(survivors))
-            elif survivors:
-                # Phase-proxy mode intentionally returns a lower-bound / dominant
-                # contribution from the most phase-matched tuples. Do not scale it
-                # to all support survivors because the sample is not uniform.
-                fwm[out_i] = sampled_sum
+    for out_i, xpm_value, fwm_value, survivor_count, sampled_count in results:
+        xpm[out_i] = xpm_value
+        fwm[out_i] = fwm_value
+        fwm_support_counts[out_i] = survivor_count
+        fwm_counts[out_i] = sampled_count
+        survivors_total += survivor_count
+        evaluated_total += sampled_count
 
     total = xpm + fwm
     return FullbandMCDiagnostic(
@@ -612,6 +758,7 @@ def compute_fullband_prefactor_free_mc(
         ),
         metadata={
             "calculation": "prefactor_free_fullband_xpm_fwm_mc",
+            "cache_version": int(FULLBAND_MC_CACHE_VERSION),
             "decimation": int(decimation),
             "n_channels_decimated": int(freqs.size),
             "baud_rate": baud_rate,
@@ -619,8 +766,13 @@ def compute_fullband_prefactor_free_mc(
             "zdw_frequency": estimate_zdw_frequency(system),
             "gamma_model": "gamma_ref * (f/f_ref) * (Aeff_ref/Aeff(f))",
             "xpm_beta_model": "channel_local_beta0_beta1_beta2",
+            "xpm_grid": "calculation",
+            "fwm_tuple_class": "nondegenerate_distinct_channels",
+            "fwm_tuple_sample_mode": "systematic_full_support" if fwm_tuple_selection == "joint_reservoir" else fwm_tuple_selection,
             "xpm_samples": int(xpm_samples),
             "fwm_samples": int(fwm_samples),
+            "fwm_frequency_samples": int(fwm_frequency_samples),
+            "n_workers": int(workers),
             "seed": int(seed),
             "include_xpm": bool(include_xpm),
             "include_fwm": bool(include_fwm),
@@ -641,7 +793,9 @@ __all__ = [
     "estimate_target_fwm_exhaustive_support_mc",
     "estimate_xpm_n1_local_taylor_mc",
     "fwm_support_survives",
+    "is_nondegenerate_fwm_tuple",
     "gamma_grid",
+    "FULLBAND_MC_CACHE_VERSION",
     "collect_support_pruned_fwm_tuples",
     "iter_support_pruned_fwm_tuples",
 ]

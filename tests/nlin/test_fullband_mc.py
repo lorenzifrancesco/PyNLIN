@@ -31,6 +31,16 @@ def test_gamma_grid_scales_with_frequency_and_effective_area():
     assert gamma[1] == pytest.approx(2.0 * (freqs[1] / freq_ref) * 2.0)
 
 
+def test_decimated_frequency_grid_strides_across_full_band():
+    freqs = np.arange(10, dtype=float)
+    system = SimpleNamespace(wdm=_DummyWDM(freqs))
+
+    indices, decimated = fullband_mc.decimated_frequency_grid(system, factor=4)
+
+    assert np.array_equal(indices, np.array([0, 4, 8]))
+    assert np.array_equal(decimated, freqs[[0, 4, 8]])
+
+
 def test_local_taylor_xpm_matches_scalar_dar_for_constant_beta2():
     baud_rate = 10e9
     length = 100e3
@@ -63,31 +73,109 @@ def test_local_taylor_xpm_matches_scalar_dar_for_constant_beta2():
     assert local == pytest.approx(scalar.n1, rel=1e-14)
 
 
-def test_fullband_xpm_uses_local_taylor_estimator(monkeypatch):
-    freqs = np.array([190e12, 190.1e12])
-    beta2 = np.array([[2e-26, 6e-26]])
-    seen = []
+def test_support_pruned_fwm_tuples_exclude_degenerate_terms():
+    freqs = np.arange(5, dtype=float) * 10e9
 
-    def fake_estimate_xpm_n1_local_taylor_mc(**kwargs):
-        seen.append((kwargs["target"], kwargs["interferer"], tuple(kwargs["beta2"])))
-        return 1.0, 0.0
+    count, tuples = fullband_mc.collect_support_pruned_fwm_tuples(
+        freqs,
+        baud_rate=100e9,
+        target=1,
+        selection_mode="reservoir",
+    )
+
+    assert count == 24
+    assert len(tuples) == 24
+    for a, b, c in tuples:
+        assert fullband_mc.is_nondegenerate_fwm_tuple(1, a, b, c)
+
+
+def test_systematic_fwm_tuple_sample_spans_support():
+    freqs = np.arange(8, dtype=float) * 10e9
+
+    count, tuples = fullband_mc.collect_support_pruned_fwm_tuples(
+        freqs,
+        baud_rate=100e9,
+        target=3,
+        max_tuples=5,
+        seed=1234,
+        selection_mode="systematic",
+    )
+
+    assert count > len(tuples)
+    assert len(tuples) == 5
+    assert len({a for a, _, _ in tuples}) > 1
+    assert len({b for _, b, _ in tuples}) > 1
+    for a, b, c in tuples:
+        assert fullband_mc.is_nondegenerate_fwm_tuple(3, a, b, c)
+
+
+def test_fullband_xpm_uses_calculation_interferer_grid(monkeypatch):
+    freqs_full = np.array([190e12, 190.05e12, 190.1e12, 190.15e12])
+    beta2_dec = np.array([[2e-26, 6e-26]])
+    beta2_full = np.array([[1e-26, 3e-26, 6e-26, 9e-26]])
+
+    propagator_args = []
+
+    def fake_propagator_abs2(db, length, alpha):
+        propagator_args.append(db)
+        return db * 0.0
+
+    def beta_grids(freqs=None):
+        if freqs is None or len(freqs) == 2:
+            return (np.zeros_like(beta2_dec), beta2_dec)
+        return (np.zeros_like(beta2_full), beta2_full)
 
     system = SimpleNamespace(
-        wdm=_DummyWDM(freqs),
+        wdm=_DummyWDM(freqs_full),
         pulse=SimpleNamespace(baud_rate=10e9),
         fiber_length=1.0,
         fiber=SimpleNamespace(gamma=1.0, effective_area=80e-12),
         effective_area=80e-12,
-        beta_grids=lambda freqs=None: (np.zeros_like(beta2), beta2),
+        beta_grids=beta_grids,
     )
-    monkeypatch.setattr(fullband_mc, "estimate_xpm_n1_local_taylor_mc", fake_estimate_xpm_n1_local_taylor_mc)
+
+    monkeypatch.setattr(fullband_mc, "_propagator_abs2", fake_propagator_abs2)
 
     diag = fullband_mc.compute_fullband_prefactor_free_mc(
         system,
         include_xpm=True,
         include_fwm=False,
         xpm_samples=1,
+        decimation=2,
     )
 
-    assert seen == [(0, 1, tuple(beta2[0])), (1, 0, tuple(beta2[0]))]
-    assert np.allclose(diag.xpm, [1.0, 1.0])
+    assert len(propagator_args) == 2, (
+        f"Expected 2 _propagator_abs2 calls (2 targets × 1 calculation-grid interferer), got {len(propagator_args)}"
+    )
+    assert np.allclose(diag.xpm, [0.0, 0.0])
+    assert diag.metadata["xpm_grid"] == "calculation"
+
+
+def test_fullband_mc_parallel_matches_sequential():
+    freqs = np.array([190.0e12, 190.05e12, 190.1e12, 190.15e12])
+    beta2 = np.full((1, freqs.size), 2e-26)
+    system = SimpleNamespace(
+        wdm=_DummyWDM(freqs),
+        pulse=SimpleNamespace(baud_rate=10e9),
+        fiber_length=1.0,
+        fiber=SimpleNamespace(gamma=1.0, effective_area=80e-12),
+        effective_area=80e-12,
+        beta_grids=lambda freqs=None: (np.zeros((1, len(freqs))), beta2[:, : len(freqs)]),
+    )
+
+    kwargs = dict(
+        include_xpm=True,
+        include_fwm=True,
+        xpm_samples=8,
+        fwm_samples=4,
+        fwm_frequency_samples=3,
+        max_fwm_tuples_per_target=4,
+        seed=1234,
+    )
+    sequential = fullband_mc.compute_fullband_prefactor_free_mc(system, n_workers=1, **kwargs)
+    parallel = fullband_mc.compute_fullband_prefactor_free_mc(system, n_workers=2, **kwargs)
+
+    assert np.allclose(parallel.xpm, sequential.xpm)
+    assert np.allclose(parallel.fwm, sequential.fwm)
+    assert np.array_equal(parallel.fwm_support_count, sequential.fwm_support_count)
+    assert np.array_equal(parallel.fwm_tuple_count, sequential.fwm_tuple_count)
