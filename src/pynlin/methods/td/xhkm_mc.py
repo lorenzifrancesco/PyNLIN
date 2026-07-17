@@ -7,8 +7,74 @@ import numpy as np
 
 
 @dataclass(frozen=True)
+class XPMTaylorDispersion:
+    """Channel-local target/interferer dispersion through fourth order.
+
+    Arrays contain the target first and the interferer second. Frequencies in
+    the Dar integrals are normalized by ``baud_rate``.
+    """
+
+    beta0: np.ndarray
+    beta1: np.ndarray
+    beta2: np.ndarray
+    baud_rate: float
+    beta3: np.ndarray | None = None
+    beta4: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("beta0", "beta1", "beta2", "beta3", "beta4"):
+            values = getattr(self, name)
+            if values is None:
+                continue
+            array = np.asarray(values, dtype=float)
+            if array.shape != (2,):
+                raise ValueError(f"{name} must contain target and interferer values")
+            object.__setattr__(self, name, array)
+        if float(self.baud_rate) <= 0.0:
+            raise ValueError("baud_rate must be positive")
+
+    def evaluate(self, channel: int, omega_normalized: np.ndarray) -> np.ndarray:
+        omega = np.asarray(omega_normalized, dtype=float) * float(self.baud_rate)
+        beta3 = 0.0 if self.beta3 is None else float(self.beta3[channel])
+        beta4 = 0.0 if self.beta4 is None else float(self.beta4[channel])
+        return (
+            float(self.beta0[channel])
+            + float(self.beta1[channel]) * omega
+            + 0.5 * float(self.beta2[channel]) * omega**2
+            + (beta3 / 6.0) * omega**3
+            + (beta4 / 24.0) * omega**4
+        )
+
+    def mismatch(
+        self,
+        channel_a: int,
+        omega_a: np.ndarray,
+        channel_b: int,
+        omega_b: np.ndarray,
+        channel_c: int,
+        omega_c: np.ndarray,
+        channel_d: int,
+        omega_d: np.ndarray,
+    ) -> np.ndarray:
+        return (
+            self.evaluate(channel_a, omega_a)
+            + self.evaluate(channel_b, omega_b)
+            - self.evaluate(channel_c, omega_c)
+            - self.evaluate(channel_d, omega_d)
+        )
+
+
+@dataclass(frozen=True)
 class XhkmMCSums:
-    """Prefactor-free Monte Carlo estimates of Dar-style Xhkm sums."""
+    """Prefactor-free Monte Carlo estimates of Dar-style Xhkm aggregates.
+
+    ``n1`` and ``n2`` are direct aggregate MC estimates.  The collision-sector
+    fields are experimental residual estimators reconstructed by subtracting
+    independently sampled aggregates; unlike the exact sectors returned by
+    :func:`pynlin.methods.td.xhkm_sums.compute_xhkm_sums`, a finite-sample
+    residual can be negative and must not be presented as a resolved
+    nonnegative sum of ``|X[h,r,m]|**2`` terms.
+    """
 
     n1: float
     n2: float
@@ -61,7 +127,9 @@ def assert_flat_signal_power_profile(system: object) -> None:
             )
 
 
-def _draw_uniform_phases_with_rng(rng: np.random.Generator, dim: int, n_samples: int) -> np.ndarray:
+def _draw_uniform_phases_with_rng(
+    rng: np.random.Generator, dim: int, n_samples: int
+) -> np.ndarray:
     return 2.0 * np.pi * (rng.random((int(dim), int(n_samples))) - 0.5)
 
 
@@ -99,11 +167,61 @@ def _link_function(
     out = np.empty_like(arg, dtype=complex)
     near_zero = np.abs(exponent) < 1e-14
     out[near_zero] = complex(length)
-    out[~near_zero] = (np.exp(exponent[~near_zero] * float(length)) - 1.0) / exponent[~near_zero]
+    out[~near_zero] = (np.exp(exponent[~near_zero] * float(length)) - 1.0) / exponent[
+        ~near_zero
+    ]
     return (
         np.exp(1j * arg * float(phase_delay))
         * out
         * _span_factor(arg * float(beta2) * float(length), int(nspan), sign=1)
+    )
+
+
+def _link_from_delta_beta(
+    delta_beta: np.ndarray,
+    *,
+    alpha: float,
+    length: float,
+    nspan: int,
+) -> np.ndarray:
+    """Stable link function for an explicitly evaluated physical mismatch."""
+    delta_beta = np.asarray(delta_beta, dtype=float)
+    exponent = 1j * delta_beta - float(alpha)
+    out = np.empty_like(delta_beta, dtype=complex)
+    near_zero = np.abs(exponent) < 1e-14
+    out[near_zero] = complex(length)
+    out[~near_zero] = (np.exp(exponent[~near_zero] * float(length)) - 1.0) / exponent[
+        ~near_zero
+    ]
+    return out * _span_factor(delta_beta * float(length), int(nspan), sign=1)
+
+
+def _link(
+    arg: np.ndarray,
+    *,
+    beta2: float,
+    delta_beta: np.ndarray | None,
+    alpha: float,
+    length: float,
+    nspan: int,
+    phase_delay: float,
+) -> np.ndarray:
+    if delta_beta is None:
+        return _link_function(
+            arg,
+            beta2=beta2,
+            alpha=alpha,
+            length=length,
+            nspan=nspan,
+            phase_delay=phase_delay,
+        )
+    if phase_delay != 0.0:
+        raise ValueError("local Taylor dispersion currently requires phase_delay=0")
+    return _link_from_delta_beta(
+        delta_beta,
+        alpha=alpha,
+        length=length,
+        nspan=nspan,
     )
 
 
@@ -117,6 +235,7 @@ def _estimate_nyquist_2pc_and_2pc_plus_3pca_samples(
     phase_delay: float,
     n_samples: int,
     rng: np.random.Generator,
+    dispersion: XPMTaylorDispersion | None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Estimate ``N_2PC`` and ``N_2PC + N_3PCa`` from Golani/Dar S1/S2.
 
@@ -135,17 +254,26 @@ def _estimate_nyquist_2pc_and_2pc_plus_3pca_samples(
     a, u, b, v = wp
     mask_a = (np.abs(x + a) <= np.pi) & (np.abs(u - x) <= np.pi)
     mask_b = (np.abs(x + b) <= np.pi) & (np.abs(v - x) <= np.pi)
-    phi_a = _link_function(
-        x * (x + a - u - omega),
+    arg_a = x * (x + a - u - omega)
+    arg_b = x * (x + b - v - omega)
+    delta_a = None
+    delta_b = None
+    if dispersion is not None:
+        delta_a = dispersion.mismatch(1, u - x, 0, x + a, 1, u, 0, a)
+        delta_b = dispersion.mismatch(1, v - x, 0, x + b, 1, v, 0, b)
+    phi_a = _link(
+        arg_a,
         beta2=beta2,
+        delta_beta=delta_a,
         alpha=alpha,
         length=length,
         nspan=nspan,
         phase_delay=phase_delay,
     )
-    phi_b = _link_function(
-        x * (x + b - v - omega),
+    phi_b = _link(
+        arg_b,
         beta2=beta2,
+        delta_beta=delta_b,
         alpha=alpha,
         length=length,
         nspan=nspan,
@@ -160,17 +288,26 @@ def _estimate_nyquist_2pc_and_2pc_plus_3pca_samples(
     x = u - v
     mask_a = np.abs(x + a) <= np.pi
     mask_b = np.abs(x + b) <= np.pi
-    phi_a = _link_function(
-        x * (a - v - omega),
+    arg_a = x * (a - v - omega)
+    arg_b = x * (b - v - omega)
+    delta_a = None
+    delta_b = None
+    if dispersion is not None:
+        delta_a = dispersion.mismatch(0, x + a, 1, v, 0, a, 1, u)
+        delta_b = dispersion.mismatch(0, x + b, 1, v, 0, b, 1, u)
+    phi_a = _link(
+        arg_a,
         beta2=beta2,
+        delta_beta=delta_a,
         alpha=alpha,
         length=length,
         nspan=nspan,
         phase_delay=phase_delay,
     )
-    phi_b = _link_function(
-        x * (b - v - omega),
+    phi_b = _link(
+        arg_b,
         beta2=beta2,
+        delta_beta=delta_b,
         alpha=alpha,
         length=length,
         nspan=nspan,
@@ -179,6 +316,86 @@ def _estimate_nyquist_2pc_and_2pc_plus_3pca_samples(
     n_2pc_plus_3pca_samples = np.real(mask_a * mask_b * phi_a * np.conj(phi_b))
 
     return n_2pc_samples, n_2pc_plus_3pca_samples
+
+
+def _estimate_aggregate_samples(
+    *,
+    beta2: float,
+    alpha: float,
+    length: float,
+    q: float,
+    nspan: int,
+    phase_delay: float,
+    R: np.ndarray,
+    rng: np.random.Generator,
+    dispersion: XPMTaylorDispersion | None,
+) -> np.ndarray:
+    omega = 2.0 * np.pi * q
+    w0 = R[0] - R[1] + R[2]
+    arg1 = (R[1] - R[2]) * (R[1] + omega - R[0])
+    mask1 = (w0 < np.pi) & (w0 > -np.pi)
+    delta1 = None
+    if dispersion is not None:
+        delta1 = dispersion.mismatch(0, w0, 1, R[1], 0, R[0], 1, R[2])
+    link1 = (
+        _link(
+            arg1,
+            beta2=beta2,
+            delta_beta=delta1,
+            alpha=alpha,
+            length=length,
+            nspan=nspan,
+            phase_delay=phase_delay,
+        )
+        * mask1
+    )
+    n1_samples = np.abs(link1) ** 2
+
+    w3p_local = -R[1] + R[3] + R[2]
+    arg2 = (R[1] - R[2]) * (R[3] - R[0] + omega)
+    mask2 = (w3p_local > -np.pi) & (w3p_local < np.pi)
+    delta2 = None
+    if dispersion is not None:
+        delta2 = dispersion.mismatch(0, w0, 1, R[3], 0, R[0], 1, w3p_local)
+    link2 = (
+        _link(
+            arg2,
+            beta2=beta2,
+            delta_beta=delta2,
+            alpha=alpha,
+            length=length,
+            nspan=nspan,
+            phase_delay=phase_delay,
+        )
+        * mask2
+    )
+    n2_samples = np.real(link1 * np.conj(link2))
+
+    n_2pc, n_2pc_plus_3pca = _estimate_nyquist_2pc_and_2pc_plus_3pca_samples(
+        beta2=beta2,
+        alpha=alpha,
+        length=length,
+        channel_spacing_over_baud=q,
+        nspan=nspan,
+        phase_delay=phase_delay,
+        n_samples=R.shape[1],
+        rng=rng,
+        dispersion=dispersion,
+    )
+    return np.vstack((n1_samples, n2_samples, n_2pc, n_2pc_plus_3pca))
+
+
+_SECTOR_TRANSFORM = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.0],  # N1
+        [0.0, 1.0, 0.0, 0.0],  # N2
+        [0.0, 0.0, 1.0, 0.0],  # 2PC
+        [0.0, 0.0, -1.0, 1.0],  # 3PCa
+        [0.0, 1.0, -1.0, 0.0],  # 3PCb
+        [0.0, 1.0, -2.0, 1.0],  # total 3PC
+        [1.0, -1.0, 1.0, -1.0],  # 4PC
+    ]
+)
 
 
 def estimate_xhkm_sums_mc(
@@ -193,6 +410,12 @@ def estimate_xhkm_sums_mc(
     seed: int | None = None,
     random_variables: np.ndarray | None = None,
     system: object | None = None,
+    dispersion: XPMTaylorDispersion | None = None,
+    batch_size: int | None = None,
+    min_samples: int | None = None,
+    target_relative_stderr: float | None = None,
+    target_stderr_over_n1: float | None = None,
+    sigma_threshold: float = 3.0,
 ) -> XhkmMCSums:
     """Estimate prefactor-free ``N1`` and ``N2`` using Dar MC integrands.
 
@@ -207,69 +430,126 @@ def estimate_xhkm_sums_mc(
     n_samples = int(n_samples)
     if n_samples <= 0:
         raise ValueError("n_samples must be positive")
-    rng = np.random.default_rng(seed)
-    if random_variables is None:
-        R = _draw_uniform_phases_with_rng(rng, 4, n_samples)
-    else:
-        R = np.asarray(random_variables, dtype=float)
-        if R.shape != (4, n_samples):
-            raise ValueError(f"random_variables must have shape (4, {n_samples})")
-
     beta2 = float(beta2)
     alpha = float(alpha)
     length = float(length)
     phase_delay = float(phase_delay)
     q = float(channel_spacing_over_baud)
     nspan = int(nspan)
+    if dispersion is not None and phase_delay != 0.0:
+        raise ValueError("local Taylor dispersion currently requires phase_delay=0")
+    if sigma_threshold <= 0.0:
+        raise ValueError("sigma_threshold must be positive")
+    for name, tolerance in (
+        ("target_relative_stderr", target_relative_stderr),
+        ("target_stderr_over_n1", target_stderr_over_n1),
+    ):
+        if tolerance is not None and tolerance <= 0.0:
+            raise ValueError(f"{name} must be positive")
 
-    w0 = R[0, :] - R[1, :] + R[2, :]
-    arg1 = (R[1, :] - R[2, :]) * (R[1, :] + 2.0 * np.pi * q - R[0, :])
-    mask1 = (w0 < np.pi) & (w0 > -np.pi)
-    denom1 = 1j * beta2 * arg1 - alpha
-    ss1 = (
-        np.exp(1j * arg1 * phase_delay)
-        * (np.exp(1j * beta2 * arg1 * length - alpha * length) - 1.0)
-        / denom1
-        * mask1
-    )
-    span1 = _span_factor(arg1 * beta2 * length, nspan, sign=1)
-    n1_samples = np.abs(ss1 * span1) ** 2
+    rng = np.random.default_rng(seed)
+    adaptive = target_relative_stderr is not None or target_stderr_over_n1 is not None
+    if batch_size is None:
+        if adaptive:
+            raise ValueError("adaptive stopping requires batch_size")
+        if random_variables is None:
+            R = _draw_uniform_phases_with_rng(rng, 4, n_samples)
+        else:
+            R = np.asarray(random_variables, dtype=float)
+            if R.shape != (4, n_samples):
+                raise ValueError(f"random_variables must have shape (4, {n_samples})")
+        aggregate_samples = _estimate_aggregate_samples(
+            beta2=beta2,
+            alpha=alpha,
+            length=length,
+            q=q,
+            nspan=nspan,
+            phase_delay=phase_delay,
+            R=R,
+            rng=rng,
+            dispersion=dispersion,
+        )
+        sector_samples = _SECTOR_TRANSFORM @ aggregate_samples
+        means = np.mean(sector_samples, axis=1)
+        stderrs = np.std(sector_samples, axis=1, ddof=1) / np.sqrt(n_samples)
+        actual_samples = n_samples
+        n_batches = 1
+        stop_reason = "fixed_budget"
+        covariance_method = "paired_samples"
+    else:
+        if random_variables is not None:
+            raise ValueError(
+                "random_variables cannot be combined with batched estimation"
+            )
+        batch_size = int(batch_size)
+        if batch_size <= 0 or n_samples % batch_size != 0:
+            raise ValueError("batch_size must be positive and divide n_samples")
+        minimum = batch_size * 2 if min_samples is None else int(min_samples)
+        if minimum < 2 * batch_size or minimum > n_samples or minimum % batch_size != 0:
+            raise ValueError(
+                "min_samples must be a multiple of batch_size between 2 batches and n_samples"
+            )
+        batch_aggregates: list[np.ndarray] = []
+        stop_reason = "maximum_budget"
+        for used in range(batch_size, n_samples + 1, batch_size):
+            R = _draw_uniform_phases_with_rng(rng, 4, batch_size)
+            samples = _estimate_aggregate_samples(
+                beta2=beta2,
+                alpha=alpha,
+                length=length,
+                q=q,
+                nspan=nspan,
+                phase_delay=phase_delay,
+                R=R,
+                rng=rng,
+                dispersion=dispersion,
+            )
+            batch_aggregates.append(np.mean(samples, axis=1))
+            if not adaptive or used < minimum:
+                continue
+            transformed = (_SECTOR_TRANSFORM @ np.asarray(batch_aggregates).T).T
+            current_means = np.mean(transformed, axis=0)
+            current_stderrs = np.std(transformed, axis=0, ddof=1) / np.sqrt(
+                transformed.shape[0]
+            )
+            n1_scale = abs(float(current_means[0]))
+            resolved = []
+            for index in (2, 3, 4, 6):
+                mean = current_means[index]
+                stderr = current_stderrs[index]
+                positive = mean - float(sigma_threshold) * stderr > 0.0
+                relative_ok = (
+                    target_relative_stderr is not None
+                    and mean > 0.0
+                    and stderr / mean <= target_relative_stderr
+                )
+                absolute_ok = (
+                    target_stderr_over_n1 is not None
+                    and n1_scale > 0.0
+                    and stderr / n1_scale <= target_stderr_over_n1
+                )
+                resolved.append(positive and (relative_ok or absolute_ok))
+            if all(resolved):
+                stop_reason = "target_precision"
+                break
+        batch_matrix = np.asarray(batch_aggregates, dtype=float)
+        transformed = (_SECTOR_TRANSFORM @ batch_matrix.T).T
+        means = np.mean(transformed, axis=0)
+        stderrs = np.std(transformed, axis=0, ddof=1) / np.sqrt(transformed.shape[0])
+        n_batches = transformed.shape[0]
+        actual_samples = n_batches * batch_size
+        covariance_method = "batch_means_linear_transform"
 
-    w3p = -R[1, :] + R[3, :] + R[2, :] + 2.0 * np.pi * q
-    arg2 = (R[1, :] - R[2, :]) * (R[3, :] - R[0, :] + 2.0 * np.pi * q)
-    mask2 = (w3p > -np.pi + 2.0 * np.pi * q) & (w3p < np.pi + 2.0 * np.pi * q)
-    denom2 = -1j * beta2 * arg2 - alpha
-    ss2 = (
-        np.exp(-1j * arg2 * phase_delay)
-        * (np.exp(-1j * beta2 * arg2 * length - alpha * length) - 1.0)
-        / denom2
-        * mask2
-    )
-    span2 = _span_factor(arg2 * beta2 * length, nspan, sign=-1)
-    n2_samples = np.real(span1 * ss1 * span2 * ss2)
-
-    n_2pc_samples, n_2pc_plus_3pca_samples = _estimate_nyquist_2pc_and_2pc_plus_3pca_samples(
-        beta2=beta2,
-        alpha=alpha,
-        length=length,
-        channel_spacing_over_baud=q,
-        nspan=nspan,
-        phase_delay=phase_delay,
-        n_samples=n_samples,
-        rng=rng,
-    )
-    n_3pca_samples = n_2pc_plus_3pca_samples - n_2pc_samples
-    n_3pcb_samples = n2_samples - n_2pc_samples
-    n_3pc_total_samples = n_3pca_samples + n_3pcb_samples
-    n_4pc_samples = n1_samples - n2_samples - n_3pca_samples
-
-    n1, n1_stderr = _safe_mean_stderr(n1_samples)
-    n2, n2_stderr = _safe_mean_stderr(n2_samples)
-    n_2pc, n_2pc_stderr = _safe_mean_stderr(n_2pc_samples)
-    n_3pc_total, n_3pc_total_stderr = _safe_mean_stderr(n_3pc_total_samples)
-    n_3pca, n_3pca_stderr = _safe_mean_stderr(n_3pca_samples)
-    n_3pcb, n_3pcb_stderr = _safe_mean_stderr(n_3pcb_samples)
-    n_4pc, n_4pc_stderr = _safe_mean_stderr(n_4pc_samples)
+    n1, n2, n_2pc, n_3pca, n_3pcb, n_3pc_total, n_4pc = map(float, means)
+    (
+        n1_stderr,
+        n2_stderr,
+        n_2pc_stderr,
+        n_3pca_stderr,
+        n_3pcb_stderr,
+        n_3pc_total_stderr,
+        n_4pc_stderr,
+    ) = map(float, stderrs)
     return XhkmMCSums(
         n1=n1,
         n2=n2,
@@ -285,10 +565,12 @@ def estimate_xhkm_sums_mc(
         n_3pca_stderr=n_3pca_stderr,
         n_3pcb_stderr=n_3pcb_stderr,
         n_4pc_stderr=n_4pc_stderr,
-        n_samples=n_samples,
+        n_samples=actual_samples,
         seed=seed,
         metadata={
             "calculation": "prefactor_free_dar_mc_xhkm_sums",
+            "sector_estimator": "aggregate_residuals_covariance_aware",
+            "sector_estimates_are_direct_modulus_squared_sums": False,
             "sector_calculation": "nyquist_golani_jlt2016_s1_s2_l0",
             "beta2": beta2,
             "alpha": alpha,
@@ -296,8 +578,25 @@ def estimate_xhkm_sums_mc(
             "channel_spacing_over_baud": q,
             "nspan": nspan,
             "phase_delay": phase_delay,
+            "dispersion_model": "local_taylor_beta4"
+            if dispersion is not None
+            else "scalar_beta2",
+            "batch_size": batch_size,
+            "n_batches": n_batches,
+            "maximum_samples": n_samples,
+            "minimum_samples": min_samples,
+            "target_relative_stderr": target_relative_stderr,
+            "target_stderr_over_n1": target_stderr_over_n1,
+            "sigma_threshold": float(sigma_threshold),
+            "covariance_method": covariance_method,
+            "stop_reason": stop_reason,
         },
     )
 
 
-__all__ = ["XhkmMCSums", "assert_flat_signal_power_profile", "estimate_xhkm_sums_mc"]
+__all__ = [
+    "XhkmMCSums",
+    "XPMTaylorDispersion",
+    "assert_flat_signal_power_profile",
+    "estimate_xhkm_sums_mc",
+]

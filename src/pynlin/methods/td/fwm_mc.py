@@ -72,6 +72,7 @@ def _beta_local(
     beta1: float,
     gvd: float,
     beta3: float,
+    beta4: float,
     omega_local: np.ndarray,
 ) -> np.ndarray:
     return (
@@ -79,6 +80,7 @@ def _beta_local(
         + float(beta1) * omega_local
         + 0.5 * float(gvd) * omega_local**2
         + (float(beta3) / 6.0) * omega_local**3
+        + (float(beta4) / 24.0) * omega_local**4
     )
 
 
@@ -93,6 +95,15 @@ def estimate_fwm_term_sum_dar_mc(
     random_variables: np.ndarray | None = None,
 ) -> FWMDarMCSum:
     """Estimate the all-index generic FWM sum by frequency-domain MC.
+
+    This function does not construct or rescale a physical system.  The carrier
+    tuple and its local dispersion coefficients are fixed by ``channels``;
+    ``baud_rate`` and ``length`` are also direct physical inputs.  Quantities
+    such as ``x = L*B*||grad Delta beta||`` and ``mu = Delta beta_center /
+    (B*||grad Delta beta||)`` are therefore diagnostics derived from those
+    inputs, not parameters used by this estimator to choose spacing or
+    bandwidth.  Controlled studies that prescribe ``x`` and ``mu`` must build
+    a modified ``FWMChannels`` object before calling this function.
 
     The estimator samples three local normalized angular frequencies
     ``Ω_a, Ω_b, Ω_c ∈ [-π,π]`` and enforces energy conservation for the
@@ -132,11 +143,34 @@ def estimate_fwm_term_sum_dar_mc(
     omega_b = omega_b_norm * baud_rate
     omega_c = omega_c_norm * baud_rate
     omega_d = omega_d_norm * baud_rate
-    delta_beta = (
-        _beta_local(channels.beta0_a, channels.beta1_a, channels.gvd_a, channels.beta3_a, omega_a)
-        + _beta_local(channels.beta0_b, channels.beta1_b, channels.gvd_b, channels.beta3_b, omega_b)
-        - _beta_local(channels.beta0_c, channels.beta1_c, channels.gvd_c, channels.beta3_c, omega_c)
-        - _beta_local(channels.beta0_d, channels.beta1_d, channels.gvd_d, channels.beta3_d, omega_d)
+    delta_beta = _beta_local(
+        channels.beta0_a,
+        channels.beta1_a,
+        channels.gvd_a,
+        channels.beta3_a,
+        channels.beta4_a,
+        omega_a,
+    ) + _beta_local(
+        channels.beta0_b,
+        channels.beta1_b,
+        channels.gvd_b,
+        channels.beta3_b,
+        channels.beta4_b,
+        omega_b,
+    ) - _beta_local(
+        channels.beta0_c,
+        channels.beta1_c,
+        channels.gvd_c,
+        channels.beta3_c,
+        channels.beta4_c,
+        omega_c,
+    ) - _beta_local(
+        channels.beta0_d,
+        channels.beta1_d,
+        channels.gvd_d,
+        channels.beta3_d,
+        channels.beta4_d,
+        omega_d,
     )
     kernel = _propagator(delta_beta, length, alpha)
     samples = np.abs(kernel) ** 2 * mask
@@ -160,6 +194,10 @@ def estimate_fwm_term_sum_dar_mc(
             "beta3_b": float(channels.beta3_b),
             "beta3_c": float(channels.beta3_c),
             "beta3_d": float(channels.beta3_d),
+            "beta4_a": float(channels.beta4_a),
+            "beta4_b": float(channels.beta4_b),
+            "beta4_c": float(channels.beta4_c),
+            "beta4_d": float(channels.beta4_d),
             "support_fraction": float(np.mean(mask)),
         },
     )

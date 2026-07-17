@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from pynlin.methods.td import fullband_mc
+from pynlin.methods.td.fwm_kernel import FWMChannels
+from pynlin.methods.td.fwm_mc import estimate_fwm_term_sum_dar_mc
 from pynlin.methods.td.xhkm_mc import estimate_xhkm_sums_mc
 
 
@@ -71,6 +73,103 @@ def test_local_taylor_xpm_matches_scalar_dar_for_constant_beta2():
     )
 
     assert local == pytest.approx(scalar.n1, rel=1e-14)
+
+
+def test_local_taylor_xpm_includes_beta4_and_accepts_samples():
+    random_variables = np.array([[0.2], [-0.1], [0.05]])
+    value, stderr = fullband_mc.estimate_xpm_n1_local_taylor_mc(
+        beta0_offsets=np.zeros(2),
+        beta1=np.zeros(2),
+        beta2=np.zeros(2),
+        beta3=np.zeros(2),
+        beta4=np.array([24.0, 0.0]),
+        baud_rate=1.0,
+        length=0.7,
+        target=0,
+        interferer=1,
+        n_samples=1,
+        seed=None,
+        random_variables=random_variables,
+    )
+
+    target_out = 0.2 - (-0.1) + 0.05
+    delta_beta = target_out**4 - 0.2**4
+    expected = abs((np.exp(1j * delta_beta * 0.7) - 1.0) / (1j * delta_beta)) ** 2
+    np.testing.assert_allclose(value, expected, rtol=1e-13)
+    assert stderr == 0.0
+
+
+def test_xpm_n1_equals_repeated_channel_fwm_mc():
+    """XPM (d,i) is generic FWM (d,d,i,i) after a variable transform."""
+    n_samples = 4096
+    rng = np.random.default_rng(2468)
+    fwm_variables = 2.0 * np.pi * (rng.random((3, n_samples)) - 0.5)
+    target_out, interferer_1, interferer_2 = fwm_variables
+    target_in = target_out + interferer_1 - interferer_2
+    accepted = (target_in > -np.pi) & (target_in < np.pi)
+    xpm_variables = np.vstack(
+        (target_in[accepted], interferer_1[accepted], interferer_2[accepted])
+    )
+
+    beta0 = np.array([0.0, 0.07])
+    beta1 = np.array([0.02, -0.03])
+    beta2 = np.array([0.004, -0.006])
+    beta3 = np.array([8e-4, -5e-4])
+    beta4 = np.array([2e-4, 3e-4])
+    channels = FWMChannels(
+        omega_a=0.0,
+        omega_b=3.0,
+        omega_c=3.0,
+        omega_d=0.0,
+        beta0_a=beta0[0],
+        beta0_b=beta0[1],
+        beta0_c=beta0[1],
+        beta0_d=beta0[0],
+        beta1_a=beta1[0],
+        beta1_b=beta1[1],
+        beta1_c=beta1[1],
+        beta1_d=beta1[0],
+        gvd_a=beta2[0],
+        gvd_b=beta2[1],
+        gvd_c=beta2[1],
+        gvd_d=beta2[0],
+        beta3_a=beta3[0],
+        beta3_b=beta3[1],
+        beta3_c=beta3[1],
+        beta3_d=beta3[0],
+        beta4_a=beta4[0],
+        beta4_b=beta4[1],
+        beta4_c=beta4[1],
+        beta4_d=beta4[0],
+    )
+    fwm = estimate_fwm_term_sum_dar_mc(
+        channels=channels,
+        baud_rate=1.0,
+        length=0.7,
+        n_samples=n_samples,
+        random_variables=fwm_variables,
+    )
+    xpm, _ = fullband_mc.estimate_xpm_n1_local_taylor_mc(
+        beta0_offsets=beta0,
+        beta1=beta1,
+        beta2=beta2,
+        beta3=beta3,
+        beta4=beta4,
+        baud_rate=1.0,
+        length=0.7,
+        target=0,
+        interferer=1,
+        n_samples=int(np.count_nonzero(accepted)),
+        seed=None,
+        random_variables=xpm_variables,
+    )
+
+    np.testing.assert_allclose(
+        fwm.total,
+        np.mean(accepted) * xpm,
+        rtol=2e-13,
+        atol=2e-15,
+    )
 
 
 def test_support_pruned_fwm_tuples_exclude_degenerate_terms():

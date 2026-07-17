@@ -351,25 +351,35 @@ def estimate_xpm_n1_local_taylor_mc(
     beta0_offsets: np.ndarray,
     beta1: np.ndarray,
     beta2: np.ndarray,
+    beta3: np.ndarray | None = None,
+    beta4: np.ndarray | None = None,
     baud_rate: float,
     length: float,
     target: int,
     interferer: int,
     n_samples: int,
-    seed: int,
+    seed: int | None,
     alpha: float = 0.0,
+    random_variables: np.ndarray | None = None,
 ) -> tuple[float, float]:
     """Estimate the XPM N1 term using channel-local propagation constants.
 
     This is the two-channel analogue of the FWM frequency-domain estimator:
     sampled local frequencies are propagated with the target and interferer
     channel Taylor coefficients instead of collapsing the pair to one beta2.
+    Optional ``beta3`` and ``beta4`` arrays extend the local model through
+    fourth order; omitted arrays preserve the historical quadratic behavior.
     """
     n_samples = int(n_samples)
     if n_samples <= 0:
         raise ValueError("n_samples must be positive")
-    rng = np.random.default_rng(seed)
-    r = 2.0 * np.pi * (rng.random((3, n_samples)) - 0.5)
+    if random_variables is None:
+        rng = np.random.default_rng(seed)
+        r = 2.0 * np.pi * (rng.random((3, n_samples)) - 0.5)
+    else:
+        r = np.asarray(random_variables, dtype=float)
+        if r.shape != (3, n_samples):
+            raise ValueError(f"random_variables must have shape (3, {n_samples})")
     omega_target_in = r[0] * float(baud_rate)
     omega_interferer_1 = r[1] * float(baud_rate)
     omega_interferer_2 = r[2] * float(baud_rate)
@@ -379,17 +389,26 @@ def estimate_xpm_n1_local_taylor_mc(
 
     t = int(target)
     b = int(interferer)
+    beta0 = np.asarray(beta0_offsets, dtype=float)
+    beta1 = np.asarray(beta1, dtype=float)
+    beta2 = np.asarray(beta2, dtype=float)
+    beta3 = np.zeros_like(beta2) if beta3 is None else np.asarray(beta3, dtype=float)
+    beta4 = np.zeros_like(beta2) if beta4 is None else np.asarray(beta4, dtype=float)
+
+    def beta_local(index: int, omega: np.ndarray) -> np.ndarray:
+        return (
+            beta0[index]
+            + beta1[index] * omega
+            + 0.5 * beta2[index] * omega**2
+            + (beta3[index] / 6.0) * omega**3
+            + (beta4[index] / 24.0) * omega**4
+        )
+
     delta_beta = (
-        beta1[t] * omega_target_out
-        + 0.5 * beta2[t] * omega_target_out**2
-        + beta0_offsets[b]
-        + beta1[b] * omega_interferer_1
-        + 0.5 * beta2[b] * omega_interferer_1**2
-        - beta1[t] * omega_target_in
-        - 0.5 * beta2[t] * omega_target_in**2
-        - beta0_offsets[b]
-        - beta1[b] * omega_interferer_2
-        - 0.5 * beta2[b] * omega_interferer_2**2
+        beta_local(t, omega_target_out)
+        + beta_local(b, omega_interferer_1)
+        - beta_local(t, omega_target_in)
+        - beta_local(b, omega_interferer_2)
     )
     values = _propagator_abs2(delta_beta, length, alpha) * mask
     mean = float(np.mean(values))

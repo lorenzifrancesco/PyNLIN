@@ -100,3 +100,27 @@ def test_direct_fwm_sum_converges_toward_dar_frequency_mc():
     assert 0.45 < ratio_r3 < 0.75
     assert 0.65 < ratio_r5 < 0.95
     assert ratio_r5 > ratio_r3
+
+
+def test_dar_fwm_mc_includes_local_beta4():
+    random_variables = np.array([[0.2], [-0.1], [0.05]])
+    channels = FWMChannels(
+        omega_a=0.0,
+        omega_b=0.0,
+        omega_c=0.0,
+        omega_d=0.0,
+        beta4_a=24.0,
+    )
+
+    estimate = estimate_fwm_term_sum_dar_mc(
+        channels=channels,
+        baud_rate=1.0,
+        length=0.7,
+        n_samples=1,
+        random_variables=random_variables,
+    )
+
+    delta_beta = random_variables[0, 0] ** 4
+    expected = abs((np.exp(1j * delta_beta * 0.7) - 1.0) / (1j * delta_beta)) ** 2
+    np.testing.assert_allclose(estimate.total, expected, rtol=1e-13)
+    assert estimate.metadata["beta4_a"] == 24.0

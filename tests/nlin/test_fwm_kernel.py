@@ -208,3 +208,22 @@ def test_fwm_zero_mismatch_result_is_nearly_real_for_real_pulse():
 
     assert abs(x.imag) < 1e-12 * abs(x.real)
     assert x.real > 0.0
+
+
+def test_direct_fwm_rejects_local_beta4():
+    pulse = GaussianPulse(baud_rate=10e9, num_symbols=16, samples_per_symbol=16)
+    z = np.linspace(0.0, 1.0, 3)
+    channels = FWMChannels(
+        omega_a=0.0,
+        omega_b=0.0,
+        omega_c=0.0,
+        omega_d=0.0,
+        beta4_a=1e-55,
+    )
+
+    try:
+        compute_fwm_coefficient_direct(pulse, z, h=0, k=0, m=0, channels=channels)
+    except NotImplementedError as exc:
+        assert "beta4" in str(exc)
+    else:
+        raise AssertionError("direct FWM silently ignored beta4")

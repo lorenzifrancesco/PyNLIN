@@ -92,7 +92,10 @@ Core method implementations live under `pynlin.methods`:
 
 - `pynlin.methods.td`: time-domain collision-coefficient NLIN.
 - `pynlin.methods.pcfm`: PCFM/GN kernels.
-- `pynlin.methods.mc`: two backends — **SSFM** (reconstructs chi1/chi2 from TD collision coefficients) and **fullband** (evaluates 3PC/4PC tuples directly via Monte Carlo sampling).
+- `pynlin.methods.mc`: TD chi1/chi2 reconstruction and a **fullband** backend
+  that evaluates 3PC/4PC tuples directly by Monte Carlo sampling. The
+  historical `engine = "ssfm"` label selects TD reconstruction; it does not
+  run an SSFM.
 
 `analysis` is orchestration only: it resolves profiles, builds cache keys,
 runs selected methods, writes CSV/NPY outputs, and creates plots.
@@ -142,10 +145,10 @@ include_mci = false
 
 [methods.mc]
 mode = "off"                # off | cached | recompute
-engine = "ssfm"             # ssfm | fullband
+engine = "ssfm"             # historical TD-reconstruction label | fullband
 n_trials = 1
 rng_seed = 1234
-# SSFM backend (engine = "ssfm"):
+# Historical TD-reconstruction backend (engine = "ssfm"):
 template = ""
 n_channels = 5
 # Fullband MC backend (engine = "fullband"):
@@ -164,8 +167,9 @@ forces regeneration. `off` disables the method even if a study lists it.
 
 Two MC backends are available:
 
-- **`engine = "ssfm"`** (default): reconstructs modulation-dependent NLIN from
-  TD collision coefficients via chi1/chi2. This backend **requires TD** — the
+- **`engine = "ssfm"`** (historical label, not an SSFM): reconstructs
+  modulation-dependent NLIN from TD collision coefficients via chi1/chi2. This
+  backend **requires TD** — the
   study must include `"td"` in its methods list (or be run after TD). Suitable
   for systems where TD collision-coefficient computation is feasible.
 
@@ -177,6 +181,15 @@ Two MC backends are available:
   approximate NLIN power via `γ²·(16/81)·Pj·Pavg·S`. Tuning `xpm_samples`,
   `fwm_samples`, `channel_decimation`, and `max_fwm_tuples_per_target`
   controls the accuracy vs. runtime trade-off.
+
+For a real scalar split-step comparison of prefactor-free XPM $N_1$, use
+`analysis/standalone_numerical/validate_ssfm_xpm_n1.py`. It runs paired
+CUT-only/CUT-plus-interferer cases through `gnlse-python`, requires
+$\Delta f\geq2B$ to exclude interferer-generated spectral overlap, fits the
+low-power $P_i^2$ slope, and compares it directly with Dar MC.
+`validate_ssfm_xpm_spectrum.py` repeats that experiment at sparse physical WDM
+frequencies and writes the cache optionally overlaid by
+`validate_fwm_mc_real_tuples.py`.
 
 ## Study Types
 

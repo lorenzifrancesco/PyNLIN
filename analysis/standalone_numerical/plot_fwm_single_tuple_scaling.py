@@ -459,7 +459,12 @@ def build_single_tuple_channels(
     """Construct one fixed tuple at prescribed mismatch scale and detuning.
 
     ``channel_positions`` follows ``(d,a,b,c)`` and is expressed in channel
-    indices. Their angular-frequency centers are
+    indices.  ``spacing_over_baud``, ``baud_rate``, and ``length`` remain fixed
+    inputs: this diagnostic builder does not infer spacing or bandwidth from
+    ``x_grad`` and ``mu``.  Instead, it rescales the dispersion magnitude to
+    realize ``x_grad`` and shifts ``beta0_a`` to realize a numerical ``mu``.
+    The resulting channel models need not belong to one unmodified physical
+    fiber.  Their angular-frequency centers are
     ``2*pi*position*spacing_over_baud*baud_rate``. ``constant-beta2`` uses a
     quadratic global beta model. ``cubic-zdw`` adds beta3 while keeping the
     extra fixed-d phase-matching branch at

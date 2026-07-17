@@ -54,6 +54,10 @@ class FWMChannels:
     beta3_b: float = 0.0
     beta3_c: float = 0.0
     beta3_d: float = 0.0
+    beta4_a: float = 0.0
+    beta4_b: float = 0.0
+    beta4_c: float = 0.0
+    beta4_d: float = 0.0
 
     @property
     def delta_omega(self) -> float:
@@ -125,6 +129,10 @@ def _metadata(
         "beta3_b": float(channels.beta3_b),
         "beta3_c": float(channels.beta3_c),
         "beta3_d": float(channels.beta3_d),
+        "beta4_a": float(channels.beta4_a),
+        "beta4_b": float(channels.beta4_b),
+        "beta4_c": float(channels.beta4_c),
+        "beta4_d": float(channels.beta4_d),
         "n_t": int(t.size),
         "n_z": int(z.size),
         "dt": _uniform_dt(t),
@@ -164,10 +172,14 @@ def compute_fwm_coefficient_direct(
             channels.beta3_b,
             channels.beta3_c,
             channels.beta3_d,
+            channels.beta4_a,
+            channels.beta4_b,
+            channels.beta4_c,
+            channels.beta4_d,
         )
     ):
         raise NotImplementedError(
-            "beta3 is supported by the Dar frequency-domain FWM estimator, "
+            "beta3/beta4 are supported by the Dar frequency-domain FWM estimator, "
             "not by the direct time-domain pulse propagator"
         )
     z = np.asarray(z, dtype=float).reshape(-1)
