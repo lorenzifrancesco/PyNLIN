@@ -19,7 +19,7 @@ effective area. Counter-propagating pumps follow
 $$P_p(z) = P_{p,\mathrm{in}} \exp[-\alpha_p (L - z)],$$
 
 yielding closed-form solutions for $P_s(z)$ under undepleted pump
-assumptions (see `analysis/undepleted_fB.py`).
+assumptions (see `analysis/fwm/fwm_efficiency/undepleted_fB.py`).
 
 Effective parameters governing the undepleted-pump model are:
 
@@ -792,6 +792,15 @@ reference backend with cost $O(N_hN_kN_mN_zN_t)$. Resolving large detunings
 requires $dt \ll 1/|\Delta\omega|$, and resolving strong phase mismatch
 requires $dz \ll 1/|\Delta\beta_0|$.
 
+The large-mismatch behavior of an individual tuple is derived in
+[Single-tuple FWM scaling: why the exponent is -1 or -2](fwm_single_tuple_scaling.md).
+The $x^{-1}$ and $x^{-2}$ regimes are distinguished by whether the tuple's
+phase-matching manifold intersects its admissible four-band spectral domain.
+The notation connecting global dispersion fits, channel-local Taylor
+coefficients, and tuple-level quantities such as $\mu$ and $x_\nabla$ is
+collected in
+[Global dispersion, local channels, and four-channel phase mismatch](fwm_dispersion_scales_and_coordinates.md).
+
 For finite numerical contractions, the integer radius $R$ denotes the
 symmetric pulse-index window retained around the observed pulse $d$:
 
@@ -887,6 +896,31 @@ prefactors. Stored curves use the S1 normalization $T^2/L^2$ and the
 walk-off axis $L/L_W$. The existing $X_{0mm}$ S1 workflow remains unchanged.
 The saved diagnostics also separate 2PC, 3PCa ($h=0,k\ne m$), 3PCb
 ($h\ne0,k=m$), residual 3PC edge coincidences, and 4PC sectors.
+
+For the Nyquist MC sector-scaling plots, error bars are standard errors of
+the Monte-Carlo estimates.  For a single seed, each component uses the sample
+standard error
+
+$$\sigma_{\mathrm{MC}}=
+\frac{\operatorname{std}(Y_i;\mathrm{ddof}=1)}{\sqrt{N_{\mathrm{samp}}}},$$
+
+where $Y_i$ is the sampled integrand for the plotted component.  When multiple
+independent seeds are used, the plotting script combines the seed-to-seed
+spread of the component means with the per-seed internal MC errors as
+
+$$\sigma_{\mathrm{plot}}=
+\sqrt{
+\left(\frac{\operatorname{std}(\hat N_s;\mathrm{ddof}=1)}
+{\sqrt{N_{\mathrm{seeds}}}}\right)^2
++
+\frac{1}{N_{\mathrm{seeds}}}\left\langle\sigma_s^2\right\rangle_s
+},$$
+
+where $\hat N_s$ and $\sigma_s$ are respectively the estimate and internal
+standard error from seed $s$.  This convention is intentionally conservative:
+the seed-to-seed spread already measures MC sampling noise, so adding the
+averaged internal variance can overestimate the uncertainty.  It is used in
+the diagnostic plots to avoid understating noisy residual sectors such as 4PC.
 
 In the high-walk-off limit the generic coefficients approach a complete-
 collision factorization of the form
