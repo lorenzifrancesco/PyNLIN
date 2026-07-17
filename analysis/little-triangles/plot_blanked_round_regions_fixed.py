@@ -20,6 +20,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import BoundaryNorm
+from matplotlib.patches import Patch
 
 
 def nearest_integer(z: np.ndarray) -> np.ndarray:
@@ -296,6 +297,26 @@ def plot_round_regions_with_blanking(
         rasterized=True,
     )
 
+    zero_sum = valid_all & (round_sum + round_x + round_y == 0)
+    ax.contourf(
+        X,
+        Y,
+        zero_sum.astype(int),
+        levels=[0.5, 1.5],
+        colors=["#ffd166"],
+        alpha=0.55,
+        zorder=1,
+    )
+    ax.contour(
+        X,
+        Y,
+        zero_sum.astype(int),
+        levels=[0.5],
+        colors=["#9c6500"],
+        linewidths=1.5,
+        zorder=2,
+    )
+
     cbar = fig.colorbar(
         mesh,
         ax=ax,
@@ -319,6 +340,19 @@ def plot_round_regions_with_blanking(
                 "alpha": 0.74,
             },
         )
+
+    ax.legend(
+        handles=[
+            Patch(
+                facecolor="#ffd166",
+                edgecolor="#9c6500",
+                alpha=0.55,
+                label=r"tuple sum $=0$",
+            )
+        ],
+        loc="upper right",
+        framealpha=0.95,
+    )
 
     ax.set(
         xlabel=r"$x$",

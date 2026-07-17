@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import BoundaryNorm
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 
 def nearest_integer(z: np.ndarray | float) -> np.ndarray | int:
@@ -156,6 +157,28 @@ def save_combined_plot(
         rasterized=True,
     )
 
+    round_x = nearest_integer(X)
+    round_y = nearest_integer(Y)
+    zero_sum = Zsum + round_x + round_y == 0
+    ax.contourf(
+        X,
+        Y,
+        zero_sum.astype(int),
+        levels=[0.5, 1.5],
+        colors=["#ffd166"],
+        alpha=0.55,
+        zorder=1,
+    )
+    ax.contour(
+        X,
+        Y,
+        zero_sum.astype(int),
+        levels=[0.5],
+        colors=["#9c6500"],
+        linewidths=1.5,
+        zorder=2,
+    )
+
     # Diagonal boundaries of round(x+y).
     ax.contour(
         X,
@@ -193,6 +216,12 @@ def save_combined_plot(
                label=r"boundaries of $\mathrm{round}(y)$"),
         Line2D([0], [0], color="white", linewidth=1.2,
                label=r"boundaries of $\mathrm{round}(x+y)$"),
+        Patch(
+            facecolor="#ffd166",
+            edgecolor="#9c6500",
+            alpha=0.55,
+            label=r"tuple sum $=0$",
+        ),
     ]
     ax.legend(handles=legend_handles, loc="upper right", framealpha=0.95)
 
