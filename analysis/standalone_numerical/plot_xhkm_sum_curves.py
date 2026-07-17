@@ -22,6 +22,8 @@ def plot_xhkm_sum_curves(path: str | Path, out_dir: str | Path = "media/n-PC") -
     ax.plot(llw, dataset["ref_n1"], lw=1.0, label=r"$N_1$ (prefactor-free chi1 sum)")
     ax.plot(llw, dataset["ref_n2"], lw=1.0, label=r"$N_2$ (prefactor-free chi2 sum)")
     ax.plot(llw, dataset["ref_n_2pc"], lw=1.0, label="2PC slice")
+    ax.plot(llw, dataset["ref_n_3pc_total"], lw=1.0, label="3PC total")
+    ax.plot(llw, dataset["ref_n_4pc"], lw=1.0, label="4PC")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$")

@@ -152,6 +152,8 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     ax.plot(llw, d["ref_n1"], lw=1.0, label=r"$N_1$")
     ax.plot(llw, d["ref_n2"], lw=1.0, label=r"$N_2$")
     ax.plot(llw, d["ref_n_2pc"], lw=1.0, label="2PC")
+    ax.plot(llw, d["ref_n_3pc_total"], lw=1.0, label="3PC")
+    ax.plot(llw, d["ref_n_4pc"], lw=1.0, label="4PC")
     ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N\,T^2/L^2$")
@@ -190,19 +192,19 @@ def _plot_per_case(case: dict, path: Path, subdir: Path) -> None:
     plt.close(fig)
 
 
-def _plot_n2pc_comparison(colors, paths, subdir) -> None:
-    """Compare 2PC slices across dispersion levels."""
+def _plot_component_comparison(colors, paths, subdir, *, key: str, label: str, stem: str) -> None:
+    """Compare one collision component across dispersion levels."""
     fig, ax = plt.subplots(figsize=(5.0, 3.4))
-    for label, key, color in colors:
-        d = np.load(paths[key])
+    for case_label, case_key, color in colors:
+        d = np.load(paths[case_key])
         llw = d["llw_grid"]
-        ax.plot(llw, d["ref_n_2pc"], color=color, lw=1.2, marker="*", ms=4,
-                label=label)
+        ax.plot(llw, d[key], color=color, lw=1.2, marker="*", ms=4,
+                label=case_label)
     ax.axvline(LLW_OLD_MAX, color="grey", lw=0.5, ls="--", alpha=0.5)
     ax.axvspan(80, 500, color="grey", alpha=0.06)
     ax.set_xscale("log"); ax.set_yscale("log")
-    ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(r"$N_{2PC}\,T^2/L^2$")
-    ax.set_title("2PC: converging at large $L/L_W$ across dispersion levels")
+    ax.set_xlabel(r"$L/L_W$"); ax.set_ylabel(rf"$N_{{{label}}}\,T^2/L^2$")
+    ax.set_title(f"{label}: large-$L/L_W$ scaling across dispersion levels")
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=7)
     _annotate(ax)
@@ -211,9 +213,7 @@ def _plot_n2pc_comparison(colors, paths, subdir) -> None:
             fontsize=5.2, color="0.40",
             bbox=dict(facecolor="white", alpha=0.65, edgecolor="none", pad=1.5))
     fig.tight_layout()
-    stem = "xhkm_n2pc_comparison_extended"
     fig.savefig(subdir / f"{stem}.pdf", dpi=300)
-    fig.savefig(subdir / f"{stem}.png", dpi=300)
     plt.close(fig)
     print(f"  {stem}")
 
@@ -231,6 +231,10 @@ def _plot_combined_n1_n2_n2pc(colors, paths, subdir) -> None:
                 ls="--", label=f"{label} N2")
         ax.plot(llw, d["ref_n_2pc"], color=color, marker="*", ms=3.5, lw=0.9,
                 ls=":", label=f"{label} 2PC")
+        ax.plot(llw, d["ref_n_3pc_total"], color=color, marker="^", ms=3.0, lw=0.9,
+                ls="-.", label=f"{label} 3PC")
+        ax.plot(llw, d["ref_n_4pc"], color=color, marker="D", ms=2.8, lw=0.9,
+                ls=(0, (3, 1, 1, 1)), label=f"{label} 4PC")
     ax.axvline(LLW_OLD_MAX, color="grey", lw=0.5, ls="--", alpha=0.5)
     ax.axvspan(RELIABILITY_LLW, 500,
                color="grey", alpha=0.06, label=r"z-res. limit")
@@ -247,7 +251,6 @@ def _plot_combined_n1_n2_n2pc(colors, paths, subdir) -> None:
     fig.tight_layout()
     stem = f"xhkm_extended_range_h{H_MAX}_r{R_MAX}_marg{MARGIN}"
     fig.savefig(subdir / f"{stem}.pdf", dpi=300)
-    fig.savefig(subdir / f"{stem}.png", dpi=300)
     plt.close(fig)
     print(f"  {stem}")
 
@@ -275,7 +278,6 @@ def _plot_ratio_comparison(colors, paths, subdir) -> None:
     fig.tight_layout()
     stem = f"xhkm_extended_ratio_h{H_MAX}_r{R_MAX}_marg{MARGIN}"
     fig.savefig(subdir / f"{stem}.pdf", dpi=300)
-    fig.savefig(subdir / f"{stem}.png", dpi=300)
     plt.close(fig)
     print(f"  {stem}")
 
@@ -320,7 +322,18 @@ def main() -> None:
     print("Plotting combined...")
     _plot_combined_n1_n2_n2pc(colors, paths, subdir)
     _plot_ratio_comparison(colors, paths, subdir)
-    _plot_n2pc_comparison(colors, paths, subdir)
+    _plot_component_comparison(
+        colors, paths, subdir,
+        key="ref_n_2pc", label="2PC", stem="xhkm_n2pc_comparison_extended",
+    )
+    _plot_component_comparison(
+        colors, paths, subdir,
+        key="ref_n_3pc_total", label="3PC", stem="xhkm_n3pc_comparison_extended",
+    )
+    _plot_component_comparison(
+        colors, paths, subdir,
+        key="ref_n_4pc", label="4PC", stem="xhkm_n4pc_comparison_extended",
+    )
     print(f"All extended plots in {subdir}/")
 
 

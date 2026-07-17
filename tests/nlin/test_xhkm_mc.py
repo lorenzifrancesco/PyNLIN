@@ -51,6 +51,36 @@ def test_prefactor_free_mc_matches_dar_interchannel_components_with_fixed_sample
     assert mc.n2_stderr >= 0.0
 
 
+def test_prefactor_free_mc_sector_estimates_are_finite_and_consistent():
+    mc = estimate_xhkm_sums_mc(
+        beta2=0.31,
+        alpha=0.17,
+        length=1.9,
+        phase_delay=0.2,
+        channel_spacing_over_baud=1.25,
+        nspan=2,
+        n_samples=2048,
+        seed=1234,
+    )
+
+    values = [
+        mc.n_2pc,
+        mc.n_3pca,
+        mc.n_3pcb,
+        mc.n_3pc_total,
+        mc.n_4pc,
+        mc.n_2pc_stderr,
+        mc.n_3pca_stderr,
+        mc.n_3pcb_stderr,
+        mc.n_3pc_total_stderr,
+        mc.n_4pc_stderr,
+    ]
+    assert np.all(np.isfinite(values))
+    assert mc.n_3pc_total == pytest.approx(mc.n_3pca + mc.n_3pcb, rel=1e-14, abs=1e-14)
+    assert mc.n1 == pytest.approx(mc.n_2pc + mc.n_3pca + mc.n_3pcb + mc.n_4pc, rel=1e-14, abs=1e-14)
+    assert mc.n2 == pytest.approx(mc.n_2pc + mc.n_3pcb, rel=1e-14, abs=1e-14)
+
+
 def test_prefactor_free_mc_rejects_nonflat_profiles_section():
     system = SimpleNamespace(raw_config={"profiles": {"mode": "recompute"}})
 

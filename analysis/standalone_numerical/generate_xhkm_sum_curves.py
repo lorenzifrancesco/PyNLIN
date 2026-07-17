@@ -243,7 +243,6 @@ def _finish(fig: plt.Figure, stem: str) -> None:
     OUT_MEDIA.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(OUT_MEDIA / f"{stem}.pdf", dpi=300)
-    fig.savefig(OUT_MEDIA / f"{stem}.png", dpi=300)
     plt.close(fig)
 
 
@@ -254,6 +253,8 @@ def plot_single(path: Path, title: str, stem: str) -> None:
     ax.plot(llw, data["ref_n1"], marker="o", ms=3, lw=1.0, label=r"$N_1$")
     ax.plot(llw, data["ref_n2"], marker="s", ms=3, lw=1.0, ls="--", label=r"$N_2$")
     ax.plot(llw, data["ref_n_2pc"], marker="*", ms=5, lw=0.9, ls=":", label="2PC")
+    ax.plot(llw, data["ref_n_3pc_total"], marker="^", ms=3, lw=0.9, ls="-.", label="3PC")
+    ax.plot(llw, data["ref_n_4pc"], marker="D", ms=3, lw=0.9, ls=(0, (3, 1, 1, 1)), label="4PC")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$")
@@ -293,6 +294,8 @@ def plot_compare(items: list[tuple[str, Path, str]], stem: str, *, include_2pc: 
         ax.plot(llw, data["ref_n2"], color=color, marker="s", ms=3, lw=1.0, ls="--", label=f"{label} N2")
         if include_2pc:
             ax.plot(llw, data["ref_n_2pc"], color=color, marker="*", ms=5, lw=0.9, ls=":", label=f"{label} 2PC")
+            ax.plot(llw, data["ref_n_3pc_total"], color=color, marker="^", ms=3, lw=0.9, ls="-.", label=f"{label} 3PC")
+            ax.plot(llw, data["ref_n_4pc"], color=color, marker="D", ms=3, lw=0.9, ls=(0, (3, 1, 1, 1)), label=f"{label} 4PC")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel(r"$L/L_W$")

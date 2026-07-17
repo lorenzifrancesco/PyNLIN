@@ -88,10 +88,29 @@ def run_validation(args: argparse.Namespace) -> Path:
                 seed=seed,
                 system=system,
             )
-            rows.append((n_samples, seed, sums.n1, sums.n2, sums.n1_stderr, sums.n2_stderr))
+            rows.append((
+                n_samples,
+                seed,
+                sums.n1,
+                sums.n2,
+                sums.n_2pc,
+                sums.n_3pca,
+                sums.n_3pcb,
+                sums.n_3pc_total,
+                sums.n_4pc,
+                sums.n1_stderr,
+                sums.n2_stderr,
+                sums.n_2pc_stderr,
+                sums.n_3pca_stderr,
+                sums.n_3pcb_stderr,
+                sums.n_3pc_total_stderr,
+                sums.n_4pc_stderr,
+            ))
             lg.info(
                 f"n={n_samples:g}, seed={seed}: N1={sums.n1:.4e}, "
-                f"N2={sums.n2:.4e}, N2/N1={sums.n2_over_n1:.4f}"
+                f"N2={sums.n2:.4e}, 2PC={sums.n_2pc:.4e}, "
+                f"3PC={sums.n_3pc_total:.4e}, 4PC={sums.n_4pc:.4e}, "
+                f"N2/N1={sums.n2_over_n1:.4f}"
             )
 
     data = np.asarray(rows, dtype=float)
@@ -103,8 +122,18 @@ def run_validation(args: argparse.Namespace) -> Path:
         seed=data[:, 1].astype(int),
         n1=data[:, 2],
         n2=data[:, 3],
-        n1_stderr=data[:, 4],
-        n2_stderr=data[:, 5],
+        n_2pc=data[:, 4],
+        n_3pca=data[:, 5],
+        n_3pcb=data[:, 6],
+        n_3pc_total=data[:, 7],
+        n_4pc=data[:, 8],
+        n1_stderr=data[:, 9],
+        n2_stderr=data[:, 10],
+        n_2pc_stderr=data[:, 11],
+        n_3pca_stderr=data[:, 12],
+        n_3pcb_stderr=data[:, 13],
+        n_3pc_total_stderr=data[:, 14],
+        n_4pc_stderr=data[:, 15],
         beta2=beta2_mc,
         alpha=config.mc_alpha,
         length=length,
@@ -192,10 +221,40 @@ def _compute_mc_direct_comparison(system: System, config: MCValidationConfig) ->
             system=system,
         )
         norm = T ** 2
-        rows.append((spacing, llw, direct.n1 * norm, direct.n2 * norm,
-                     mc.n1, mc.n2, mc.n1_stderr, mc.n2_stderr, h_r, m_r, actual_nz, n_entries))
+        rows.append((
+            spacing,
+            llw,
+            direct.n1 * norm,
+            direct.n2 * norm,
+            direct.n_2pc * norm,
+            direct.n_3pca * norm,
+            direct.n_3pcb * norm,
+            direct.n_3pc_total * norm,
+            direct.n_4pc * norm,
+            mc.n1,
+            mc.n2,
+            mc.n_2pc,
+            mc.n_3pca,
+            mc.n_3pcb,
+            mc.n_3pc_total,
+            mc.n_4pc,
+            mc.n1_stderr,
+            mc.n2_stderr,
+            mc.n_2pc_stderr,
+            mc.n_3pca_stderr,
+            mc.n_3pcb_stderr,
+            mc.n_3pc_total_stderr,
+            mc.n_4pc_stderr,
+            h_r,
+            m_r,
+            actual_nz,
+            n_entries,
+        ))
         lg.info(f"  h_r={h_r} m_r={m_r} nz={actual_nz} entries={n_entries}  "
-                f"N1/MC={direct.n1*norm/mc.n1:.4f}  N2/MC={direct.n2*norm/mc.n2:.4f}")
+                f"N1/MC={direct.n1*norm/mc.n1:.4f}  N2/MC={direct.n2*norm/mc.n2:.4f}  "
+                f"2PC/MC={direct.n_2pc*norm/mc.n_2pc:.4f}  "
+                f"3PC/MC={direct.n_3pc_total*norm/mc.n_3pc_total:.4f}  "
+                f"4PC/MC={direct.n_4pc*norm/mc.n_4pc:.4f}")
 
     data = np.asarray(rows, dtype=float)
     return {
@@ -203,14 +262,29 @@ def _compute_mc_direct_comparison(system: System, config: MCValidationConfig) ->
         "llw": data[:, 1],
         "direct_n1": data[:, 2],
         "direct_n2": data[:, 3],
-        "mc_n1": data[:, 4],
-        "mc_n2": data[:, 5],
-        "mc_n1_stderr": data[:, 6],
-        "mc_n2_stderr": data[:, 7],
-        "h_radius": data[:, 8],
-        "m_radius": data[:, 9],
-        "nz_actual": data[:, 10],
-        "n_entries": data[:, 11],
+        "direct_n_2pc": data[:, 4],
+        "direct_n_3pca": data[:, 5],
+        "direct_n_3pcb": data[:, 6],
+        "direct_n_3pc_total": data[:, 7],
+        "direct_n_4pc": data[:, 8],
+        "mc_n1": data[:, 9],
+        "mc_n2": data[:, 10],
+        "mc_n_2pc": data[:, 11],
+        "mc_n_3pca": data[:, 12],
+        "mc_n_3pcb": data[:, 13],
+        "mc_n_3pc_total": data[:, 14],
+        "mc_n_4pc": data[:, 15],
+        "mc_n1_stderr": data[:, 16],
+        "mc_n2_stderr": data[:, 17],
+        "mc_n_2pc_stderr": data[:, 18],
+        "mc_n_3pca_stderr": data[:, 19],
+        "mc_n_3pcb_stderr": data[:, 20],
+        "mc_n_3pc_total_stderr": data[:, 21],
+        "mc_n_4pc_stderr": data[:, 22],
+        "h_radius": data[:, 23],
+        "m_radius": data[:, 24],
+        "nz_actual": data[:, 25],
+        "n_entries": data[:, 26],
     }
 
 
@@ -243,7 +317,6 @@ def _plot_convergence(data: np.ndarray, out_dir: Path) -> None:
     fig.tight_layout()
     path = out_dir / "dar_mc_xhkm_n1_n2_convergence.pdf"
     fig.savefig(path, dpi=300)
-    fig.savefig(path.with_suffix(".png"), dpi=300)
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(4.0, 2.6))
@@ -256,7 +329,6 @@ def _plot_convergence(data: np.ndarray, out_dir: Path) -> None:
     fig.tight_layout()
     path = out_dir / "dar_mc_xhkm_n2_over_n1.pdf"
     fig.savefig(path, dpi=300)
-    fig.savefig(path.with_suffix(".png"), dpi=300)
     plt.close(fig)
     lg.success(f"saved plots in {out_dir}")
 
@@ -290,7 +362,6 @@ def _plot_mc_direct_comparison(comparison: dict[str, np.ndarray], out_dir: Path)
     fig.tight_layout()
     path = out_dir / "mc_vs_direct_xhkm_n1_n2.pdf"
     fig.savefig(path, dpi=300)
-    fig.savefig(path.with_suffix(".png"), dpi=300)
     plt.close(fig)
 
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.8), sharex=True)
@@ -306,7 +377,6 @@ def _plot_mc_direct_comparison(comparison: dict[str, np.ndarray], out_dir: Path)
     fig.tight_layout()
     path = out_dir / "mc_vs_direct_xhkm_ratio.pdf"
     fig.savefig(path, dpi=300)
-    fig.savefig(path.with_suffix(".png"), dpi=300)
     plt.close(fig)
     lg.success(f"saved MC-vs-direct comparison plots in {out_dir}")
 
