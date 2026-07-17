@@ -23,6 +23,7 @@ _POWER_PROFILE_MODES = {
 
 _METHOD_MODES = {"off", "cached", "recompute"}
 _TD_TIME_INTEGRAL_BACKENDS = {"direct", "x0mm_fft"}
+_FULLBAND_FWM_TUPLE_SELECTION_MODES = {"joint_reservoir", "exhaustive_support_mc"}
 _STUDY_TYPES = {"full_system", "subset", "sweep"}
 
 
@@ -80,9 +81,11 @@ class MCMethodConfig:
     target_limit: int | None = None
     xpm_samples: int = 10000
     fwm_samples: int = 5000
+    fwm_frequency_samples: int = 50
     seed: int = 1234
     max_fwm_tuples_per_target: int | None = None
-    fwm_tuple_selection: str = "phase_proxy"
+    fwm_tuple_selection: str = "joint_reservoir"
+    workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -397,10 +400,18 @@ def _load_methods_config(system: System) -> MethodsConfig:
             if mc.get("target_limit") is not None else None,
             xpm_samples=max(_as_int(mc.get("xpm_samples", 10000), "methods.mc.xpm_samples"), 1),
             fwm_samples=max(_as_int(mc.get("fwm_samples", 5000), "methods.mc.fwm_samples"), 1),
+            fwm_frequency_samples=max(
+                _as_int(mc.get("fwm_frequency_samples", 50), "methods.mc.fwm_frequency_samples"), 1
+            ),
             seed=_as_int(mc.get("seed", 1234), "methods.mc.seed"),
             max_fwm_tuples_per_target=_as_int(mc.get("max_fwm_tuples_per_target"), "methods.mc.max_fwm_tuples_per_target")
             if mc.get("max_fwm_tuples_per_target") is not None else None,
-            fwm_tuple_selection=str(mc.get("fwm_tuple_selection", "phase_proxy")),
+            fwm_tuple_selection=_normalize_mode(
+                "methods.mc.fwm_tuple_selection",
+                mc.get("fwm_tuple_selection", "joint_reservoir"),
+                _FULLBAND_FWM_TUPLE_SELECTION_MODES,
+            ),
+            workers=max(_as_int(mc.get("workers", 1), "methods.mc.workers"), 0),
         ),
     )
 

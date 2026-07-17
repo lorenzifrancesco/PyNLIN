@@ -11,6 +11,7 @@ from pynlin.methods.pcfm import (
     compute_pcfm_nlin,
 )
 from pynlin.methods.td.fullband_mc import (
+    FULLBAND_MC_CACHE_VERSION,
     FullbandMCDiagnostic,
     compute_fullband_prefactor_free_mc,
     decimated_frequency_grid,
@@ -258,20 +259,49 @@ def _load_or_compute_fullband_mc(
     output_path: Path,
     *,
     channel_decimation: int = 1,
+    target_decimation: int = 1,
+    target_offset: int = 0,
+    target_limit: int | None = None,
     target_indices: np.ndarray | None = None,
     xpm_samples: int = 10000,
     fwm_samples: int = 5000,
+    fwm_frequency_samples: int = 50,
     seed: int = 1234,
     max_fwm_tuples_per_target: int | None = None,
-    fwm_tuple_selection: str = "phase_proxy",
+    fwm_tuple_selection: str = "joint_reservoir",
+    workers: int = 1,
     recompute: bool = False,
 ) -> FullbandMCDiagnostic:
     """Compute or load a prefactor-free fullband MC diagnostic NPZ."""
+    if target_indices is None:
+        target_indices = _fullband_mc_target_indices(
+            system,
+            channel_decimation=channel_decimation,
+            target_decimation=target_decimation,
+            target_offset=target_offset,
+            target_limit=target_limit,
+        )
+    target_indices = np.asarray(target_indices, dtype=int).reshape(-1)
+    kept_indices, _ = decimated_frequency_grid(system, channel_decimation)
+    expected_targets = kept_indices[target_indices]
+    expected_meta = {
+        "cache_version": FULLBAND_MC_CACHE_VERSION,
+        "decimation": int(channel_decimation),
+        "xpm_samples": int(xpm_samples),
+        "fwm_samples": int(fwm_samples),
+        "fwm_frequency_samples": int(fwm_frequency_samples),
+        "seed": int(seed),
+        "max_fwm_tuples_per_target": max_fwm_tuples_per_target,
+        "fwm_tuple_selection": str(fwm_tuple_selection),
+    }
     if output_path.exists() and not recompute:
         lg.debug(f"Loading cached fullband MC diagnostic from {output_path}")
         try:
             data = np.load(output_path, allow_pickle=True)
             meta = {k[len("meta_"):]: data[k].item() for k in data.files if k.startswith("meta_")}
+            mismatches = [key for key, value in expected_meta.items() if meta.get(key) != value]
+            if mismatches or not np.array_equal(data["target_indices"], expected_targets):
+                raise FileNotFoundError(f"Stale fullband MC cache parameters: {', '.join(mismatches)}")
             return FullbandMCDiagnostic(
                 target_indices=data["target_indices"],
                 target_frequencies=data["target_frequencies"],
@@ -291,11 +321,6 @@ def _load_or_compute_fullband_mc(
             lg.warning(f"Stale or invalid cache at {output_path}; recomputing.")
 
     lg.info("Computing fullband prefactor-free MC diagnostic")
-    if target_indices is None:
-        target_indices = _fullband_mc_target_indices(
-            system,
-            channel_decimation=channel_decimation,
-        )
     diagnostic = compute_fullband_prefactor_free_mc(
         system,
         decimation=channel_decimation,
@@ -304,9 +329,11 @@ def _load_or_compute_fullband_mc(
         include_fwm=True,
         xpm_samples=xpm_samples,
         fwm_samples=fwm_samples,
+        fwm_frequency_samples=fwm_frequency_samples,
         seed=seed,
         max_fwm_tuples_per_target=max_fwm_tuples_per_target,
         fwm_tuple_selection=fwm_tuple_selection,
+        n_workers=workers,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(

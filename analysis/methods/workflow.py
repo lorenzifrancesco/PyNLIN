@@ -17,6 +17,7 @@ from pynlin.utils import watt2dBm
 
 from analysis.config import (
     PROFILE_MAX_W,
+    _FULLBAND_FWM_TUPLE_SELECTION_MODES,
     _flat_profiles_enabled,
     _load_pcfm_runtime_config,
     _normalize_mode,
@@ -178,11 +179,13 @@ def run_pcfm_workflow(
                     mc_target_limit = int(mc_target_limit)
                 mc_xpm_samples = int(mc_section.get("xpm_samples", 10000))
                 mc_fwm_samples = int(mc_section.get("fwm_samples", 5000))
+                mc_fwm_frequency_samples = int(mc_section.get("fwm_frequency_samples", 50))
                 mc_fwm_seed = int(mc_section.get("seed", 1234))
                 mc_max_fwm_tuples = mc_section.get("max_fwm_tuples_per_target")
                 if mc_max_fwm_tuples is not None:
                     mc_max_fwm_tuples = int(mc_max_fwm_tuples)
-                mc_fwm_tuple_selection = str(mc_section.get("fwm_tuple_selection", "phase_proxy"))
+                mc_fwm_tuple_selection = str(mc_section.get("fwm_tuple_selection", "joint_reservoir"))
+                mc_workers = int(mc_section.get("workers", 1))
             else:
                 mc_mode = "off"
                 mc_engine = "ssfm"
@@ -192,9 +195,11 @@ def run_pcfm_workflow(
                 mc_target_limit = None
                 mc_xpm_samples = 10000
                 mc_fwm_samples = 5000
+                mc_fwm_frequency_samples = 50
                 mc_fwm_seed = 1234
                 mc_max_fwm_tuples = None
-                mc_fwm_tuple_selection = "phase_proxy"
+                mc_fwm_tuple_selection = "joint_reservoir"
+                mc_workers = 1
         else:
             mc_mode = "off"
             mc_engine = "ssfm"
@@ -204,9 +209,11 @@ def run_pcfm_workflow(
             mc_target_limit = None
             mc_xpm_samples = 10000
             mc_fwm_samples = 5000
+            mc_fwm_frequency_samples = 50
             mc_fwm_seed = 1234
             mc_max_fwm_tuples = None
-            mc_fwm_tuple_selection = "phase_proxy"
+            mc_fwm_tuple_selection = "joint_reservoir"
+            mc_workers = 1
     else:
         mc_mode = "off"
         mc_engine = "ssfm"
@@ -216,10 +223,17 @@ def run_pcfm_workflow(
         mc_target_limit = None
         mc_xpm_samples = 10000
         mc_fwm_samples = 5000
+        mc_fwm_frequency_samples = 50
         mc_fwm_seed = 1234
         mc_max_fwm_tuples = None
-        mc_fwm_tuple_selection = "phase_proxy"
+        mc_fwm_tuple_selection = "joint_reservoir"
+        mc_workers = 1
     mc_mode = _normalize_mode("mc_mode", mc_mode, {"off", "cached", "recompute"})
+    mc_fwm_tuple_selection = _normalize_mode(
+        "mc_fwm_tuple_selection",
+        mc_fwm_tuple_selection,
+        _FULLBAND_FWM_TUPLE_SELECTION_MODES,
+    )
     compute_mc = mc_mode != "off"
     recompute_mc = mc_mode == "recompute"
     use_fullband_mc = compute_mc and mc_engine.lower() == "fullband"
@@ -658,12 +672,17 @@ def run_pcfm_workflow(
             system,
             output_path=out_path,
             channel_decimation=mc_channel_decimation,
+            target_decimation=mc_target_decimation,
+            target_offset=mc_target_offset,
+            target_limit=mc_target_limit,
             target_indices=None,
             xpm_samples=mc_xpm_samples,
             fwm_samples=mc_fwm_samples,
+            fwm_frequency_samples=mc_fwm_frequency_samples,
             seed=mc_fwm_seed,
             max_fwm_tuples_per_target=mc_max_fwm_tuples,
             fwm_tuple_selection=mc_fwm_tuple_selection,
+            workers=mc_workers,
             recompute=recompute_mc,
         )
         fullband_mc_diagnostic = diagnostic
@@ -676,14 +695,14 @@ def run_pcfm_workflow(
             kappa2 = float(gamma[int(grid_idx)]) ** 2 * (16.0 / 81.0)
             fmc_launch_nlin[i] = kappa2 * P_j * mean_launch * float(diagnostic.total[i])
         if kept.size > 0 and diagnostic.target_indices.size > 0:
-            fmc_full = np.full(kept.size, np.nan, dtype=float)
+            fmc_full = np.full(freqs.size, np.nan, dtype=float)
             for di, gi in enumerate(diagnostic.target_indices):
                 if 0 <= int(gi) < fmc_full.size:
                     fmc_full[int(gi)] = fmc_launch_nlin[di]
             fmc_interp = np.interp(
                 np.arange(freqs.size, dtype=float),
-                kept.astype(float),
-                np.nan_to_num(fmc_full, nan=0.0),
+                diagnostic.target_indices.astype(float),
+                np.nan_to_num(fmc_full[diagnostic.target_indices], nan=0.0),
                 left=0.0,
                 right=0.0,
             )
@@ -708,8 +727,9 @@ def run_pcfm_workflow(
             )
         )
         lg.info(
-            "Fullband MC targets: {:d} channels (decimation {}), xpm_samples={:d}, fwm_samples={:d}".format(
-                int(diagnostic.target_indices.size), mc_channel_decimation, mc_xpm_samples, mc_fwm_samples
+            "Fullband MC targets: {:d} channels (decimation {}), xpm_samples={:d}, fwm_samples={:d}, fwm_frequency_samples={:d}, workers={:d}".format(
+                int(diagnostic.target_indices.size), mc_channel_decimation, mc_xpm_samples, mc_fwm_samples,
+                mc_fwm_frequency_samples, mc_workers
             )
         )
 

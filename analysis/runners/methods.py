@@ -172,19 +172,26 @@ def run_fullband_mc(
     cache_tag = method_cache_tag(
         cache_scope, context.cache_tag,
         f"dec{config.channel_decimation}",
-        f"td{config.target_decimation}_to{config.target_offset}",
-        f"xpm{config.xpm_samples}_fwm{config.fwm_samples}",
+        f"td{config.target_decimation}_to{config.target_offset}_tl{config.target_limit}",
+        f"xpm{config.xpm_samples}_fwm{config.fwm_samples}_ff{config.fwm_frequency_samples}",
         f"sel{config.fwm_tuple_selection}",
+        f"seed{config.seed}_mt{config.max_fwm_tuples_per_target}",
+        f"w{config.workers}",
     )
     diagnostic = _load_or_compute_fullband_mc(
         context.system,
         output_path=context.out_dir / f"fullband_mc_{cache_tag}.npz",
         channel_decimation=config.channel_decimation,
+        target_decimation=config.target_decimation,
+        target_offset=config.target_offset,
+        target_limit=config.target_limit,
         xpm_samples=config.xpm_samples,
         fwm_samples=config.fwm_samples,
+        fwm_frequency_samples=config.fwm_frequency_samples,
         seed=config.seed,
         max_fwm_tuples_per_target=config.max_fwm_tuples_per_target,
         fwm_tuple_selection=config.fwm_tuple_selection,
+        workers=config.workers,
         recompute=config.mode == "recompute",
     )
     launch_nlin = _fullband_mc_estimate_nlin(context.system, diagnostic, context.launch_powers_w)
