@@ -127,7 +127,7 @@ def test_adaptive_sector_estimate_classifies_resolution(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "analysis.standalone_numerical.validate_fwm_mc_real_tuples.estimate_xhkm_sums_mc",
+        "analysis.standalone_numerical.validate_fwm_mc_real_tuples.estimate_xhkm_sectors_direct_mc",
         fake_estimator,
     )
     result = estimate_xpm_sector_ensemble(

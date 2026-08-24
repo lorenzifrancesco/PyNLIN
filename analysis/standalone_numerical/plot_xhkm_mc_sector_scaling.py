@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from pynlin.methods.td.xhkm_mc import estimate_xhkm_sums_mc
+from pynlin.methods.td.xhkm_mc import estimate_xhkm_sectors_direct_mc
 
 
 OUT_MEDIA = Path("media/n-PC/mc-sector-scaling")
@@ -71,7 +71,7 @@ def compute_curves(args: argparse.Namespace, *, lld: float | None = None) -> dic
         per_seed = []
         per_seed_stderr = []
         for seed in seeds:
-            mc = estimate_xhkm_sums_mc(
+            mc = estimate_xhkm_sectors_direct_mc(
                 beta2=beta2,
                 alpha=args.alpha,
                 length=args.length,

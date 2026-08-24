@@ -33,7 +33,11 @@ from scipy.optimize import brentq
 from pynlin.methods.td.fullband_mc import estimate_xpm_n1_local_taylor_mc
 from pynlin.methods.td.fwm_kernel import FWMChannels
 from pynlin.methods.td.fwm_mc import estimate_fwm_term_sum_dar_mc
-from pynlin.methods.td.xhkm_mc import XPMTaylorDispersion, estimate_xhkm_sums_mc
+from pynlin.methods.td.xhkm_mc import (
+    XPMTaylorDispersion,
+    assert_flat_signal_power_profile,
+    estimate_xhkm_sectors_direct_mc,
+)
 from pynlin.system import System
 
 
@@ -277,38 +281,81 @@ def estimate_xpm_sector_ensemble(
     max_stderr_over_n1: float,
     system: System | None = None,
 ) -> dict[str, float | bool | str]:
-    """Adaptively estimate covariance-aware residual XPM sectors."""
+    """Adaptively estimate the XPM sectors with the direct CRN estimator.
+
+    Uses :func:`estimate_xhkm_sectors_direct_mc` (per-sample value scales with the
+    sector, not the aggregate) instead of the alternating-difference transform,
+    so 3PCa/3PCb/4PC resolve at a fraction of the budget.  Batch means over
+    fixed-size direct batches preserve the adaptive stopping and resolved-flag
+    contract of the previous transform-based ensemble.
+    """
+    if system is not None:
+        assert_flat_signal_power_profile(system)
     names = ("n_2pc", "n_3pca", "n_3pcb", "n_4pc", "n1")
-    estimate = estimate_xhkm_sums_mc(
-        beta2=0.0,
-        dispersion=dispersion,
-        alpha=alpha,
-        length=length,
-        channel_spacing_over_baud=spacing_over_baud,
-        n_samples=max_samples,
-        batch_size=batch_size,
-        min_samples=min_samples,
-        target_relative_stderr=max_relative_error,
-        target_stderr_over_n1=max_stderr_over_n1,
-        sigma_threshold=sigma_threshold,
-        seed=seed,
-        system=system,
-    )
+    batch_size = int(batch_size)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    min_batches = max(2, int(np.ceil(int(min_samples) / batch_size)))
+    max_batches = max(min_batches, int(int(max_samples) // batch_size))
+
+    def _pool(means_list: list[float], stderrs_list: list[float]) -> tuple[float, float]:
+        # Equal-size iid batches: pooled mean and its stderr from per-batch
+        # (per-sample) stderrs, sqrt(sum s_b**2)/M == pop_sd/sqrt(total samples).
+        m = len(means_list)
+        pooled_mean = float(np.mean(means_list))
+        pooled_stderr = float(np.sqrt(np.sum(np.square(stderrs_list))) / m)
+        return pooled_mean, pooled_stderr
+
+    batch_means: dict[str, list[float]] = {name: [] for name in names}
+    batch_stderrs: dict[str, list[float]] = {name: [] for name in names}
+    stop_reason = "maximum_budget"
+    for batch_index in range(max_batches):
+        estimate = estimate_xhkm_sectors_direct_mc(
+            beta2=0.0,
+            dispersion=dispersion,
+            alpha=alpha,
+            length=length,
+            channel_spacing_over_baud=spacing_over_baud,
+            n_samples=batch_size,
+            seed=int(seed) + batch_index,
+        )
+        for name in names:
+            batch_means[name].append(float(getattr(estimate, name)))
+            batch_stderrs[name].append(float(getattr(estimate, f"{name}_stderr")))
+        n_batches = batch_index + 1
+        if n_batches < min_batches:
+            continue
+        means = {k: _pool(batch_means[k], batch_stderrs[k])[0] for k in names}
+        stderrs = {k: _pool(batch_means[k], batch_stderrs[k])[1] for k in names}
+        n1_scale = abs(means["n1"])
+        resolved = []
+        for name in ("n_2pc", "n_3pca", "n_3pcb", "n_4pc"):
+            mean = means[name]
+            stderr = stderrs[name]
+            positive = mean - float(sigma_threshold) * stderr > 0.0
+            relative_ok = mean > 0.0 and stderr / mean <= float(max_relative_error)
+            absolute_ok = n1_scale > 0.0 and stderr / n1_scale <= float(max_stderr_over_n1)
+            resolved.append(positive and (relative_ok or absolute_ok))
+        if all(resolved):
+            stop_reason = "target_precision"
+            break
+
+    means = {k: _pool(batch_means[k], batch_stderrs[k])[0] for k in names}
+    stderrs = {k: _pool(batch_means[k], batch_stderrs[k])[1] for k in names}
+    n_batches = len(batch_means["n1"])
 
     result: dict[str, float | bool | str] = {
-        "n_samples": float(estimate.n_samples),
-        "stop_reason": str(estimate.metadata["stop_reason"]),
+        "n_samples": float(n_batches * batch_size),
+        "stop_reason": stop_reason,
     }
     for name in names:
-        mean = float(getattr(estimate, name))
-        stderr = float(getattr(estimate, f"{name}_stderr"))
-        result[name] = mean
-        result[f"{name}_stderr"] = stderr
+        result[name] = means[name]
+        result[f"{name}_stderr"] = stderrs[name]
         if name != "n1":
-            relative_error = stderr / mean if mean > 0.0 else float("inf")
-            scaled_error = stderr / estimate.n1 if estimate.n1 > 0.0 else float("inf")
+            relative_error = stderrs[name] / means[name] if means[name] > 0.0 else float("inf")
+            scaled_error = stderrs[name] / means["n1"] if means["n1"] > 0.0 else float("inf")
             result[f"{name}_resolved"] = bool(
-                mean - float(sigma_threshold) * stderr > 0.0
+                means[name] - float(sigma_threshold) * stderrs[name] > 0.0
                 and (
                     relative_error <= float(max_relative_error)
                     or scaled_error <= float(max_stderr_over_n1)
@@ -877,7 +924,7 @@ def compute_dataset(
             "sector_max_stderr_over_n1": np.array(float(sector_max_stderr_over_n1)),
             "sector_sigma_threshold": np.array(float(sector_sigma_threshold)),
             "sector_estimator": np.array(
-                "adaptive_covariance_aware_aggregate_residuals"
+                "direct_crn_paired_projections"
             ),
             "sector_dispersion_model": np.array("channel_local_taylor_beta4"),
             "sector_common_random_numbers_across_spectrum": np.array(True),
