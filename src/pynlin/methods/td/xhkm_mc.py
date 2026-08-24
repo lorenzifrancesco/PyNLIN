@@ -594,9 +594,191 @@ def estimate_xhkm_sums_mc(
     )
 
 
+# Branch-A sampling Jacobian: outer x drawn uniformly on (-2pi, 2pi) while the two
+# inner frequencies are drawn on (-pi, pi). Empirically 2.0 to MC precision across
+# every sector (see tests), matching the explicit 2.0 in the Nyquist 2PC sampler.
+_DIRECT_SECTOR_CONST = 2.0
+
+
+def _direct_sector_kernel(
+    x: np.ndarray,
+    a: np.ndarray,
+    u: np.ndarray,
+    *,
+    beta2: float,
+    dispersion: XPMTaylorDispersion | None,
+    alpha: float,
+    length: float,
+    nspan: int,
+    phase_delay: float,
+    omega: float,
+) -> np.ndarray:
+    """One masked link kernel ``K(a, u)`` at shared outer frequency ``x``.
+
+    Variable map to the Golani frequencies: target in ``w1=a``, target out
+    ``w2=x+a``, interferer ``w3=u``, interferer other ``w4=u-x``; the outer
+    ``x`` is the target in/out difference shared by the two ``|X|**2`` copies
+    (the collision ``m`` sum).  The support mask keeps ``w2`` and ``w4`` inside
+    the principal band ``[-pi, pi]``.
+    """
+    w2 = x + a
+    w4 = u - x
+    mask = (np.abs(w2) <= np.pi) & (np.abs(w4) <= np.pi)
+    if dispersion is not None:
+        delta = dispersion.mismatch(0, w2, 1, w4, 0, a, 1, u)
+        kernel = _link(
+            np.zeros_like(x),
+            beta2=0.0,
+            delta_beta=delta,
+            alpha=alpha,
+            length=length,
+            nspan=nspan,
+            phase_delay=phase_delay,
+        )
+    else:
+        arg = -x * (u - x + omega - a)
+        kernel = _link(
+            arg,
+            beta2=beta2,
+            delta_beta=None,
+            alpha=alpha,
+            length=length,
+            nspan=nspan,
+            phase_delay=phase_delay,
+        )
+    return kernel * mask
+
+
+def estimate_xhkm_sectors_direct_mc(
+    *,
+    beta2: float,
+    alpha: float,
+    length: float,
+    channel_spacing_over_baud: float,
+    n_samples: int,
+    nspan: int = 1,
+    phase_delay: float = 0.0,
+    seed: int | None = None,
+    dispersion: XPMTaylorDispersion | None = None,
+    random_variables: np.ndarray | None = None,
+) -> XhkmMCSums:
+    """Direct common-random-number estimator for the XPM collision sectors.
+
+    Unlike :func:`estimate_xhkm_sums_mc`, which samples four aggregates and
+    reconstructs the sectors through the alternating-difference
+    :data:`_SECTOR_TRANSFORM` (variance set by the *aggregate*), this estimator
+    evaluates all sectors from a single draw of one outer frequency ``x`` and
+    two independent inner pairs ``(a1, u1)`` and ``(a2, u2)``.  With the four
+    kernels ``A=K(a1,u1)``, ``B=K(a2,u2)``, ``Cc=K(a2,u1)`` (shared interferer),
+    ``Dd=K(a1,u2)`` (shared target):
+
+    * ``N1 = E|A|**2``, ``2PC = E[A conj(B)]`` (both direct, non-negative),
+    * ``3PCa = E[A conj(Cc-B)]``, ``3PCb = E[A conj(Dd-B)]``,
+      ``4PC  = E[A conj(A-Cc-Dd+B)]``.
+
+    The last three are common-random-number paired differences whose per-sample
+    value scales with the *sector*, not the aggregate, so the residual sectors
+    (3PCa/3PCb/4PC) are resolved 7-19x more cheaply at high walk-off where the
+    transform estimator leaves them in the noise.  Derived from the Golani/Dar
+    ``X[h,r,m]`` definition by Poisson summation (``m`` -> shared ``x``, ``h`` ->
+    target-out frequency, ``r`` -> interferer frequency).
+
+    ``random_variables``, if given, must have shape ``(5, n_samples)`` with row 0
+    the outer ``x`` on ``(-2pi, 2pi)`` and rows 1-4 the inner ``a1, u1, a2, u2``
+    on ``(-pi, pi)``.
+    """
+    n_samples = int(n_samples)
+    if n_samples <= 0:
+        raise ValueError("n_samples must be positive")
+    beta2 = float(beta2)
+    alpha = float(alpha)
+    length = float(length)
+    phase_delay = float(phase_delay)
+    q = float(channel_spacing_over_baud)
+    nspan = int(nspan)
+    if dispersion is not None and phase_delay != 0.0:
+        raise ValueError("local Taylor dispersion currently requires phase_delay=0")
+    omega = 2.0 * np.pi * q
+
+    if random_variables is None:
+        rng = np.random.default_rng(seed)
+        draws = rng.random((5, n_samples))
+        x = 2.0 * np.pi * (2.0 * draws[0] - 1.0)
+        a1, u1, a2, u2 = (np.pi * (2.0 * draws[i] - 1.0) for i in range(1, 5))
+    else:
+        R = np.asarray(random_variables, dtype=float)
+        if R.shape != (5, n_samples):
+            raise ValueError(f"random_variables must have shape (5, {n_samples})")
+        x, a1, u1, a2, u2 = R
+
+    kwargs = dict(
+        beta2=beta2, dispersion=dispersion, alpha=alpha, length=length,
+        nspan=nspan, phase_delay=phase_delay, omega=omega,
+    )
+    A = _direct_sector_kernel(x, a1, u1, **kwargs)
+    B = _direct_sector_kernel(x, a2, u2, **kwargs)
+    Cc = _direct_sector_kernel(x, a2, u1, **kwargs)
+    Dd = _direct_sector_kernel(x, a1, u2, **kwargs)
+
+    per_sample = {
+        "n1": _DIRECT_SECTOR_CONST * np.real(A * np.conj(A)),
+        "n2": _DIRECT_SECTOR_CONST * np.real(A * np.conj(Dd)),
+        "n_2pc": _DIRECT_SECTOR_CONST * np.real(A * np.conj(B)),
+        "n_3pca": _DIRECT_SECTOR_CONST * np.real(A * np.conj(Cc - B)),
+        "n_3pcb": _DIRECT_SECTOR_CONST * np.real(A * np.conj(Dd - B)),
+        "n_4pc": _DIRECT_SECTOR_CONST * np.real(A * np.conj(A - Cc - Dd + B)),
+    }
+    means = {k: float(np.mean(v)) for k, v in per_sample.items()}
+    stderrs = {
+        k: float(np.std(v, ddof=1) / np.sqrt(n_samples)) if n_samples > 1 else float("nan")
+        for k, v in per_sample.items()
+    }
+    n_3pc_total = means["n_3pca"] + means["n_3pcb"]
+    n_3pc_total_stderr = float(
+        np.std(per_sample["n_3pca"] + per_sample["n_3pcb"], ddof=1) / np.sqrt(n_samples)
+        if n_samples > 1 else float("nan")
+    )
+
+    return XhkmMCSums(
+        n1=means["n1"],
+        n2=means["n2"],
+        n_2pc=means["n_2pc"],
+        n_3pc_total=n_3pc_total,
+        n_3pca=means["n_3pca"],
+        n_3pcb=means["n_3pcb"],
+        n_4pc=means["n_4pc"],
+        n1_stderr=stderrs["n1"],
+        n2_stderr=stderrs["n2"],
+        n_2pc_stderr=stderrs["n_2pc"],
+        n_3pc_total_stderr=n_3pc_total_stderr,
+        n_3pca_stderr=stderrs["n_3pca"],
+        n_3pcb_stderr=stderrs["n_3pcb"],
+        n_4pc_stderr=stderrs["n_4pc"],
+        n_samples=n_samples,
+        seed=seed,
+        metadata={
+            "calculation": "prefactor_free_dar_mc_xhkm_sums",
+            "sector_estimator": "direct_crn_paired_projections",
+            "sector_estimates_are_direct_modulus_squared_sums": False,
+            "sector_calculation": "golani_poisson_hr_projections",
+            "beta2": beta2,
+            "alpha": alpha,
+            "length": length,
+            "channel_spacing_over_baud": q,
+            "nspan": nspan,
+            "phase_delay": phase_delay,
+            "dispersion_model": "local_taylor_beta4"
+            if dispersion is not None
+            else "scalar_beta2",
+            "sampling_constant": _DIRECT_SECTOR_CONST,
+        },
+    )
+
+
 __all__ = [
     "XhkmMCSums",
     "XPMTaylorDispersion",
     "assert_flat_signal_power_profile",
     "estimate_xhkm_sums_mc",
+    "estimate_xhkm_sectors_direct_mc",
 ]
