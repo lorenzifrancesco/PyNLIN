@@ -1,0 +1,916 @@
+import base64
+import io
+import sys
+from pathlib import Path
+
+import numpy as np
+import plotly.graph_objects as go
+from dash import Dash, dcc, html, Input, Output, callback
+
+from itertools import combinations, product
+from scipy.spatial import ConvexHull
+# from IPython.display import display
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from analysis.fwm.plot_wdm_quadruplet import draw_wdm_quadruplet
+
+
+# ============================================================
+# FWM frequency matching condition (angular frequencies):
+#
+#   omega_1 - omega_2 + omega_3 = omega_4    (absolute)
+#   nu_1   - nu_2   + nu_3   = nu_4          (offsets from COI,
+#                                              nu_j = omega_j - omega_COI)
+#   |nu_4| <= pi * B                           (support / bandwidth)
+#
+# All variables are angular frequencies.
+# Axes are normalised by Omega_0 = 2 pi Delta_f, the base
+# inter-channel spacing: Omega_0 = spacing_ratio * B.
+# ============================================================
+
+B = 1.0
+h = B / 2
+tol = 1e-9
+
+plane_normal = np.array([1.0, -1.0, 1.0])
+
+# Plot only a reasonable number of nearby shifted cubes.
+index_values = range(-2, 3)
+
+
+# ============================================================
+# Find the vertices of one shifted cube clipped by
+#
+# |nu1 - nu2 + nu3| <= B/2
+# ============================================================
+
+def clipped_region_vertices(n1, n2, n3, spacing_ratio):
+    omega = spacing_ratio * B
+
+    center = omega * np.array([n1, n2, n3], dtype=float)
+    lower = center - h
+    upper = center + h
+
+    # Half-space representation:
+    #
+    # A @ nu <= b
+    #
+    A = np.array([
+        [ 1,  0,  0],
+        [-1,  0,  0],
+        [ 0,  1,  0],
+        [ 0, -1,  0],
+        [ 0,  0,  1],
+        [ 0,  0, -1],
+
+        [ 1, -1,  1],
+        [-1,  1, -1],
+    ], dtype=float)
+
+    b = np.array([
+        upper[0],
+        -lower[0],
+
+        upper[1],
+        -lower[1],
+
+        upper[2],
+        -lower[2],
+
+        h,
+        h,
+    ])
+
+    vertices = []
+
+    # Every polyhedron vertex is obtained by intersecting
+    # three boundary planes.
+    for selected_planes in combinations(range(len(A)), 3):
+        matrix = A[list(selected_planes)]
+        rhs = b[list(selected_planes)]
+
+        if abs(np.linalg.det(matrix)) < tol:
+            continue
+
+        point = np.linalg.solve(matrix, rhs)
+
+        if np.all(A @ point <= b + 1e-8):
+            already_present = any(
+                np.linalg.norm(point - old_point) < 1e-8
+                for old_point in vertices
+            )
+
+            if not already_present:
+                vertices.append(point)
+
+    return np.asarray(vertices)
+
+
+# ============================================================
+# Extract true polyhedron edges
+#
+# scipy.spatial.ConvexHull triangulates polygonal faces.
+# The function below removes artificial diagonals connecting
+# coplanar triangles.
+# ============================================================
+
+def true_hull_edges(vertices):
+    hull = ConvexHull(vertices)
+
+    edge_to_faces = {}
+
+    for face_index, triangle in enumerate(hull.simplices):
+        triangle_edges = [
+            (triangle[0], triangle[1]),
+            (triangle[1], triangle[2]),
+            (triangle[2], triangle[0]),
+        ]
+
+        for i, j in triangle_edges:
+            edge = tuple(sorted((int(i), int(j))))
+            edge_to_faces.setdefault(edge, []).append(face_index)
+
+    normals = hull.equations[:, :3]
+    normals /= np.linalg.norm(normals, axis=1)[:, None]
+
+    true_edges = []
+
+    for edge, adjacent_faces in edge_to_faces.items():
+        if len(adjacent_faces) == 1:
+            true_edges.append(edge)
+            continue
+
+        normal_1 = normals[adjacent_faces[0]]
+        normal_2 = normals[adjacent_faces[1]]
+
+        # Keep the edge only when the two adjacent triangles
+        # belong to different geometric faces.
+        if abs(normal_1 @ normal_2) < 1 - 1e-7:
+            true_edges.append(edge)
+
+    return hull, true_edges
+
+
+def edges_as_lines(vertices, edges):
+    x, y, z = [], [], []
+
+    for i, j in edges:
+        p = vertices[i]
+        q = vertices[j]
+
+        x.extend([p[0], q[0], None])
+        y.extend([p[1], q[1], None])
+        z.extend([p[2], q[2], None])
+
+    return x, y, z
+
+
+# ============================================================
+# Intersection between one shifted cube and
+#
+# nu1 - nu2 + nu3 = slice_value
+# ============================================================
+
+def shifted_cube_section(
+    n1,
+    n2,
+    n3,
+    spacing_ratio,
+    slice_value,
+):
+    omega = spacing_ratio * B
+
+    center = omega * np.array([n1, n2, n3], dtype=float)
+    lower = center - h
+    upper = center + h
+
+    cube_vertices = np.array([
+        [x, y, z]
+        for x in (lower[0], upper[0])
+        for y in (lower[1], upper[1])
+        for z in (lower[2], upper[2])
+    ])
+
+    cube_edges = []
+
+    for i, p in enumerate(cube_vertices):
+        for j, q in enumerate(cube_vertices):
+            if i >= j:
+                continue
+
+            # Two cube vertices are connected when they differ
+            # in exactly one coordinate.
+            number_of_different_coordinates = np.count_nonzero(
+                np.abs(p - q) > tol
+            )
+
+            if number_of_different_coordinates == 1:
+                cube_edges.append((p, q))
+
+    intersection_points = []
+
+    for p, q in cube_edges:
+        fp = plane_normal @ p - slice_value
+        fq = plane_normal @ q - slice_value
+
+        # Entire cube edge lies in the slicing plane.
+        if abs(fp) < tol and abs(fq) < tol:
+            intersection_points.extend([p, q])
+            continue
+
+        # Plane intersects the cube edge.
+        if fp * fq <= 0 and abs(fp - fq) > tol:
+            t = fp / (fp - fq)
+
+            if -tol <= t <= 1 + tol:
+                point = p + t * (q - p)
+                intersection_points.append(point)
+
+    unique_points = []
+
+    for point in intersection_points:
+        already_present = any(
+            np.linalg.norm(point - old_point) < 1e-8
+            for old_point in unique_points
+        )
+
+        if not already_present:
+            unique_points.append(point)
+
+    points = np.asarray(unique_points)
+
+    if len(points) < 3:
+        return np.empty((0, 3))
+
+    # Build a two-dimensional coordinate system intrinsic
+    # to the slicing plane.
+    normal = plane_normal / np.linalg.norm(plane_normal)
+
+    reference = np.array([1.0, 0.0, 0.0])
+
+    if abs(normal @ reference) > 0.9:
+        reference = np.array([0.0, 1.0, 0.0])
+
+    e1 = np.cross(normal, reference)
+    e1 /= np.linalg.norm(e1)
+
+    e2 = np.cross(normal, e1)
+
+    projected_points = np.column_stack([
+        points @ e1,
+        points @ e2,
+    ])
+
+    polygon_hull = ConvexHull(projected_points)
+
+    # Return vertices ordered around the polygon boundary.
+    return points[polygon_hull.vertices]
+
+
+# ============================================================
+# nu1 and nu3 are user-controlled; nu2 is derived from the
+# frequency-matching condition nu1-nu2+nu3=nu4, with nu4 fixed by
+# the requested output frequency (slice_value). Rendered as a 2D
+# WDM comb via plot_wdm_quadruplet.draw_wdm_quadruplet.
+# ============================================================
+
+def derive_quadruplet(nu1, nu3, spacing_ratio, slice_value):
+    """Derive nu2 from the frequency-matching condition nu1-nu2+nu3=nu4,
+    with nu4 fixed by the requested output frequency (slice_value). nu1 and
+    nu3 are user-controlled (nu/Omega_0 units); nu2 is whatever value makes
+    the triplet land exactly on the COI's output frequency."""
+    Omega_0 = spacing_ratio * B
+    nu4 = slice_value / Omega_0
+    nu2 = nu1 + nu3 - nu4
+    return nu1, nu2, nu3, nu4
+
+
+def quadruplet_image_src(nu1, nu3, spacing_ratio, slice_value):
+    """Render the (nu1, nu2, nu3, nu4) quadruplet (nu2 derived, nu4 fixed by
+    slice_value) with plot_wdm_quadruplet.draw_wdm_quadruplet, base64-encoded
+    for an html.Img src. Passes the channel bandwidth-over-spacing
+    (B/Omega_0 = 1/spacing_ratio), not just the frequencies, so the WDM comb
+    is drawn to scale with the 3D admissible-region figure."""
+    quadruplet = derive_quadruplet(nu1, nu3, spacing_ratio, slice_value)
+    fig = draw_wdm_quadruplet(quadruplet, bandwidth_norm=1.0 / spacing_ratio)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+# ============================================================
+# Build the complete Plotly figure
+# ============================================================
+
+def build_figure(
+    spacing_ratio=1.10,
+    slice_value=0.0,
+    marker_point=None,
+):
+    Omega_0 = spacing_ratio * B
+    s_norm = slice_value / Omega_0
+
+    fig = go.Figure()
+
+    regions = []
+
+    # --------------------------------------------------------
+    # Generate all nonempty nearby regions
+    # --------------------------------------------------------
+
+    for n1, n2, n3 in product(index_values, repeat=3):
+        vertices = clipped_region_vertices(
+            n1=n1,
+            n2=n2,
+            n3=n3,
+            spacing_ratio=spacing_ratio,
+        )
+        vertices = vertices / Omega_0
+
+        if len(vertices) >= 4:
+            q = n1 - n2 + n3
+
+            regions.append({
+                "indices": (n1, n2, n3),
+                "q": q,
+                "vertices": vertices,
+            })
+
+    # One color for each channel-index family.
+    q_colors = {
+        -6: "#2d004b",
+        -5: "#3f007d",
+        -4: "#5e3c99",
+        -3: "#7b3294",
+        -2: "#008837",
+        -1: "#4dac26",
+         0: "#2c7fb8",
+         1: "#fdae61",
+         2: "#d7191c",
+         3: "#9e0142",
+         4: "#67001f",
+         5: "#49000f",
+         6: "#280000",
+    }
+
+    legend_shown = set()
+    active_q_values = set()
+    number_of_sections = 0
+
+    # --------------------------------------------------------
+    # Add regions, edges, slices and slice boundaries
+    # --------------------------------------------------------
+
+    for region in regions:
+        n1, n2, n3 = region["indices"]
+        q = region["q"]
+        vertices = region["vertices"]
+
+        active_q_values.add(q)
+
+        group_name = f"q={q:+d}"
+
+        hull, edges = true_hull_edges(vertices)
+
+        edge_x, edge_y, edge_z = edges_as_lines(
+            vertices,
+            edges,
+        )
+
+        hover_label = (
+            f"(n₁,n₂,n₃)=({n1},{n2},{n3})"
+            f"<br>q=n₁−n₂+n₃={q:+d}"
+        )
+
+        # ----------------------------------------------------
+        # Translucent admissible polyhedron
+        # ----------------------------------------------------
+
+        fig.add_trace(
+            go.Mesh3d(
+                x=vertices[:, 0],
+                y=vertices[:, 1],
+                z=vertices[:, 2],
+
+                i=hull.simplices[:, 0],
+                j=hull.simplices[:, 1],
+                k=hull.simplices[:, 2],
+
+                color=q_colors.get(q, "royalblue"),
+                opacity=0.16,
+                flatshading=True,
+
+                name=group_name,
+                legendgroup=group_name,
+
+                # Only one legend entry for each q.
+                showlegend=q not in legend_shown,
+
+                text=[hover_label] * len(vertices),
+
+                hovertemplate=(
+                    "%{text}<br>"
+                    "ν₁/Ω₀=%{x:.3f}<br>"
+                    "ν₂/Ω₀=%{y:.3f}<br>"
+                    "ν₃/Ω₀=%{z:.3f}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        legend_shown.add(q)
+
+        # ----------------------------------------------------
+        # Strong geometric edges
+        # ----------------------------------------------------
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=edge_x,
+                y=edge_y,
+                z=edge_z,
+
+                mode="lines",
+
+                line=dict(
+                    color="black",
+                    width=5,
+                ),
+
+                opacity=0.78,
+
+                name=group_name,
+                legendgroup=group_name,
+                showlegend=False,
+
+                hoverinfo="skip",
+            )
+        )
+
+        # ----------------------------------------------------
+        # Tunable planar section
+        # ----------------------------------------------------
+
+        section = shifted_cube_section(
+            n1=n1,
+            n2=n2,
+            n3=n3,
+            spacing_ratio=spacing_ratio,
+            slice_value=slice_value,
+        )
+        section = section / Omega_0
+
+        if len(section) < 3:
+            continue
+
+        number_of_sections += 1
+
+        centroid = section.mean(axis=0)
+        mesh_vertices = np.vstack([centroid, section])
+
+        number_of_boundary_vertices = len(section)
+
+        triangle_i = np.zeros(
+            number_of_boundary_vertices,
+            dtype=int,
+        )
+
+        triangle_j = np.arange(
+            1,
+            number_of_boundary_vertices + 1,
+        )
+
+        triangle_k = np.roll(triangle_j, -1)
+
+        section_label = (
+            f"(n₁,n₂,n₃)=({n1},{n2},{n3})"
+            f"<br>q={q:+d}"
+            f"<br>ν₄/Ω₀={s_norm:+.3f}"
+        )
+
+        # Filled red slice.
+        fig.add_trace(
+            go.Mesh3d(
+                x=mesh_vertices[:, 0],
+                y=mesh_vertices[:, 1],
+                z=mesh_vertices[:, 2],
+
+                i=triangle_i,
+                j=triangle_j,
+                k=triangle_k,
+
+                color="crimson",
+                opacity=0.82,
+                flatshading=True,
+
+                name=group_name,
+                legendgroup=group_name,
+                showlegend=False,
+
+                text=[section_label] * len(mesh_vertices),
+
+                hovertemplate=(
+                    "%{text}<br>"
+                    "ν₁/Ω₀=%{x:.3f}<br>"
+                    "ν₂/Ω₀=%{y:.3f}<br>"
+                    "ν₃/Ω₀=%{z:.3f}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        # Thick boundary of the red slice.
+        closed_section = np.vstack([
+            section,
+            section[0],
+        ])
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=closed_section[:, 0],
+                y=closed_section[:, 1],
+                z=closed_section[:, 2],
+
+                mode="lines+markers",
+
+                line=dict(
+                    color="darkred",
+                    width=4,
+                ),
+
+                marker=dict(
+                    color="darkred",
+                    size=2,
+                ),
+
+                name=group_name,
+                legendgroup=group_name,
+                showlegend=False,
+
+                hoverinfo="skip",
+            )
+        )
+
+    # --------------------------------------------------------
+    # Layout
+    # --------------------------------------------------------
+
+    if marker_point is not None:
+        mx, my, mz = marker_point
+        fig.add_trace(go.Scatter3d(
+            x=[mx], y=[my], z=[mz],
+            mode="markers",
+            marker=dict(size=8, color="#ffff00", symbol="diamond",
+                        line=dict(color="black", width=1.5)),
+            name="selected (ν₁,ν₂,ν₃)",
+            showlegend=True,
+            hovertemplate=(
+                "selected point<br>"
+                f"ν₁/Ω₀={mx:.3f}<br>ν₂/Ω₀={my:.3f}<br>ν₃/Ω₀={mz:.3f}"
+                "<extra></extra>"
+            ),
+        ))
+
+    plot_limit = max(abs(v) for v in index_values) + 0.65 / Omega_0
+
+    q_text = ", ".join(
+        f"{q:+d}"
+        for q in sorted(active_q_values)
+    )
+
+    fig.update_layout(
+        font=dict(size=16),
+        title=(
+            f"Ω₀/B={spacing_ratio:.2f}, "
+            f"ν₄/Ω₀={s_norm:+.3f}"
+            f"<br><sup>"
+            f"{len(regions)} admissible regions; "
+            f"{number_of_sections} slice polygons; "
+            f"q∈{{{q_text}}}"
+            f"</sup>"
+            f"<br><sup>FWM: ω₁−ω₂+ω₃=ω₄; "
+            f"ν₁−ν₂+ν₃=ν₄; |ν₄|≤πB</sup>"
+        ),
+
+        uirevision="domain-camera",
+        legend_uirevision="q-family-visibility",
+        scene=dict(
+            # Pinned so slider-driven re-renders never reset user pan/zoom/
+            # camera; only an actual uirevision *change* would reset it, and
+            # this string never changes (set here too, not just via the
+            # callback's update_layout, so the very first render already
+            # carries it and doesn't cause a spurious reset on first input).
+            uirevision="domain-camera",
+            xaxis=dict(
+                title="ν₁/Ω₀",
+                range=[-plot_limit, plot_limit],
+                showbackground=False,
+                zeroline=True,
+            ),
+
+            yaxis=dict(
+                title="ν₂/Ω₀",
+                range=[-plot_limit, plot_limit],
+                showbackground=False,
+                zeroline=True,
+            ),
+
+            zaxis=dict(
+                title="ν₃/Ω₀",
+                range=[-plot_limit, plot_limit],
+                showbackground=False,
+                zeroline=True,
+            ),
+
+            aspectmode="cube",
+
+            # Orthographic axonometry:
+            # parallel edges remain parallel.
+            camera=dict(
+                projection=dict(
+                    type="orthographic",
+                ),
+
+                eye=dict(
+                    x=1.55,
+                    y=-1.55,
+                    z=1.55,
+                ),
+
+                up=dict(
+                    x=0,
+                    y=0,
+                    z=1,
+                ),
+            ),
+        ),
+
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="right",
+                x=1.0,
+                y=0.85,
+                xanchor="right",
+                yanchor="top",
+                # Each preset pins both eye and up explicitly (not just eye)
+                # so the projection always comes out with the two visible
+                # axes oriented like a normal 2D plot (increasing right and
+                # up), regardless of which button was clicked previously.
+                buttons=[
+                    dict(
+                        label="Iso",
+                        method="relayout",
+                        args=[{
+                            "scene.camera.eye": dict(x=1.55, y=-1.55, z=1.55),
+                            "scene.camera.up": dict(x=0, y=0, z=1),
+                        }],
+                    ),
+                    dict(
+                        label="ν₁",
+                        method="relayout",
+                        args=[{
+                            # looking along -x: y increases right, z increases up
+                            "scene.camera.eye": dict(x=1, y=0, z=0),
+                            "scene.camera.up": dict(x=0, y=0, z=1),
+                        }],
+                    ),
+                    dict(
+                        label="ν₂",
+                        method="relayout",
+                        args=[{
+                            # looking along +y (eye on the -y side): x increases right, z increases up
+                            "scene.camera.eye": dict(x=0, y=-1, z=0),
+                            "scene.camera.up": dict(x=0, y=0, z=1),
+                        }],
+                    ),
+                    dict(
+                        label="ν₃",
+                        method="relayout",
+                        args=[{
+                            # looking along -z (from above): x increases right, y increases up
+                            "scene.camera.eye": dict(x=0, y=0, z=1),
+                            "scene.camera.up": dict(x=0, y=1, z=0),
+                        }],
+                    ),
+                ],
+            )
+        ],
+
+        legend=dict(
+            x=0.82,
+            y=0.98,
+
+            # Clicking one q entry hides all traces in that
+            # legend group:
+            #
+            # - translucent regions;
+            # - black edges;
+            # - red slices;
+            # - red slice boundaries.
+            groupclick="togglegroup",
+        ),
+
+        margin=dict(
+            l=0,
+            r=0,
+            b=0,
+            t=115,
+        ),
+
+        height=750,
+    )
+
+    return fig
+
+# ============================================================
+# Standalone Dash application
+# ============================================================
+
+def _slider_block(label, slider_id, **slider_kwargs):
+    """Compact label+slider pair for the control grid."""
+    return html.Div(
+        [
+            html.Label(
+                label,
+                htmlFor=slider_id,
+                style={
+                    "display": "block",
+                    "fontFamily": "sans-serif",
+                    "fontWeight": "bold",
+                    "fontSize": "13px",
+                    "marginBottom": "2px",
+                },
+            ),
+            dcc.Slider(
+                id=slider_id,
+                tooltip={"placement": "bottom", "always_visible": True},
+                updatemode="mouseup",
+                **slider_kwargs,
+            ),
+        ],
+    )
+
+
+app = Dash(__name__)
+
+
+app.layout = html.Div(
+    [
+        html.H3(
+            "Shifted frequency-domain regions",
+            style={"fontFamily": "sans-serif", "marginBottom": "4px"},
+        ),
+        html.P(
+            "q = n₁ − n₂ + n₃: the channel-index combination that labels "
+            "each admissible region's family (color-coded below).",
+            style={
+                "fontFamily": "sans-serif",
+                "fontSize": "13px",
+                "color": "#555",
+                "marginTop": "0px",
+                "marginBottom": "14px",
+            },
+        ),
+
+        html.Div(
+            [
+                _slider_block(
+                    "Ω₀/B (spacing)",
+                    "spacing-slider",
+                    min=0.55,
+                    max=2.20,
+                    step=0.05,
+                    value=1.10,
+                    marks={0.55: "0.55", 1.10: "1.10", 2.20: "2.20"},
+                ),
+                _slider_block(
+                    "ν₄/Ω₀ (output)",
+                    "slice-slider",
+                    min=-0.5,
+                    max=0.5,
+                    step=0.025,
+                    value=0.0,
+                    marks={-0.5: "−0.50", 0.0: "0", 0.5: "+0.50"},
+                ),
+                _slider_block(
+                    "ν₁/Ω₀",
+                    "nu1-slider",
+                    min=-2.75,
+                    max=2.75,
+                    step=0.05,
+                    value=1.0,
+                ),
+                _slider_block(
+                    "ν₃/Ω₀",
+                    "nu3-slider",
+                    min=-2.75,
+                    max=2.75,
+                    step=0.05,
+                    value=-1.0,
+                ),
+            ],
+            style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(2, minmax(220px, 1fr))",
+                "columnGap": "32px",
+                "rowGap": "16px",
+                "marginBottom": "18px",
+            },
+        ),
+
+        html.Div(
+            [
+                html.Div(
+                    dcc.Loading(
+                        dcc.Graph(
+                            id="domain-graph",
+                            figure=build_figure(
+                                spacing_ratio=1.10,
+                                slice_value=0.0,
+                                marker_point=(1.0, 0.0, -1.0),
+                            ),
+                            config={
+                                "displaylogo": False,
+                                "scrollZoom": True,
+                                "responsive": True,
+                            },
+                            style={"height": "72vh"},
+                        ),
+                        type="circle",
+                    ),
+                    style={"flex": "1 1 58%", "minWidth": "0"},
+                ),
+                html.Div(
+                    [
+                        html.H4(
+                            "Selected quadruplet (ν₁, ν₃ controlled; ν₂ derived)",
+                            style={"fontFamily": "sans-serif", "marginTop": "0px"},
+                        ),
+                        html.Img(
+                            id="quadruplet-image",
+                            src=quadruplet_image_src(1.0, -1.0, 1.10, 0.0),
+                            style={"maxWidth": "100%"},
+                        ),
+                    ],
+                    style={"flex": "1 1 38%", "minWidth": "320px"},
+                ),
+            ],
+            style={
+                "display": "flex",
+                "flexWrap": "wrap",
+                "alignItems": "flex-start",
+                "gap": "24px",
+            },
+        ),
+    ],
+    style={
+        "maxWidth": "1600px",
+        "margin": "0 auto",
+        "padding": "20px",
+    },
+)
+
+
+@callback(
+    Output("domain-graph", "figure"),
+    Output("quadruplet-image", "src"),
+    Input("spacing-slider", "value"),
+    Input("slice-slider", "value"),
+    Input("nu1-slider", "value"),
+    Input("nu3-slider", "value"),
+)
+def update_domain_figure(spacing_ratio, slice_value, nu1, nu3):
+    spacing_ratio = float(spacing_ratio)
+    slice_value = float(slice_value)
+    nu1 = float(nu1)
+    nu3 = float(nu3)
+
+    _, nu2, _, _ = derive_quadruplet(nu1, nu3, spacing_ratio, slice_value)
+    figure = build_figure(
+        spacing_ratio=spacing_ratio,
+        slice_value=slice_value,
+        marker_point=(nu1, nu2, nu3),
+    )
+
+    image_src = quadruplet_image_src(nu1, nu3, spacing_ratio, slice_value)
+
+    return figure, image_src
+
+
+if __name__ == "__main__":
+    app.run(
+        debug=True,
+        host="127.0.0.1",
+        port=8050,
+    )
