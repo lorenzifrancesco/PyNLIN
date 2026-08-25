@@ -11,6 +11,7 @@ fwm_single_tuple_scaling
 fwm_high_mu_oscillations
 calculation_correctness_audit
 logical_analysis/index
+repository_consolidation_todo
 noise_calculations
 direct_sector_mc
 npc_sector_asymptotics
