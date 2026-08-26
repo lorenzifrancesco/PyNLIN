@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import factorial
+from typing import Literal
 
 import numpy as np
 
@@ -64,6 +65,9 @@ WIDE_CHUNK = 4096
 # count collapses and the analytic estimate is the more accurate one.
 REFINE_MAX_WIDTH = 300.0
 
+FringePolicy = Literal["resolved", "upper_envelope"]
+FRINGE_POLICIES: tuple[FringePolicy, ...] = ("resolved", "upper_envelope")
+
 
 def kernel_abs2(u: np.ndarray) -> np.ndarray:
     """Normalized lossless link kernel Khat(u) = 4 sin^2(u/2) / u^2."""
@@ -74,6 +78,21 @@ def kernel_abs2(u: np.ndarray) -> np.ndarray:
     us = u[~small]
     out[~small] = 4.0 * np.sin(0.5 * us) ** 2 / us**2
     return out
+
+
+def kernel_upper_envelope(u: np.ndarray) -> np.ndarray:
+    """Pointwise upper envelope min(1, 4/u^2) of the link power kernel."""
+    u = np.asarray(u, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.minimum(1.0, 4.0 / u**2)
+
+
+def _check_fringe_policy(fringe_policy: FringePolicy) -> None:
+    if fringe_policy not in FRINGE_POLICIES:
+        choices = ", ".join(repr(value) for value in FRINGE_POLICIES)
+        raise ValueError(
+            f"fringe_policy must be one of {choices}, got {fringe_policy!r}"
+        )
 
 
 def uniform_sum_density(u: np.ndarray, widths: np.ndarray) -> np.ndarray:
@@ -345,17 +364,25 @@ def pointwise_conditional_acceptance(
     return np.where(degenerate[:, None], accept_deg, accept)
 
 
-def far_model(u0: np.ndarray, widths: np.ndarray) -> np.ndarray:
+def far_model(
+    u0: np.ndarray,
+    widths: np.ndarray,
+    *,
+    fringe_policy: FringePolicy = "resolved",
+) -> np.ndarray:
     """Far-detuned closed form: E[(2 - 2 cos u)/u^2] for |u0| >> sum(w_j).
 
     Uses E[cos u] = cos(u0) prod sinc(w_j) exactly and a second-order
     expansion of E[1/u^2] about u0.
     """
+    _check_fringe_policy(fringe_policy)
     u0 = np.asarray(u0, dtype=float).reshape(-1)
     widths = np.atleast_2d(np.asarray(widths, dtype=float))
     var = np.sum(widths**2, axis=-1) / 3.0
     inv_u02 = 1.0 / u0**2
     e_inv_u2 = inv_u02 * (1.0 + 3.0 * var * inv_u02)
+    if fringe_policy == "upper_envelope":
+        return 4.0 * e_inv_u2
     e_cos = np.cos(u0) * np.prod(_sinc(widths), axis=-1)
     return 2.0 * e_inv_u2 * (1.0 - e_cos)
 
@@ -364,7 +391,12 @@ WIDE_CENTRAL_CUT = 48.0 * np.pi
 WIDE_CENTRAL_NODES = 384
 
 
-def wide_model(u0: np.ndarray, widths: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def wide_model(
+    u0: np.ndarray,
+    widths: np.ndarray,
+    *,
+    fringe_policy: FringePolicy = "resolved",
+) -> tuple[np.ndarray, np.ndarray]:
     """Wide-density regime: returns (central, tail) contributions separately.
 
     Central: exact quadrature of Khat(u) rho(u - u0) over |u| < U with the
@@ -373,6 +405,7 @@ def wide_model(u0: np.ndarray, widths: np.ndarray) -> tuple[np.ndarray, np.ndarr
     valid because the density spans many oscillation periods here.
     The caller applies (possibly different) acceptances to the two pieces.
     """
+    _check_fringe_policy(fringe_policy)
     u0 = np.asarray(u0, dtype=float).reshape(-1)
     widths = np.atleast_2d(np.asarray(widths, dtype=float))
     U = WIDE_CENTRAL_CUT
@@ -380,7 +413,10 @@ def wide_model(u0: np.ndarray, widths: np.ndarray) -> tuple[np.ndarray, np.ndarr
     nodes, wts = cf_gauss_legendre(WIDE_CENTRAL_NODES)
     u = -U + 2.0 * U * nodes
     rho = uniform_sum_density(u[None, :] - u0[:, None], widths[:, None, :])
-    central = 2.0 * U * np.sum(wts[None, :] * kernel_abs2(u)[None, :] * rho, axis=-1)
+    kernel_fn = (
+        kernel_abs2 if fringe_policy == "resolved" else kernel_upper_envelope
+    )
+    central = 2.0 * U * np.sum(wts[None, :] * kernel_fn(u)[None, :] * rho, axis=-1)
 
     total = np.sum(widths, axis=-1)
     lo = u0 - total
@@ -396,9 +432,10 @@ def wide_model(u0: np.ndarray, widths: np.ndarray) -> tuple[np.ndarray, np.ndarr
         y = span[:, None] * t_nodes[None, :]
         u_t = seg_lo[:, None] * np.exp(y)
         rho_t = uniform_sum_density(sign * u_t - u0[:, None], widths[:, None, :])
+        tail_factor = 2.0 if fringe_policy == "resolved" else 4.0
         tail += np.where(
             length > 0.0,
-            2.0 * span * np.sum(t_wts[None, :] * rho_t / u_t, axis=-1),
+            tail_factor * span * np.sum(t_wts[None, :] * rho_t / u_t, axis=-1),
             0.0,
         )
     return central, tail
@@ -414,13 +451,18 @@ def linear_tuple_estimate(
     u0: np.ndarray,
     coeffs: np.ndarray,
     d: np.ndarray,
+    *,
+    fringe_policy: FringePolicy = "resolved",
 ) -> TupleBatchEstimate:
     """Regime-dispatched linear-model estimate of F for a batch of tuples.
 
     ``u0`` (m,), ``coeffs`` (m, 3) signed linear coefficients of the
     in-channel offsets (for FWM: ``(nu_a, nu_b, -nu_c)``), ``d`` (m,) the
-    normalized support shift.  Returns acceptance-weighted F values.
+    normalized support shift. ``upper_envelope`` removes physical fringes by
+    replacing the link kernel with ``min(1, 4/u^2)``. Returns
+    acceptance-weighted F values.
     """
+    _check_fringe_policy(fringe_policy)
     u0 = np.asarray(u0, dtype=float).reshape(-1)
     coeffs = np.atleast_2d(np.asarray(coeffs, dtype=float))
     d = np.broadcast_to(np.asarray(d, dtype=float).reshape(-1), u0.shape)
@@ -440,13 +482,18 @@ def linear_tuple_estimate(
     if np.any(far):
         # Kernel mass spans the whole density: correlation with the mask is a
         # second-order effect, use the plain acceptance.
-        values[far] = far_model(u0[far], widths[far]) * plain_accept[far]
+        values[far] = far_model(
+            u0[far], widths[far], fringe_policy=fringe_policy
+        ) * plain_accept[far]
         regime[far] = 1
     if np.any(wide):
         idx = np.where(wide)[0]
         for start in range(0, idx.size, WIDE_CHUNK):
             sel = idx[start : start + WIDE_CHUNK]
-            central, tail = wide_model_masked(u0[sel], widths[sel], coeffs[sel], d[sel])
+            central, tail = wide_model_masked(
+                u0[sel], widths[sel], coeffs[sel], d[sel],
+                fringe_policy=fringe_policy,
+            )
             values[sel] = central + tail * plain_accept[sel]
         regime[idx] = 2
     if np.any(near):
@@ -466,7 +513,8 @@ def linear_tuple_estimate(
             for start in range(0, sel.size, chunk):
                 sub = sel[start : start + chunk]
                 values[sub] = near_model_masked(
-                    u0[sub], widths[sub], coeffs[sub], d[sub], nn
+                    u0[sub], widths[sub], coeffs[sub], d[sub], nn,
+                    fringe_policy=fringe_policy,
                 )
     return TupleBatchEstimate(values=values, regime=regime)
 
@@ -478,6 +526,8 @@ def near_model_masked(
     d: np.ndarray,
     n_nodes: int,
     acceptance_fn=None,
+    *,
+    fringe_policy: FringePolicy = "resolved",
 ) -> np.ndarray:
     """u-space quadrature of Khat(u) rho(u - u0) A(u) over the density support.
 
@@ -487,6 +537,7 @@ def near_model_masked(
     approximate model (bulk pass); pass :func:`exact_conditional_acceptance`
     for the mass-capped refinement tier.
     """
+    _check_fringe_policy(fringe_policy)
     u0 = np.asarray(u0, dtype=float).reshape(-1)
     widths = np.atleast_2d(np.asarray(widths, dtype=float))
     total = np.maximum(np.sum(widths, axis=-1), 1e-9)
@@ -496,7 +547,10 @@ def near_model_masked(
     rho = uniform_sum_density(offset, widths[:, None, :])
     fn = acceptance_fn or pointwise_conditional_acceptance
     accept = fn(offset, coeffs, d)
-    integrand = kernel_abs2(u) * rho * accept
+    kernel_fn = (
+        kernel_abs2 if fringe_policy == "resolved" else kernel_upper_envelope
+    )
+    integrand = kernel_fn(u) * rho * accept
     return 2.0 * total * np.sum(wts[None, :] * integrand, axis=-1)
 
 
@@ -506,8 +560,11 @@ def wide_model_masked(
     coeffs: np.ndarray,
     d: np.ndarray,
     acceptance_fn=None,
+    *,
+    fringe_policy: FringePolicy = "resolved",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Wide-regime central piece with pointwise mask acceptance, plus tail."""
+    _check_fringe_policy(fringe_policy)
     u0 = np.asarray(u0, dtype=float).reshape(-1)
     widths = np.atleast_2d(np.asarray(widths, dtype=float))
     U = WIDE_CENTRAL_CUT
@@ -517,10 +574,13 @@ def wide_model_masked(
     rho = uniform_sum_density(offset, widths[:, None, :])
     fn = acceptance_fn or pointwise_conditional_acceptance
     accept = fn(offset, coeffs, d)
-    central = 2.0 * U * np.sum(
-        wts[None, :] * kernel_abs2(u)[None, :] * rho * accept, axis=-1
+    kernel_fn = (
+        kernel_abs2 if fringe_policy == "resolved" else kernel_upper_envelope
     )
-    _, tail = wide_model(u0, widths)
+    central = 2.0 * U * np.sum(
+        wts[None, :] * kernel_fn(u)[None, :] * rho * accept, axis=-1
+    )
+    _, tail = wide_model(u0, widths, fringe_policy=fringe_policy)
     return central, tail
 
 
@@ -667,6 +727,61 @@ def fwm_tuple_variables(
         nu_a=nu_a,
         nu_b=nu_b,
         nu_c=nu_c,
+        q_a=beta2[a_idx] * q_scale,
+        q_b=beta2[b_idx] * q_scale,
+        q_c=beta2[c_idx] * q_scale,
+        q_t=float(beta2[t]) * q_scale,
+        d=d,
+        acceptance=support_acceptance(d),
+    )
+
+
+def fwm_tuple_variables_for_indices(
+    freqs: np.ndarray,
+    beta0_abs: np.ndarray,
+    beta1: np.ndarray,
+    beta2: np.ndarray,
+    baud_rate: float,
+    length: float,
+    target: int,
+    a: np.ndarray,
+    b: np.ndarray,
+    c: np.ndarray,
+) -> FWMTupleVariables:
+    """Normalized variables for explicitly given tuples of one target.
+
+    Same conventions as :func:`fwm_tuple_variables` but without enumeration:
+    the caller supplies the leg index arrays (no support pruning or
+    strictness filtering is applied -- degenerate legs are allowed and the
+    caller is responsible for interpreting them).
+    """
+    freqs = np.asarray(freqs, dtype=float).reshape(-1)
+    t = int(target)
+    B = float(baud_rate)
+    L = float(length)
+    a_idx = np.asarray(a, dtype=int).reshape(-1)
+    b_idx = np.asarray(b, dtype=int).reshape(-1)
+    c_idx = np.asarray(c, dtype=int).reshape(-1)
+
+    beta1_rel = np.asarray(beta1, dtype=float) - float(beta1[t])
+    omega = TWO_PI * freqs
+    beta0_rel = (
+        np.asarray(beta0_abs, dtype=float)
+        - float(beta0_abs[t])
+        - float(beta1[t]) * (omega - omega[t])
+    )
+    delta_omega = TWO_PI * (freqs[a_idx] + freqs[b_idx] - freqs[c_idx] - freqs[t])
+    d = delta_omega / B
+    beta2 = np.asarray(beta2, dtype=float)
+    q_scale = 0.5 * B**2 * L
+    return FWMTupleVariables(
+        a=a_idx.astype(np.int32),
+        b=b_idx.astype(np.int32),
+        c=c_idx.astype(np.int32),
+        u0=(beta0_rel[a_idx] + beta0_rel[b_idx] - beta0_rel[c_idx]) * L,
+        nu_a=beta1_rel[a_idx] * B * L,
+        nu_b=beta1_rel[b_idx] * B * L,
+        nu_c=beta1_rel[c_idx] * B * L,
         q_a=beta2[a_idx] * q_scale,
         q_b=beta2[b_idx] * q_scale,
         q_c=beta2[c_idx] * q_scale,
@@ -883,6 +998,8 @@ def refine_tuples_exact(
     variables: FWMTupleVariables,
     indices: np.ndarray,
     regime: np.ndarray,
+    *,
+    fringe_policy: FringePolicy = "resolved",
 ) -> np.ndarray:
     """Deterministic exact-acceptance re-evaluation of selected tuples.
 
@@ -901,6 +1018,7 @@ def refine_tuples_exact(
     aligned with ``variables`` (0=near, 1=far, 2=wide). Returns values
     aligned with ``indices``.
     """
+    _check_fringe_policy(fringe_policy)
     idx = np.asarray(indices, dtype=int)
     out = np.empty(idx.size, dtype=float)
     coeffs = np.stack(
@@ -915,7 +1033,9 @@ def refine_tuples_exact(
     far_sel = reg == 1
     if np.any(far_sel):
         plain_accept = support_acceptance(d[far_sel])
-        out[far_sel] = far_model(u0[far_sel], widths[far_sel]) * plain_accept
+        out[far_sel] = far_model(
+            u0[far_sel], widths[far_sel], fringe_policy=fringe_policy
+        ) * plain_accept
 
     wide_sel = reg == 2
     if np.any(wide_sel):
@@ -923,6 +1043,7 @@ def refine_tuples_exact(
         central, tail = wide_model_masked(
             u0[wide_sel], widths[wide_sel], coeffs[wide_sel], d[wide_sel],
             acceptance_fn=exact_conditional_acceptance,
+            fringe_policy=fringe_policy,
         )
         out[wide_sel] = central + tail * plain_accept
 
@@ -943,6 +1064,7 @@ def refine_tuples_exact(
                 out[sub] = near_model_masked(
                     u0[sub], widths[sub], coeffs[sub], d[sub], nn,
                     acceptance_fn=exact_conditional_acceptance,
+                    fringe_policy=fringe_policy,
                 )
     return out
 
@@ -958,6 +1080,7 @@ def target_fast_sums(
     *,
     n_refine: int = 256,
     max_near_refine: int = 16_384,
+    fringe_policy: FringePolicy = "resolved",
 ) -> FastTargetResult:
     """Fast prefactor-free XPM + strict-FWM sums for one target channel.
 
@@ -969,7 +1092,10 @@ def target_fast_sums(
     analytic mask-acceptance approximation to the unrefined remainder. Note
     this omits the (S2-measured, ~0.1-0.3% aggregate) beta2 quadratic-phase
     contribution that the earlier QMC refinement folded in incidentally.
+    ``fringe_policy`` applies to strict FWM only; XPM remains the exact
+    linear-model pair estimate.
     """
+    _check_fringe_policy(fringe_policy)
     variables = fwm_tuple_variables(
         freqs, beta0_abs, beta1, beta2, baud_rate, length, target
     )
@@ -979,7 +1105,9 @@ def target_fast_sums(
         coeffs = np.stack(
             [variables.nu_a, variables.nu_b, -variables.nu_c], axis=-1
         )
-        est = linear_tuple_estimate(variables.u0, coeffs, variables.d)
+        est = linear_tuple_estimate(
+            variables.u0, coeffs, variables.d, fringe_policy=fringe_policy
+        )
         values = est.values.copy()
         widths_sum_all = np.sum(variables.widths, axis=-1)
         # The near regime's analytic mask-acceptance model assumes the
@@ -1021,7 +1149,7 @@ def target_fast_sums(
         )
         if always_refine.size:
             values[always_refine] = refine_tuples_exact(
-                variables, always_refine, est.regime
+                variables, always_refine, est.regime, fringe_policy=fringe_policy
             )
         refined = int(always_refine.size)
         fwm_total = float(np.sum(values))

@@ -4,9 +4,9 @@ Implements the design of docs/source/lorenzi_fast_method.md §15:
 
 * :func:`envelope_bound` -- the certified per-tuple upper bound
   ``A(d) * min(1, 4/g^2)``, ``g = |u0| - W`` (§9 theorem).
-* :func:`select_tube` -- the epsilon-tube around the phase-matched
-  stationary lines, realized as the certified selection ``bound >= eps``
-  with EXACT accumulation of the discarded certificate.
+* :func:`select_tube` -- mask-aware epsilon selection from a certified outer
+  interval of reachable phase, with exact accumulation of the discarded
+  per-tuple bounds.
 * :func:`analytic_tuple_values` -- branch-dispatched per-tuple efficiency:
     - sheet branch (closed form): F = 2*pi * rho_w(-u0) * A_cond(u=0),
       valid when the mismatch density is flat over the kernel core;
@@ -77,6 +77,32 @@ def envelope_bound(
     return acceptance * np.minimum(1.0, decay)
 
 
+def masked_linear_phase_outer_interval(
+    variables: FWMTupleVariables,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return a mask-aware outer interval for each tuple's linear phase.
+
+    Both returned arrays have shape ``(tuple,)`` and contain dimensionless
+    accumulated phase.  The interval is exact when the mismatch coefficients
+    are aligned with the mask normal.  For a general orientation it is a
+    certified superset because the parallel and perpendicular extrema are
+    bounded separately, then intersected with the full-cube interval.
+    """
+    u0 = variables.u0
+    box_halfwidth = np.sum(variables.widths, axis=-1)
+    kappa = (variables.nu_a + variables.nu_b + variables.nu_c) / 3.0
+    perpendicular_halfwidth = np.pi * (
+        np.abs(variables.nu_a - kappa)
+        + np.abs(variables.nu_b - kappa)
+        + np.abs(-variables.nu_c + kappa)
+    )
+    mask_halfwidth = np.pi * np.abs(kappa) + perpendicular_halfwidth
+    mask_center = u0 - kappa * variables.d
+    lower = np.maximum(u0 - box_halfwidth, mask_center - mask_halfwidth)
+    upper = np.minimum(u0 + box_halfwidth, mask_center + mask_halfwidth)
+    return lower, upper
+
+
 def select_tube(
     variables: FWMTupleVariables, epsilon: float
 ) -> tuple[np.ndarray, float]:
@@ -85,19 +111,41 @@ def select_tube(
     Returns (survivor indices, certificate = exact sum of the discarded
     tuples' bounds -- a rigorous upper bound on the discarded true sum).
     ``epsilon <= 0`` keeps everything with a zero certificate.
+
+    The gap is mask-aware (theory doc §10.3): decomposing the phase
+    coefficients along the mask normal, ``c_u = kappa c_m + c_perp`` with
+    ``kappa = (nu_a + nu_b + nu_c)/3``, the mask ``|m + d| < pi`` confines
+    the aligned component to a shifted window, so under the mask
+
+        u  in  u0 - kappa d + [-(pi|kappa| + W_perp), pi|kappa| + W_perp],
+
+    a certified superset of the reachable set, intersected with the unmasked
+    interval ``u0 +- W``.  For mask-aligned tuples this both narrows the
+    interval (down to W/3 at the equal split) and shifts its center by
+    ``-kappa d`` -- the d-dependence the unmasked gap ``|u0| - W`` misses.
     """
-    W = np.sum(variables.widths, axis=-1)
+    if epsilon <= 0.0:
+        return np.arange(variables.u0.size), 0.0
+    lower, upper = masked_linear_phase_outer_interval(variables)
+    gap = np.where(
+        (lower <= 0.0) & (upper >= 0.0),
+        0.0,
+        np.minimum(np.abs(lower), np.abs(upper)),
+    )
     # Quadratic padding P_q (theory doc §9): the confinement argument uses
     # the linear model, so the certificate valid for the full quadratic
     # model must shrink the gap by the maximum quadratic phase shift
     # pi^2 * sum|q_j| (each x_j^2 <= pi^2; x_d^2 <= pi^2 under the mask).
     p_q = np.pi**2 * (
-        np.abs(variables.q_a) + np.abs(variables.q_b)
-        + np.abs(variables.q_c) + abs(variables.q_t)
+        np.abs(variables.q_a)
+        + np.abs(variables.q_b)
+        + np.abs(variables.q_c)
+        + abs(variables.q_t)
     )
-    bound = envelope_bound(variables.u0, W + p_q, variables.acceptance)
-    if epsilon <= 0.0:
-        return np.arange(variables.u0.size), 0.0
+    g = np.maximum(gap - p_q, 0.0)
+    with np.errstate(divide="ignore"):
+        decay = np.where(g > 0.0, 4.0 / np.maximum(g, 1e-300) ** 2, np.inf)
+    bound = variables.acceptance * np.minimum(1.0, decay)
     keep = bound >= epsilon
     certificate = float(np.sum(bound[~keep]))
     return np.where(keep)[0], certificate
@@ -196,9 +244,13 @@ def target_analytic_sums(
     if n_total == 0:
         _, nu_pairs, _ = xpm_pair_variables(beta1, beta2, baud_rate, length, target)
         return AnalyticTargetResult(
-            xpm=float(np.sum(xpm_fast_batch(nu_pairs))), fwm=0.0,
-            fwm_tuples_total=0, fwm_tuples_kept=0, certificate=0.0,
-            branch_counts=(0, 0, 0), branch_mass=(0.0, 0.0, 0.0),
+            xpm=float(np.sum(xpm_fast_batch(nu_pairs))),
+            fwm=0.0,
+            fwm_tuples_total=0,
+            fwm_tuples_kept=0,
+            certificate=0.0,
+            branch_counts=(0, 0, 0),
+            branch_mass=(0.0, 0.0, 0.0),
         )
     keep, certificate = select_tube(variables, epsilon)
     values, branch = analytic_tuple_values(variables, keep)
@@ -223,6 +275,7 @@ __all__ = [
     "AnalyticTargetResult",
     "analytic_tuple_values",
     "envelope_bound",
+    "masked_linear_phase_outer_interval",
     "select_tube",
     "target_analytic_sums",
 ]

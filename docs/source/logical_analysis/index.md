@@ -457,6 +457,20 @@ Equation (7.3) is an approximation. It factorizes two correlated functions of
 $u$ and must not be described as the exact second-order expansion of the full
 expectation; see Problem P6.
 
+The optional strict-FWM `fringe_policy="upper_envelope"` replaces the resolved
+kernel by
+
+$$
+K_{\rm env}(u)=\min\left(1,\frac{4}{u^2}\right).
+\tag{7.5}
+$$
+
+Near and central-wide quadrature use (7.5), wide tails use $4/u^2$, and the
+far branch drops the cosine factor. The result is a fringe-free envelope
+estimate, not a certified bound, because the production acceptance and far
+branches retain the approximations stated above. The default policy remains
+`resolved`; the setting applies to strict FWM and does not alter XPM.
+
 ### 7.2 Refinement
 
 `target_fast_sums` first computes a bulk value for every support-surviving
@@ -470,36 +484,63 @@ This removes acceptance-model error for the selected tuples. It does not add
 the quadratic phase in (4.4), and ranking by the approximate value is not a
 certificate that every important tuple was selected.
 
-### 7.3 Envelope bound and S3
+### 7.3 Mask-aware envelope bound and S3
 
-For the linear model, if
+The unmasked cube gives the valid but loose linear gap
 
 $$
 g_{\rm lin}=|u_0|-W>0,
-\tag{7.5}
-$$
-
-then every point in the cube has $|u|\ge g_{\rm lin}$ and
-
-$$
-F_\tau^{(\rm lin)}
-\le A(d)\min\left(1,\frac4{g_{\rm lin}^2}\right).
 \tag{7.6}
 $$
 
-For the local-quadratic model, the corresponding safe gap is
+when it is positive. The current selector tightens this confinement with the
+output mask. Let
 
 $$
-g_{\rm quad}=|u_0|-W-P_q.
+\mathbf c_u=(\nu_a,\nu_b,-\nu_c),\qquad
+\mathbf c_m=(1,1,-1),\qquad
+\kappa=\frac{\mathbf c_u\cdot\mathbf c_m}{3},\qquad
+\mathbf c_\perp=\mathbf c_u-\kappa\mathbf c_m.
 \tag{7.7}
 $$
 
-The current `fast_analytic.envelope_bound` has a linear-width API, but
-`select_tube` passes $W+P_q$ as its effective width. Thus the discarded-set
-bound includes the quadratic confinement padding. Existing tests exercise the
-discarded bound against linear tuple values, and the retained-tuple evaluator
-still uses the linear phase model; a complete local-quadratic result is not yet
-certified. S3 v1 also performs exhaustive support enumeration before pruning;
+Because the mask confines $m=\mathbf c_m\cdot\mathbf x$ to
+$(-\pi-d,\pi-d)$, the accepted linear phase lies in the certified outer
+interval
+
+$$
+I_{\rm mask}= [u_0-W,u_0+W]\cap
+\left[u_0-\kappa d-H,\ u_0-\kappa d+H\right],
+\qquad
+H=\pi|\kappa|+\pi\|\mathbf c_\perp\|_1.
+\tag{7.8}
+$$
+
+This interval is exact for mask-aligned coefficients. In a general
+orientation it is a superset because the parallel and perpendicular extrema
+were bounded separately. Define $g_{\rm mask}=\operatorname{dist}(0,I_{\rm
+mask})$. Then
+
+$$
+F_\tau^{(\rm lin)}
+\le A(d)\min\left(1,\frac4{g_{\rm mask}^2}\right).
+\tag{7.9}
+$$
+
+For the local-quadratic model, the safe padded gap used by `select_tube` is
+
+$$
+g_{\rm quad}=\max(g_{\rm mask}-P_q,0).
+\tag{7.10}
+$$
+
+`masked_linear_phase_outer_interval` implements (7.8), and `select_tube`
+applies (7.10) before accumulating discarded bounds. Focused tests cover
+shifted aligned, anti-aligned, zero-coefficient, and quadratic-padding cases;
+they establish the interval and selection implementation, not an independent
+local-quadratic QMC validation. The retained-tuple evaluator still uses the
+linear phase model, so a complete local-quadratic result is not yet certified.
+S3 v1 also performs exhaustive support enumeration before pruning;
 it is post-enumeration value pruning, not yet direct geometric tube
 enumeration.
 
@@ -509,7 +550,7 @@ $$
 \widehat F_{\rm sheet}
 =2\pi\rho_{\mathbf w}(-u_0)\,
 A(-u_0;d,\boldsymbol\nu),
-\tag{7.8}
+\tag{7.11}
 $$
 
 valid when the density and conditional acceptance vary slowly over the kernel
@@ -646,7 +687,7 @@ tested, cross-model absolute comparisons require care.
 | S0 | Full channel grid and selected targets | Tuple coordinates, bulk $F^{(\rm lin)}$, weighted histograms | Census of the approximate bulk model |
 | S1 | Selected real tuples | Plain-MC and randomized-Sobol estimates of the same integrand | Implementation cross-check |
 | S2 | Nonuniform tuple sample | Bulk, linear-QMC, quadratic-QMC comparisons | Diagnostic; current aggregate weighting is not valid |
-| S3 v1 | Exhaustively enumerated tuples, $\varepsilon$ | Retained linear-model sum and discarded linear bound | Post-enumeration linear certificate |
+| S3 v1 | Exhaustively enumerated tuples, $\varepsilon$ | Retained linear-model sum and discarded mask-aware, quadratically padded bound | Post-enumeration truncation bound; retained model remains linear |
 | S4 | Probe targets | Fast and MC sums in m$^2$ | No propagated MC uncertainty in current output |
 | S5 | Full interferer grid, possibly thinned targets | $K_t^{\rm XPM}$, $K_t^{\rm FWM}$ | Production prefactor-free spectrum; checkpoint provenance incomplete |
 | S6 | S5 sums, $\gamma_t$, equal $P$ | Physical variances and NSR | Provisional because of XPM and convention issues |

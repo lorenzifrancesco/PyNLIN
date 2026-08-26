@@ -29,6 +29,21 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+matplotlib.rcParams.update({
+    "font.size": 12,
+    "axes.labelsize": 13,
+    "axes.titlesize": 14,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "legend.fontsize": 11,
+    "figure.titlesize": 15,
+    "xtick.major.size": 5,
+    "ytick.major.size": 5,
+    "xtick.major.width": 1,
+    "ytick.major.width": 1,
+})
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -37,7 +52,7 @@ import pynlin  # noqa: F401
 from loguru import logger as lg
 
 from analysis.log_init import init_logging
-from pynlin.methods.td.fast_nlin import target_fast_sums
+from pynlin.methods.td.fast_nlin import FRINGE_POLICIES, target_fast_sums
 from pynlin.methods.td.fullband_mc import (
     _beta0_abs_from_fiber,
     compute_fullband_prefactor_free_mc,
@@ -49,10 +64,13 @@ from pynlin.system import System
 _G: dict = {}
 
 
-def _init_worker(freqs, beta0_abs, beta1, beta2, baud_rate, length, n_refine):
+def _init_worker(
+    freqs, beta0_abs, beta1, beta2, baud_rate, length, n_refine, fringe_policy
+):
     _G.update(
         freqs=freqs, beta0_abs=beta0_abs, beta1=beta1, beta2=beta2,
         baud_rate=baud_rate, length=length, n_refine=n_refine,
+        fringe_policy=fringe_policy,
     )
 
 
@@ -60,6 +78,7 @@ def _work(target: int):
     res = target_fast_sums(
         _G["freqs"], _G["beta0_abs"], _G["beta1"], _G["beta2"],
         _G["baud_rate"], _G["length"], int(target), n_refine=_G["n_refine"],
+        fringe_policy=_G["fringe_policy"],
     )
     out = (
         int(target), res.xpm, res.fwm, res.fwm_tuples,
@@ -173,7 +192,7 @@ def select_mc_probes(
 
 
 def _load_checkpoint(
-    path: Path, n: int, n_refine: int
+    path: Path, n: int, n_refine: int, fringe_policy: str
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Load a per-target checkpoint if it matches this run's configuration.
 
@@ -191,9 +210,13 @@ def _load_checkpoint(
     if not path.exists():
         return xpm_fast, fwm_fast, refined_mass, done
     ck = np.load(path)
+    stored_fringe_policy = (
+        str(ck["fringe_policy"]) if "fringe_policy" in ck else "resolved"
+    )
     if (
         int(ck["n_refine"]) != int(n_refine)
         or int(ck["xpm_fast"].size) != n
+        or stored_fringe_policy != fringe_policy
     ):
         lg.warning(f"checkpoint at {path} does not match this run's config; ignoring")
         return xpm_fast, fwm_fast, refined_mass, done
@@ -229,6 +252,7 @@ def _save_checkpoint(
     done: np.ndarray,
     decimation: int,
     n_refine: int,
+    fringe_policy: str,
 ) -> None:
     """Atomically write the checkpoint (write-then-rename survives a kill
     mid-write, which a direct np.savez to the final path would not)."""
@@ -237,6 +261,7 @@ def _save_checkpoint(
         tmp,
         xpm_fast=xpm_fast, fwm_fast=fwm_fast, refined_mass=refined_mass,
         done=done, decimation=decimation, n_refine=n_refine,
+        fringe_policy=fringe_policy,
     )
     tmp.replace(path)
 
@@ -252,6 +277,10 @@ def main() -> None:
     parser.add_argument("--mc-frequency-samples", type=int, default=1000)
     parser.add_argument("--mc-xpm-samples", type=int, default=200_000)
     parser.add_argument("--n-refine", type=int, default=256)
+    parser.add_argument(
+        "--fringe-policy", choices=FRINGE_POLICIES, default="resolved",
+        help="Strict-FWM kernel treatment: resolve physical fringes or use their upper envelope.",
+    )
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument(
         "--no-mc", action="store_true",
@@ -290,9 +319,12 @@ def main() -> None:
     )
 
     L2 = length**2
+    policy_suffix = (
+        "" if args.fringe_policy == "resolved" else f"_{args.fringe_policy}"
+    )
     # Decimation-free name: any-decimation runs share/extend one checkpoint.
     checkpoint_path = args.checkpoint or (
-        args.out_dir / f"s5_checkpoint_nrefine{args.n_refine}.npz"
+        args.out_dir / f"s5_checkpoint_nrefine{args.n_refine}{policy_suffix}.npz"
     )
     if args.no_checkpoint:
         xpm_fast = np.full(n, np.nan)
@@ -301,7 +333,7 @@ def main() -> None:
         done = np.zeros(n, dtype=bool)
     else:
         xpm_fast, fwm_fast, refined_mass, done = _load_checkpoint(
-            checkpoint_path, n, args.n_refine
+            checkpoint_path, n, args.n_refine, args.fringe_policy
         )
         if np.any(done):
             lg.info(f"resuming from checkpoint: {int(np.sum(done))}/{n} targets already done")
@@ -314,7 +346,10 @@ def main() -> None:
         with ProcessPoolExecutor(
             max_workers=workers,
             initializer=_init_worker,
-            initargs=(freqs, beta0_abs, beta1, beta2, baud_rate, length, args.n_refine),
+            initargs=(
+                freqs, beta0_abs, beta1, beta2, baud_rate, length,
+                args.n_refine, args.fringe_policy,
+            ),
         ) as pool:
             futures = {pool.submit(_work, int(t)): int(t) for t in remaining}
             for fut in as_completed(futures):
@@ -327,14 +362,14 @@ def main() -> None:
                 if not args.no_checkpoint and completed_since_save >= args.checkpoint_every:
                     _save_checkpoint(
                         checkpoint_path, xpm_fast, fwm_fast, refined_mass, done,
-                        args.decimation, args.n_refine,
+                        args.decimation, args.n_refine, args.fringe_policy,
                     )
                     lg.info(f"checkpoint saved: {int(np.sum(done))}/{n} done")
                     completed_since_save = 0
         if not args.no_checkpoint:
             _save_checkpoint(
                 checkpoint_path, xpm_fast, fwm_fast, refined_mass, done,
-                args.decimation, args.n_refine,
+                args.decimation, args.n_refine, args.fringe_policy,
             )
     t_fast = time.perf_counter() - t0
     lg.info(
@@ -403,11 +438,12 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     np.savez(
-        args.out_dir / "s5_fullband.npz",
+        args.out_dir / f"s5_fullband{policy_suffix}.npz",
         freqs=freqs, xpm_fast=xpm_fast, fwm_fast=fwm_fast,
         refined_mass=refined_mass, probes=probes, targets=targets,
         xpm_mc=mc_xpm, fwm_mc=mc_fwm,
         t_fast=t_fast, t_mc=t_mc, decimation=args.decimation,
+        fringe_policy=args.fringe_policy,
     )
 
     f_thz = freqs * 1e-12
@@ -416,20 +452,30 @@ def main() -> None:
                              gridspec_kw={"height_ratios": [3, 1]})
     ax = axes[0]
     ax.plot(f_thz[ts], xpm_fast[ts], lw=1.2, color="tab:blue", label="XPM fast")
-    ax.plot(f_thz[ts], fwm_fast[ts], lw=1.2, color="tab:red", label="FWM fast")
-    ax.plot(f_thz[ts], xpm_fast[ts] + fwm_fast[ts], lw=1.0, color="black", alpha=0.6, label="total fast")
+    fwm_label = (
+        "FWM fast" if args.fringe_policy == "resolved" else "FWM upper envelope"
+    )
+    ax.plot(f_thz[ts], fwm_fast[ts], lw=1.2, color="tab:red", label=fwm_label)
+    total_label = (
+        "total fast" if args.fringe_policy == "resolved"
+        else "XPM + FWM envelope"
+    )
+    ax.plot(
+        f_thz[ts], xpm_fast[ts] + fwm_fast[ts], lw=1.0,
+        color="black", alpha=0.6, label=total_label,
+    )
     if probes.size:
         ax.plot(f_thz[probes], mc_xpm, "o", ms=4, mfc="none", color="tab:blue", label="XPM MC")
         ax.plot(f_thz[probes], mc_fwm, "s", ms=4, mfc="none", color="tab:red", label="FWM MC")
     ax.set_yscale("log")
     ax.set_ylabel("prefactor-free sum [m$^2$]")
     ax.grid(True, which="both", alpha=0.25)
-    ax.legend(fontsize=8, frameon=False, ncol=2)
+    ax.legend(frameon=False, ncol=2)
     ax2 = axes[1]
     if probes.size:
         ax2.plot(f_thz[probes], xr, "o-", ms=3, lw=0.8, color="tab:blue", label="XPM fast/MC")
         ax2.plot(f_thz[probes], fr, "s-", ms=3, lw=0.8, color="tab:red", label="FWM fast/MC")
-        ax2.legend(fontsize=8, frameon=False)
+        ax2.legend(frameon=False)
     ax2.axhline(1.0, color="black", lw=0.6)
     ax2.set_ylim(0.85, 1.15)
     ax2.set_xlabel("target frequency [THz]")
@@ -448,12 +494,13 @@ def main() -> None:
                 a.axvline(edge_thz, color="gray", lw=0.5, ls="--", alpha=0.4)
     fig.suptitle(
         f"Lorenzi Fast full-band spectrum ({n} channels, "
-        f"{targets.size} targets [decimation {args.decimation}, targets only])\n"
+        f"{targets.size} targets [decimation {args.decimation}, targets only], "
+        f"FWM fringe policy: {args.fringe_policy})\n"
         f"fast {t_fast/max(targets.size,1):.2f} s/target vs "
         f"MC {t_mc/max(probes.size,1):.1f} s/target ({probes.size} probes)"
     )
     fig.tight_layout()
-    fig.savefig(args.out_dir / "s5_fullband.png", dpi=200)
+    fig.savefig(args.out_dir / f"s5_fullband{policy_suffix}.png", dpi=200)
     plt.close(fig)
     lg.success(f"S5 saved to {args.out_dir}")
 

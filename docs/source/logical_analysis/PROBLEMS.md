@@ -61,41 +61,41 @@ local-quadratic pair integral. At minimum, implement and validate the
 $C_{N_1}(q)/|\nu|$ asymptotic branch with a controlled transition to low
 walk-off. Regenerate S4--S6 after the change.
 
-### P2. The S3 certificate bounds the linear model, not the advertised quadratic model
+### P2. The S3 retained estimator and certificate use different phase-model levels
 
-**Status: partially resolved in code; documentation and validation remain
-open.**
+**Status: selection bound resolved in code; retained-model control and
+independent local-quadratic validation remain open.**
 
 **Evidence**
 
-- A quadratic-model bound requires
-  $g=|u_0|-W-P_q$.
+- Starting from any certified linear reachable interval, a quadratic-model
+  bound requires shrinking its distance from zero by $P_q$.
 - `fast_analytic.py::envelope_bound` implements $g=|u_0|-W$ and accepts no
   explicitly named quadratic padding.
-- The current `select_tube` computes $P_q$ and passes $W+P_q$ as the effective
-  width. This applies the quadratic confinement padding during selection and
-  discarded-bound accumulation, despite older documents saying it is absent.
-- Existing certificate tests compare against linear-model tuple values. They
-  do not directly test the bound against local-quadratic QMC values.
+- The current `select_tube` obtains a mask-aware linear outer interval from
+  `masked_linear_phase_outer_interval`, computes its distance from zero, and
+  subtracts $P_q$. This applies the quadratic confinement padding explicitly
+  during selection and discarded-bound accumulation.
+- Tests cover the projected interval for shifted aligned, anti-aligned, and
+  zero-coefficient cases and verify that quadratic padding changes selection
+  at the reachable-interval boundary. They do not compare discarded bounds
+  against independent local-quadratic QMC values.
 - The retained-tuple evaluator remains a linear-phase estimator, so the
   resulting retained sum plus discarded certificate is not by itself a
   certified local-quadratic physical result.
 
 **Consequence**
 
-The discarded-set confinement argument now includes the quadratic padding,
-but its implementation contract is indirect and lacks a quadratic regression
-test. The complete S3 result still mixes a padded selection certificate with
-a retained-tuple estimator that omits quadratic phase.
+The discarded-set confinement argument now includes both the output mask and
+quadratic padding. The complete S3 result still mixes that padded selection
+certificate with a retained-tuple estimator that omits quadratic phase.
 
 **Required resolution**
 
-Make the padding explicit in the bound API, add local-quadratic QMC regression
-tests for discarded tuples, and separately control or label the retained-tuple
-model error. Reconcile `lorenzi_fast_method.md`, the logical specification,
-and S3 captions with the code. Do not claim a full physical truncation
-guarantee until both discarded and retained errors are controlled at the same
-phase-model level.
+Add local-quadratic QMC regression tests for discarded tuples, and separately
+control or label the retained-tuple model error. Do not claim a full physical
+result guarantee until both discarded and retained errors are controlled at
+the same phase-model level.
 
 ### P3. The claimed two-coordinate factorization uses an invalid marginal mask correction
 
@@ -203,6 +203,9 @@ the point estimate.
 
 ### P7. `$|u_0|<W$' is only an unmasked-box crossing test
 
+**Status: resolved for S3 selection; exact masked-domain classification remains
+open.**
+
 **Evidence**
 
 $W$ describes the image of the complete cube $(-\pi,\pi)^3$. The support mask
@@ -221,7 +224,9 @@ Use two names:
   $\min_{\mathbf x:M_d(\mathbf x)=1}|u(\mathbf x)|=0$.
 
 For the linear model, derive the latter from the support polytope rather than
-overstating the box test.
+overstating the box test. The current S3 selector uses a certified mask-aware
+outer interval, which can reject some box-crossing tuples but need not equal
+the exact image of the support polytope for a generic orientation.
 
 ### P8. Sector-asymptotic documents state incompatible laws
 
@@ -481,7 +486,8 @@ figure numbers differing from document numbers.
 ## Recommended repair order
 
 1. Fix production XPM and regenerate S4--S6.
-2. Correct or relabel the S3 certificate.
+2. Validate the S3 discarded bound independently at local-quadratic level and
+   control or label retained-model error.
 3. Replace the S2 aggregate validation protocol and add S4 uncertainty.
 4. Add complete S5 checkpoint provenance and a fixed-reference gamma model.
 5. Rebuild the factorization experiment with conditional acceptance and raw
