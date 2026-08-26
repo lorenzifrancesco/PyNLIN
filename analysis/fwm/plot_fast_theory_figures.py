@@ -35,7 +35,17 @@ GRAY = "#6f6e66"
 
 plt.rcParams.update({
     "figure.dpi": 150,
-    "font.size": 9,
+    "font.size": 12,
+    "axes.labelsize": 13,
+    "axes.titlesize": 13,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+    "legend.fontsize": 11,
+    "figure.titlesize": 14,
+    "xtick.major.size": 5,
+    "ytick.major.size": 5,
+    "xtick.major.width": 1,
+    "ytick.major.width": 1,
     "axes.grid": True,
     "grid.alpha": 0.25,
     "grid.linewidth": 0.6,
@@ -84,10 +94,10 @@ def fig_density_regimes():
     ]
     for w, color, label in cases:
         ax.plot(u, uniform_sum_density(u, w), color=color, label=label)
-    ax.legend(frameon=False, fontsize=8)
+    ax.legend(frameon=False)
     ax.set_xlabel(r"offset $u-u_0$")
     ax.set_ylabel(r"density $\rho_{\mathbf{w}}$")
-    ax.set_title("(a) 3-uniform mismatch density", fontsize=9)
+    ax.set_title("(a) 3-uniform mismatch density")
 
     ax = axes[1]
     W = np.logspace(-1, 5.5, 400)
@@ -110,7 +120,7 @@ def fig_density_regimes():
     ax.annotate(r"$|u_0|=W$", xy=(2e3, 6e2), color=GRAY, rotation=33)
     ax.set_xlabel(r"total width $W=\pi\sum_j|\nu_j|$  [rad]")
     ax.set_ylabel(r"$|u_0|$  [rad]")
-    ax.set_title("(b) regime dispatch", fontsize=9)
+    ax.set_title("(b) regime dispatch")
     fig.tight_layout()
     fig.savefig(OUT / "density_regimes.png", bbox_inches="tight")
     plt.close(fig)
@@ -135,7 +145,7 @@ def fig_acceptance():
         ax.plot(off[0] / total, approx, color=ORANGE, ls="--",
                 label="rescaled 3-uniform model")
         ax.set_xlabel(r"$(u-u_0)/W$")
-        ax.set_title(title, fontsize=9)
+        ax.set_title(title)
         # masked-F consequence for the caption
         u0 = np.array([0.5 * total])
         w = np.pi * np.abs(coeffs)
@@ -149,7 +159,7 @@ def fig_acceptance():
             n_points=1 << 16, n_replicates=6, include_quadratic=False)
         numbers[title] = (f_ex, f_ap, qmc, qerr)
     axes[0].set_ylabel(r"$A(u)=P(\mathrm{mask}\mid u)$")
-    axes[0].legend(frameon=False, fontsize=8, loc="lower center")
+    axes[0].legend(frameon=False, loc="lower center")
     fig.tight_layout()
     fig.savefig(OUT / "acceptance_exact_vs_approx.png", bbox_inches="tight")
     plt.close(fig)
@@ -169,11 +179,11 @@ def fig_xpm():
             ls=":", lw=1.2)
     ax.annotate(r"$H(\theta)$", xy=(0.62, 0.42), color=BLUE)
     ax.annotate(r"$1/(\pi\theta)^2$", xy=(1.35, 0.12), color=GRAY)
-    ax.annotate(r"$H(0)=2/3$", xy=(1.6, 0.62), color=GRAY, fontsize=8)
+    ax.annotate(r"$H(0)=2/3$", xy=(1.6, 0.62), color=GRAY)
     ax.set_ylim(0, 0.74)
     ax.set_xlabel(r"$\theta$")
     ax.set_ylabel(r"masked cosine transform $H$")
-    ax.set_title("(a) exact masked XPM transform", fontsize=9)
+    ax.set_title("(a) exact masked XPM transform")
 
     ax = axes[1]
     nu = np.logspace(-1, 4, 300)
@@ -186,7 +196,7 @@ def fig_xpm():
           " at nu=1e4:", 1e4 * xpm_fast_batch(np.array([1e4]))[0])
     ax.set_xlabel(r"walk-off $|\nu| = |\Delta\beta_1| B L$  [rad]")
     ax.set_ylabel(r"$F_{\rm XPM}$")
-    ax.set_title("(b) exact 1-D XPM efficiency", fontsize=9)
+    ax.set_title("(b) exact 1-D XPM efficiency")
     fig.tight_layout()
     fig.savefig(OUT / "xpm_reduction.png", bbox_inches="tight")
     plt.close(fig)
@@ -245,7 +255,7 @@ def fig_fast_vs_qmc():
     ax.set_xscale("log")
     ax.set_xlabel(r"randomized-Sobol ground truth $F$ (linear model, exact mask)")
     ax.set_ylabel("model / ground truth")
-    ax.legend(frameon=False, fontsize=8)
+    ax.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(OUT / "fast_vs_qmc.png", bbox_inches="tight")
     plt.close(fig)
@@ -267,8 +277,7 @@ def fig_support_acceptance():
     ax.axvline(edge, color=GRAY, ls=":", lw=1.0)
     ax.axvline(-edge, color=GRAY, ls=":", lw=1.0)
     ax.annotate(r"$A(d)$, $A(0)=2/3$", xy=(0, 0.69), ha="center", color=BLUE)
-    ax.annotate("hard support edge\n$|d|=4\\pi$", xy=(7.2, 0.35), color=GRAY,
-                fontsize=8)
+    ax.annotate("hard support edge\n$|d|=4\\pi$", xy=(7.2, 0.35), color=GRAY)
     ax.set_xlabel(r"support shift $d=\delta\omega/B$  [rad]")
     ax.set_ylabel("acceptance")
     ax.set_ylim(0, 0.78)

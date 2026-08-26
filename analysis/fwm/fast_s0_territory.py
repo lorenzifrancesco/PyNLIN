@@ -199,21 +199,22 @@ def main() -> None:
     lg.success(f"S0 saved to {args.out_dir}")
 
 
-def _bump_all_fonts(delta: float) -> None:
-    """Add ``delta`` points to every numeric font size in rcParams.
-
-    Sizes configured as relative keywords ('large', 'medium', ...) follow
-    ``font.size`` automatically; numeric values (as in the user's
-    matplotlibrc) must be bumped explicitly or they pin their elements.
-    """
-    for key in (
-        "font.size", "axes.labelsize", "axes.titlesize", "xtick.labelsize",
-        "ytick.labelsize", "legend.fontsize", "legend.title_fontsize",
-        "figure.titlesize",
-    ):
-        value = matplotlib.rcParams.get(key)
-        if isinstance(value, (int, float)):
-            matplotlib.rcParams[key] = value + delta
+def _set_readable_fonts() -> None:
+    """Keep labels legible after the multi-panel image is scaled in docs."""
+    matplotlib.rcParams.update({
+        "font.size": 14,
+        "axes.labelsize": 15,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 13,
+        "legend.title_fontsize": 13,
+        "figure.titlesize": 17,
+        "xtick.major.size": 5,
+        "ytick.major.size": 5,
+        "xtick.major.width": 1,
+        "ytick.major.width": 1,
+    })
 
 
 # Histogram resolution (x-bins, y-bins) per panel.
@@ -285,7 +286,7 @@ def plot_territory(
     if u0.size == 0:
         lg.warning("plot_territory: no tuples to plot")
         return
-    _bump_all_fonts(3.0)
+    _set_readable_fonts()
     fig, axes = plt.subplots(2, 2, figsize=(9.4, 7.4))
     abs_u0 = np.abs(u0)
     abs_mu = np.abs(mu)

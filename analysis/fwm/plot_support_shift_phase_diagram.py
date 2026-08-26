@@ -23,6 +23,23 @@ import numpy as np
 from scipy.special import sici
 
 
+# Both outputs are wide multi-panel figures and are downscaled in the docs.
+matplotlib.rcParams.update({
+    "font.size": 16,
+    "axes.labelsize": 17,
+    "axes.titlesize": 18,
+    "xtick.labelsize": 16,
+    "ytick.labelsize": 16,
+    "legend.fontsize": 14,
+    "legend.title_fontsize": 14,
+    "figure.titlesize": 20,
+    "xtick.major.size": 6,
+    "ytick.major.size": 6,
+    "xtick.major.width": 1.2,
+    "ytick.major.width": 1.2,
+})
+
+
 SQRT3 = np.sqrt(3.0)
 PLATEAU = 2.0 / 3.0
 MU_UNMASKED = np.pi * SQRT3

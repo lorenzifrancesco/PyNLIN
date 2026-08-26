@@ -141,25 +141,31 @@ def main() -> None:
             f"over {sel.sum()} bins")
 
     boundary = np.pi * np.sqrt(3.0)
-    # +3pt on every numeric font size (numeric rc values pin their elements
-    # and do not follow font.size).
-    matplotlib.rcParams["figure.dpi"] = 150
-    for key in (
-        "font.size", "axes.labelsize", "axes.titlesize", "xtick.labelsize",
-        "ytick.labelsize", "legend.fontsize", "legend.title_fontsize",
-        "figure.titlesize",
-    ):
-        value = matplotlib.rcParams.get(key)
-        if isinstance(value, (int, float)):
-            matplotlib.rcParams[key] = value + 3.0
-    fig, axes = plt.subplots(2, 2, figsize=(10.5, 8.0), sharex=True, sharey=True)
+    # Explicit sizes avoid tiny values pinned by a user's matplotlibrc and
+    # remain readable when the four-panel image is scaled to the docs column.
+    matplotlib.rcParams.update({
+        "figure.dpi": 150,
+        "font.size": 14,
+        "axes.labelsize": 15,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 13,
+        "legend.title_fontsize": 13,
+        "figure.titlesize": 17,
+        "xtick.major.size": 5,
+        "ytick.major.size": 5,
+        "xtick.major.width": 1,
+        "ytick.major.width": 1,
+    })
+    fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.0), sharex=True, sharey=True)
     for ax, img, title in (
         (axes[0, 0], np.log10(np.maximum(H_cnt, 1e-300)),
          "(a) population: tuple count density"),
         (axes[1, 0], np.log10(np.maximum(H_real, 1e-300)),
-         "(c) REAL mass map (S0, per-target normalized)"),
+         "(c) real mass (per-target normalized)"),
         (axes[1, 1], np.log10(np.maximum(H_pred, 1e-300)),
-         "(d) PREDICTED mass = population x kernel x acceptance"),
+         "(d) predicted: population x kernel x acceptance"),
     ):
         vmax = img.max()
         pcm = ax.pcolormesh(xe, ye, img, cmap="viridis", vmin=vmax - 6, vmax=vmax)

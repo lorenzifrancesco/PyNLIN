@@ -6,11 +6,24 @@
 #   omega_1 - omega_2 + omega_3 = omega_4    (absolute)
 #   nu_1   - nu_2   + nu_3   = nu_4          (offsets from COI,
 #                                              nu_j = omega_j - omega_COI)
-#   |nu_4| <= pi * B                           (support / bandwidth)
+#   |nu_4| <= B / 2                            (support / bandwidth)
 #
 # All variables are angular frequencies.
-# Axes are normalised by Omega_0 = 2 pi Delta_f, the base
-# inter-channel spacing: Omega_0 = spacing_ratio * B.
+# Here B is the full angular passband width 2 pi R_s. Axes are normalised by
+# Omega_0 = 2 pi Delta_f, the base inter-channel spacing, so
+# spacing_ratio = Omega_0 / B = Delta_f / R_s.
+#
+# The plotted integer family q_idx = n1 - n2 + n3 uses the target as index
+# zero. Its carrier residual in lorenzi_fast_method.md is
+#
+#   d = 2 pi q_idx (Omega_0 / B) = 2 pi q_idx spacing_ratio.
+#
+# A q_idx family has nonzero support iff
+# |q_idx| * spacing_ratio < 2. Therefore q_idx is restricted to -1, 0, 1
+# when 1 <= spacing_ratio < 2; sub-Nyquist spacing can admit |q_idx| >= 2.
+#
+# This q_idx is not the quadratic phase coefficient q_j and not the
+# spacing-to-baud ratio called q in some XPM plots.
 # ============================================================
 
 import base64
@@ -531,8 +544,11 @@ app.layout = html.Div(
             style={"fontFamily": "sans-serif", "marginBottom": "4px"},
         ),
         html.P(
-            "q = n₁ − n₂ + n₃: the channel-index combination that labels "
-            "each admissible region's family (color-coded below).",
+            "q_idx = n₁ − n₂ + n₃ labels each admissible channel-index "
+            "family. In the normalized variables of lorenzi_fast_method.md, "
+            "its carrier residual is d = 2π q_idx (Ω₀/B). This q_idx is not "
+            "the quadratic phase coefficient q_j. Nonzero support requires "
+            "|q_idx|(Ω₀/B) < 2, so q_idx ∈ {−1,0,1} for 1 ≤ Ω₀/B < 2.",
             style={
                 "fontFamily": "sans-serif",
                 "fontSize": "13px",

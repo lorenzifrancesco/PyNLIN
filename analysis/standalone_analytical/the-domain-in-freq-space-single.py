@@ -10,11 +10,14 @@ from scipy.spatial import ConvexHull, HalfspaceIntersection
 #   omega_1 - omega_2 + omega_3 = omega_4    (absolute)
 #   nu_1   - nu_2   + nu_3   = nu_4          (offsets from COI,
 #                                              nu_j = omega_j - omega_COI)
-#   |nu_4| <= pi * B                           (support / bandwidth)
+#   |nu_4| <= B / 2                            (support / bandwidth)
 #
 # All variables are angular frequencies.
-# Axes are normalised by Omega_0 = 2 pi Delta_f, the base
-# inter-channel spacing.
+# Here B is the full angular passband width 2 pi R_s. Axes are normalised by
+# Omega_0 = 2 pi Delta_f, the base inter-channel spacing. For a shifted cube
+# with integer family q_idx, the support shift of lorenzi_fast_method.md is
+# d = 2 pi q_idx (Omega_0 / B). This single-cube view uses q_idx = 0.
+# In general, nonzero support requires |q_idx| (Omega_0 / B) < 2.
 # ============================================================
 
 B = 1.0

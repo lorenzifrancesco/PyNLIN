@@ -27,16 +27,22 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# +3pt on every numeric font size (the user matplotlibrc pins numeric values
-# for labels/ticks/legend, which a bare font.size change would miss).
-for _key in (
-    "font.size", "axes.labelsize", "axes.titlesize", "xtick.labelsize",
-    "ytick.labelsize", "legend.fontsize", "legend.title_fontsize",
-    "figure.titlesize",
-):
-    _val = matplotlib.rcParams.get(_key)
-    if isinstance(_val, (int, float)):
-        matplotlib.rcParams[_key] = _val + 3.0
+# These wide figures are substantially downscaled in the documentation.
+# Explicit values also override tiny numeric sizes pinned by matplotlibrc.
+matplotlib.rcParams.update({
+    "font.size": 16,
+    "axes.labelsize": 17,
+    "axes.titlesize": 18,
+    "xtick.labelsize": 16,
+    "ytick.labelsize": 16,
+    "legend.fontsize": 14,
+    "legend.title_fontsize": 14,
+    "figure.titlesize": 20,
+    "xtick.major.size": 6,
+    "ytick.major.size": 6,
+    "xtick.major.width": 1.2,
+    "ytick.major.width": 1.2,
+})
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -112,9 +118,9 @@ def draw_boundaries(ax, s_lim, mu_lim, label: bool) -> None:
         ax.text(60.0, 0.15, "2", **kw)
         ax.text(600.0, 12.0, "3", **kw)
         ax.text(20.0, 400.0, "4", **kw)
-        ax.text(s_lim[1] * 0.5, MU_UNMASKED * 1.3, r"$|u_0|=W$", color="w", fontsize=11, ha="right")
-        ax.text(s_lim[1] * 0.5, MU_23 * 0.55, r"$|\mu|=\pi/\sqrt{3}$", color="w", fontsize=11, ha="right")
-        ax.text(300.0, 190.0, r"$x_\nabla=1$", color="w", fontsize=11, rotation=45)
+        ax.text(s_lim[1] * 0.5, MU_UNMASKED * 1.3, r"$|u_0|=W$", color="w", fontsize=14, ha="right")
+        ax.text(s_lim[1] * 0.5, MU_23 * 0.55, r"$|\mu|=\pi/\sqrt{3}$", color="w", fontsize=14, ha="right")
+        ax.text(300.0, 190.0, r"$x_\nabla=1$", color="w", fontsize=14, rotation=45)
 
 
 def fig_cmaps(args, out_dirs) -> None:
@@ -182,12 +188,12 @@ def fig_cuts(args, out_dirs) -> None:
         ax.plot(s_g, prediction(s_g, mu_v), color="k", lw=0.7, ls="--", alpha=0.7)
     ax.plot(s_g, 2.0 / s_g, color="gray", ls=":", lw=1.0)
     ax.plot(s_g, 20.0 / s_g**2, color="gray", ls=":", lw=1.0)
-    ax.text(2e3, 1.6e-3, r"$\propto s^{-1}$", color="gray", fontsize=12)
-    ax.text(1.5e2, 2e-4, r"$\propto s^{-2}$", color="gray", fontsize=12)
+    ax.text(2e3, 1.6e-3, r"$\propto s^{-1}$", color="gray", fontsize=14)
+    ax.text(1.5e2, 2e-4, r"$\propto s^{-2}$", color="gray", fontsize=14)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_ylim(1e-10, 2.0)
     ax.set_xlabel(r"$s$ [rad]"); ax.set_ylabel(r"$N\,T^2\!/L^2$")
-    ax.legend(fontsize=11)
+    ax.legend()
     ax.set_title("(a) iso-$\\mu$ cuts vs $s$; dashed = region laws")
 
     # (b) compensated s^2 N for gapped cuts
@@ -198,11 +204,11 @@ def fig_cuts(args, out_dirs) -> None:
         ax.axhline(4.0 * (1.0 + mu_c) ** 2 / (3.0 * mu_c**2), color=c, ls="--", lw=0.8)
     ax.axhline(8.0 / 3.0, color="gray", ls=":", lw=1.0)
     ax.text(args.s_max * 0.3, 8.0 / 3.0 * 1.15, r"envelope $\frac{2}{3}\cdot\frac{4}{s^2}s^2 = \frac{8}{3}$",
-            color="gray", fontsize=11, ha="right")
+            color="gray", fontsize=14, ha="right")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlim(3.0, args.s_max); ax.set_ylim(1e-4, 6.0)
     ax.set_xlabel(r"$s$ [rad]"); ax.set_ylabel(r"$s^2\, N\,T^2\!/L^2$")
-    ax.legend(fontsize=11)
+    ax.legend()
     ax.set_title("(b) compensated gapped cuts: plateau = $\\frac{4}{3}(1+1/\\mu)^2$")
 
     # (c) iso-s cuts vs mu
@@ -216,12 +222,12 @@ def fig_cuts(args, out_dirs) -> None:
         ax.plot(mu_g, prediction(s_v, mu_g), color="k", lw=0.7, ls="--", alpha=0.7)
     ax.axvline(MU_23, color="gray", ls="-", lw=0.8)
     ax.axvline(MU_UNMASKED, color="gray", ls=":", lw=0.8)
-    ax.text(MU_23 * 0.85, 1.2, r"$\pi/\sqrt3$", color="gray", fontsize=11, ha="right")
-    ax.text(MU_UNMASKED * 1.2, 1.2, r"$\pi\sqrt3$", color="gray", fontsize=11)
+    ax.text(MU_23 * 0.85, 1.2, r"$\pi/\sqrt3$", color="gray", fontsize=14, ha="right")
+    ax.text(MU_UNMASKED * 1.2, 1.2, r"$\pi\sqrt3$", color="gray", fontsize=14)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_ylim(1e-9, 3.0)
     ax.set_xlabel(r"$|\mu|$"); ax.set_ylabel(r"$N\,T^2\!/L^2$")
-    ax.legend(fontsize=11, loc="lower left")
+    ax.legend(loc="lower left")
     ax.set_title("(c) iso-$s$ cuts vs $|\\mu|$: flat inside regions,\n"
                  "step at $\\pi/\\sqrt3$, fringes appear near $\\mu \\approx s$")
 
@@ -238,7 +244,7 @@ def fig_cuts(args, out_dirs) -> None:
         ax.axvline(2.0 * np.pi * k * (1.0 + 1.0 / mu_c), color="gray", ls=":", lw=0.6)
     ax.xaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%g"))
     ax.set_xlabel(r"$s$ [rad] (linear)"); ax.set_ylabel(r"$N\,T^2\!/L^2$")
-    ax.legend(fontsize=11)
+    ax.legend()
     ax.set_title(rf"(d) region-4 fringes at $|\mu|=10^3$; nulls at $u_0 = 2\pi k$")
 
     # (e) fringe contrast vs x
@@ -265,7 +271,7 @@ def fig_cuts(args, out_dirs) -> None:
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_ylim(1e-4, 1.5)
     ax.set_xlabel(r"$x_\nabla = s/(1+|\mu|)$ [rad]"); ax.set_ylabel("fringe contrast")
-    ax.legend(fontsize=11)
+    ax.legend()
     ax.set_title("(e) fringe contrast: mask-edge $1/x_\\nabla$ envelope\n"
                  "(high-$\\mu$ dips = frozen $|\\sin w|$), not the unmasked $\\mathrm{sinc}^3$")
 
@@ -282,7 +288,7 @@ def fig_cuts(args, out_dirs) -> None:
     ax.set_ylim(1e-4, 2.0)
     ax.set_xlabel(r"$s / s_1(\mu)$,   $s_1 = \pi(1+\mu)/(\mu+\pi/\sqrt3)$")
     ax.set_ylabel(r"$N\,T^2\!/L^2 \;/\; (2/3)$")
-    ax.legend(fontsize=11, loc="lower left")
+    ax.legend(loc="lower left")
     ax.set_title("(f) plateau edge collapses on $s = s_1(\\mu)$")
 
     fig.suptitle("Quantitative cuts through the four-region phase diagram (doc §10.2)")
