@@ -16,6 +16,7 @@ noise_calculations
 direct_sector_mc
 npc_sector_asymptotics
 lorenzi_fast_method
+lorenzi_fast_cost_anatomy
 publication_novelty
 pcfm_td_scientific_spec
 io
