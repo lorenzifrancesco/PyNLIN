@@ -11,6 +11,7 @@ import argparse
 import csv
 import logging
 import math
+import time
 from pathlib import Path
 
 import matplotlib
@@ -31,6 +32,10 @@ from matplotlib.patches import Polygon
 from scipy.optimize import brentq
 
 from pynlin.methods.td.fullband_mc import estimate_xpm_n1_local_taylor_mc
+from pynlin.methods.td.fast_nlin import (
+    fwm_tuple_variables_for_indices,
+    linear_tuple_estimate,
+)
 from pynlin.methods.td.fwm_kernel import FWMChannels
 from pynlin.methods.td.fwm_mc import estimate_fwm_term_sum_dar_mc
 from pynlin.methods.td.xhkm_mc import (
@@ -225,6 +230,65 @@ def physical_tuple_coordinates(
     x_grad = float(length) * mismatch_scale
     mu = delta_beta_center / mismatch_scale if mismatch_scale > 0.0 else float("nan")
     return delta_beta_center, gradient_norm, x_grad, mu
+
+
+def fast_linear_fwm_efficiencies(
+    *,
+    frequencies_hz: np.ndarray,
+    beta0_per_m: np.ndarray,
+    beta1_s_per_m: np.ndarray,
+    beta2_s2_per_m: np.ndarray,
+    symbol_rate_baud: float,
+    fiber_length_m: float,
+    tuple_indices_dabc: tuple[int, int, int, int],
+) -> tuple[float, float, float, float]:
+    """Return linear efficiencies and standalone computation times.
+
+    The tuple is ``(resolved efficiency, upper-envelope efficiency, resolved
+    time in s, upper-envelope time in s)``. Repeated leg indices are allowed.
+    Both efficiencies are dimensionless ``N T^2/L^2`` values and use the
+    exact output-support mask of the Fast linear model. Each time includes
+    normalized-variable construction, as a standalone policy evaluation would.
+    """
+    target_idx, a_idx, b_idx, c_idx = tuple_indices_dabc
+    setup_start = time.perf_counter()
+    variables = fwm_tuple_variables_for_indices(
+        frequencies_hz,
+        beta0_per_m,
+        beta1_s_per_m,
+        beta2_s2_per_m,
+        symbol_rate_baud,
+        fiber_length_m,
+        target_idx,
+        np.array([a_idx]),
+        np.array([b_idx]),
+        np.array([c_idx]),
+    )
+    setup_time_s = time.perf_counter() - setup_start
+    linear_coeffs = np.array(
+        [[variables.nu_a[0], variables.nu_b[0], -variables.nu_c[0]]]
+    )
+    resolved_start = time.perf_counter()
+    resolved = linear_tuple_estimate(
+        variables.u0, linear_coeffs, variables.d, fringe_policy="resolved"
+    ).values[0]
+    resolved_time_s = setup_time_s + time.perf_counter() - resolved_start
+    upper_envelope_start = time.perf_counter()
+    upper_envelope = linear_tuple_estimate(
+        variables.u0,
+        linear_coeffs,
+        variables.d,
+        fringe_policy="upper_envelope",
+    ).values[0]
+    upper_envelope_time_s = (
+        setup_time_s + time.perf_counter() - upper_envelope_start
+    )
+    return (
+        float(resolved),
+        float(upper_envelope),
+        float(resolved_time_s),
+        float(upper_envelope_time_s),
+    )
 
 
 def tuple_sequences(
@@ -618,6 +682,10 @@ def compute_dataset(
                 "xpm_stderr": np.nan,
                 "fwm_degenerate_noise": np.nan,
                 "fwm_degenerate_stderr": np.nan,
+                "fwm_fast_linear_efficiency": np.nan,
+                "fwm_fast_upper_envelope_efficiency": np.nan,
+                "fwm_fast_linear_computation_time_s": np.nan,
+                "fwm_fast_upper_envelope_computation_time_s": np.nan,
                 **_empty_sector_fields(),
                 "support_fraction": float(estimate.metadata["support_fraction"]),
             }
@@ -703,6 +771,10 @@ def compute_dataset(
                 "xpm_stderr": np.nan,
                 "fwm_degenerate_noise": np.nan,
                 "fwm_degenerate_stderr": np.nan,
+                "fwm_fast_linear_efficiency": np.nan,
+                "fwm_fast_upper_envelope_efficiency": np.nan,
+                "fwm_fast_linear_computation_time_s": np.nan,
+                "fwm_fast_upper_envelope_computation_time_s": np.nan,
                 **_empty_sector_fields(),
                 "support_fraction": float(quartic.metadata["support_fraction"]),
             }
@@ -741,6 +813,20 @@ def compute_dataset(
             n_samples=n_samples,
             alpha=alpha,
             random_variables=random_variables,
+        )
+        (
+            fwm_fast_linear,
+            fwm_fast_upper_envelope,
+            fwm_fast_linear_time_s,
+            fwm_fast_upper_envelope_time_s,
+        ) = fast_linear_fwm_efficiencies(
+            frequencies_hz=fwm_freqs,
+            beta0_per_m=fwm_beta0,
+            beta1_s_per_m=fwm_beta1,
+            beta2_s2_per_m=fwm_beta2,
+            symbol_rate_baud=baud_rate,
+            fiber_length_m=length,
+            tuple_indices_dabc=(0, 1, 2, 3),
         )
 
         xpm_frequency = target_frequency + float(xpm_shift) * spacing
@@ -842,6 +928,12 @@ def compute_dataset(
                 "xpm_stderr": xpm_stderr / length**2,
                 "fwm_degenerate_noise": fwm_estimate.total / length**2,
                 "fwm_degenerate_stderr": fwm_estimate.total_stderr / length**2,
+                "fwm_fast_linear_efficiency": fwm_fast_linear,
+                "fwm_fast_upper_envelope_efficiency": fwm_fast_upper_envelope,
+                "fwm_fast_linear_computation_time_s": fwm_fast_linear_time_s,
+                "fwm_fast_upper_envelope_computation_time_s": (
+                    fwm_fast_upper_envelope_time_s
+                ),
                 **sector_fields,
                 "support_fraction": float(fwm_estimate.metadata["support_fraction"]),
             }
@@ -874,6 +966,10 @@ def compute_dataset(
         "xpm_stderr",
         "fwm_degenerate_noise",
         "fwm_degenerate_stderr",
+        "fwm_fast_linear_efficiency",
+        "fwm_fast_upper_envelope_efficiency",
+        "fwm_fast_linear_computation_time_s",
+        "fwm_fast_upper_envelope_computation_time_s",
         "xpm_sector_n1",
         "xpm_sector_n1_stderr",
         "xpm_sector_samples",
@@ -913,6 +1009,10 @@ def compute_dataset(
                 "all plotted MC coefficients are divided by L_squared"
             ),
             "physical_prefactors_included": np.array(False),
+            "fwm_fast_phase_model": np.array("linear"),
+            "fwm_fast_fringe_policies": np.array(
+                ["resolved", "upper_envelope"]
+            ),
             "xpm_shift_channels": np.array(int(xpm_shift)),
             "fwm_shift_channels": np.array(int(fwm_shift)),
             "spectrum_step": np.array(int(spectrum_step)),
@@ -1095,6 +1195,26 @@ def plot_dataset(
         fwm_error = np.asarray(data["fwm_degenerate_stderr"], dtype=float)[selected][
             order
         ]
+        fwm_fast_linear = np.asarray(
+            data["fwm_fast_linear_efficiency"], dtype=float
+        )[selected][order]
+        fwm_fast_upper_envelope = np.asarray(
+            data["fwm_fast_upper_envelope_efficiency"], dtype=float
+        )[selected][order]
+        fwm_fast_linear_mean_time_ms = 1e3 * float(
+            np.nanmean(
+                np.asarray(
+                    data["fwm_fast_linear_computation_time_s"], dtype=float
+                )[selected]
+            )
+        )
+        fwm_fast_upper_envelope_mean_time_ms = 1e3 * float(
+            np.nanmean(
+                np.asarray(
+                    data["fwm_fast_upper_envelope_computation_time_s"], dtype=float
+                )[selected]
+            )
+        )
         ratio = np.divide(fwm, xpm, out=np.full_like(fwm, np.nan), where=xpm > 0.0)
         fig, axes = plt.subplots(4, 1, figsize=(8.4, 9.0), sharex=True)
 
@@ -1145,6 +1265,28 @@ def plot_dataset(
                 yerr=fwm_error,
                 lw=0.8,
                 label=rf"FWM $(d,d{fwm_shift:+d},d{fwm_shift:+d},d{2 * fwm_shift:+d})$",
+            )
+            axis.plot(
+                frequency,
+                fwm_fast_linear,
+                color="C2",
+                lw=1.0,
+                ls="--",
+                label=(
+                    "FWM Fast linear, resolved "
+                    rf"($\langle t\rangle={fwm_fast_linear_mean_time_ms:.2f}$ ms/tuple)"
+                ),
+            )
+            axis.plot(
+                frequency,
+                fwm_fast_upper_envelope,
+                color="C4",
+                lw=1.0,
+                ls=":",
+                label=(
+                    "FWM Fast linear, upper envelope "
+                    rf"($\langle t\rangle={fwm_fast_upper_envelope_mean_time_ms:.2f}$ ms/tuple)"
+                ),
             )
             if ssfm_fwm is not None:
                 ssfm_frequency = (

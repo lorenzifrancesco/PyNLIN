@@ -7,6 +7,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / '../fwm'))
+import pubstyle
 
 from pynlin.collisions import get_m_values
 from pynlin.fiber import SMFiber
@@ -242,14 +245,14 @@ def _load(path: Path) -> np.lib.npyio.NpzFile:
 def _finish(fig: plt.Figure, stem: str) -> None:
     OUT_MEDIA.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(OUT_MEDIA / f"{stem}.pdf", dpi=300)
+    fig.savefig(OUT_MEDIA / f"{stem}.pdf", dpi=pubstyle.dpi(300))
     plt.close(fig)
 
 
 def plot_single(path: Path, title: str, stem: str) -> None:
     data = _load(path)
     llw = data["llw_grid"]
-    fig, ax = plt.subplots(figsize=(4.4, 3.15))
+    fig, ax = plt.subplots(figsize=pubstyle.figsize(4.4, 3.15))
     ax.plot(llw, data["ref_n1"], marker="o", ms=3, lw=1.0, label=r"$N_1$")
     ax.plot(llw, data["ref_n2"], marker="s", ms=3, lw=1.0, ls="--", label=r"$N_2$")
     ax.plot(llw, data["ref_n_2pc"], marker="*", ms=5, lw=0.9, ls=":", label="2PC")
@@ -269,7 +272,7 @@ def plot_single(path: Path, title: str, stem: str) -> None:
 def plot_decomposition(path: Path, title: str, stem: str) -> None:
     data = _load(path)
     llw = data["llw_grid"]
-    fig, ax = plt.subplots(figsize=(4.6, 3.25))
+    fig, ax = plt.subplots(figsize=pubstyle.figsize(4.6, 3.25))
     ax.plot(llw, data["ref_n_2pc"], marker="*", ms=5, lw=0.9, label="2PC")
     ax.plot(llw, data["ref_n_3pca"], marker="o", ms=3, lw=1.0, label="3PCa")
     ax.plot(llw, data["ref_n_3pcb"], marker="s", ms=3, lw=1.0, label="3PCb")
@@ -286,7 +289,7 @@ def plot_decomposition(path: Path, title: str, stem: str) -> None:
 
 
 def plot_compare(items: list[tuple[str, Path, str]], stem: str, *, include_2pc: bool = True, legend_font: float = 6.0) -> None:
-    fig, ax = plt.subplots(figsize=(5.2, 3.6))
+    fig, ax = plt.subplots(figsize=pubstyle.figsize(5.2, 3.6))
     for label, path, color in items:
         data = _load(path)
         llw = data["llw_grid"]
@@ -307,7 +310,7 @@ def plot_compare(items: list[tuple[str, Path, str]], stem: str, *, include_2pc: 
 
 
 def plot_ratio(paths: dict[str, Path]) -> None:
-    fig, ax = plt.subplots(figsize=(4.4, 3.0))
+    fig, ax = plt.subplots(figsize=pubstyle.figsize(4.4, 3.0))
     for label, key, color in (("Gaussian", "gaussian", "tab:purple"), ("Nyquist", "nyquist", "tab:blue")):
         data = _load(paths[key])
         ax.plot(data["llw_grid"], data["n2_over_n1"], marker="o", ms=3, lw=1.0, color=color, label=label)
@@ -321,6 +324,9 @@ def plot_ratio(paths: dict[str, Path]) -> None:
 
 
 def main() -> None:
+    # No argparse in this script: select publication sizing with
+    #   XHKM_PUBLICATION=column python generate_xhkm_sum_curves.py
+    pubstyle.apply(__import__("os").environ.get("XHKM_PUBLICATION", "screen"))
     cases = _cases()
     paths: dict[str, Path] = {}
     for case in cases:
