@@ -30,6 +30,9 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / '.'))
+import pubstyle
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -65,6 +68,7 @@ def synthetic_kernel_grid(
 def main() -> None:
     init_logging()
     parser = argparse.ArgumentParser(description=__doc__)
+    pubstyle.add_argument(parser)
     parser.add_argument(
         "--territory-npz", type=Path,
         default=Path("media/lorenzi-fast/s0_territory.npz"),
@@ -78,6 +82,7 @@ def main() -> None:
     parser.add_argument("--n-grid", type=int, default=140)
     parser.add_argument("--n-bins", type=int, default=120)
     args = parser.parse_args()
+    pubstyle.apply(args)
 
     real = np.load(args.territory_npz)
     # Current S0 keys (x_grad, mu); fall back to the pre-rename keys
@@ -158,7 +163,7 @@ def main() -> None:
         "xtick.major.width": 1,
         "ytick.major.width": 1,
     })
-    fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.0), sharex=True, sharey=True)
+    fig, axes = plt.subplots(2, 2, figsize=pubstyle.figsize(12.0, 8.0), sharex=True, sharey=True)
     for ax, img, title in (
         (axes[0, 0], np.log10(np.maximum(H_cnt, 1e-300)),
          "(a) population: tuple count density"),
@@ -197,9 +202,9 @@ def main() -> None:
     fig.tight_layout()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     out = args.out_dir / "s0_factorization.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches=None if pubstyle.current() != "screen" else "tight")
     if args.docs_dir.is_dir():
-        fig.savefig(args.docs_dir / "s0_factorization.png", bbox_inches="tight")
+        fig.savefig(args.docs_dir / "s0_factorization.png", bbox_inches=None if pubstyle.current() != "screen" else "tight")
     plt.close(fig)
     lg.success(f"factorization figure saved to {out}")
 

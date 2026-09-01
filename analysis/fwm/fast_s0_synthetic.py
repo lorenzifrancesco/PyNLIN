@@ -117,10 +117,12 @@ def main() -> None:
     parser.add_argument("--n-directions", type=int, default=16)
     parser.add_argument("--d", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--s-min", type=float, default=1e-1)
-    parser.add_argument("--s-max", type=float, default=3e3)
-    parser.add_argument("--n-s", type=int, default=1600)
-    parser.add_argument("--n-mu-dense", type=int, default=400)
+    parser.add_argument("--x-min-dense", type=float, default=1e-2)
+    parser.add_argument("--x-max-dense", type=float, default=3e3)
+    parser.add_argument("--n-x-dense", type=int, default=500)
+    parser.add_argument("--u-min-dense", type=float, default=1e-2)
+    parser.add_argument("--u-max-dense", type=float, default=3e3)
+    parser.add_argument("--n-u-dense", type=int, default=1000)
     args = parser.parse_args()
 
     x_grid = np.logspace(np.log10(args.x_min), np.log10(args.x_max), args.n_x)
@@ -270,46 +272,42 @@ def main() -> None:
     ax4.set_xscale("log")
     ax4.set_yscale("log")
     ax4.set_ylim(max(f_flat[good].min() * 0.5, 1e-14), 2.0)
-    ax4.set_xlabel(r"$s = x + |u_0| = L(B\|\nabla\Delta\beta\|_2 + |\Delta\beta_0|)$ [rad]")
+    ax4.set_xlabel(r"derived $s = x_\nabla + |u_0|$ [rad]")
     ax4.set_ylabel(r"$N\,T^2/L^2$")
     ax4.legend()
-    ax4.set_title("combined-axis collapse (cf. mc-gradient-scaling)")
+    ax4.set_title("collapse on the DERIVED radial coordinate $s$\n(cf. mc-gradient-scaling)")
 
-    # Fifth panel: the same mass map as panel 1, but over (s, |mu|) with
-    # s = x + |u0| = x (1 + |mu|). The (x, mu) mesh maps to a warped but
-    # monotone quadrilateral mesh, which pcolormesh accepts directly as 2-D
-    # coordinate arrays -- no rebinning. In these axes the surface-crossing
-    # region (below the boundary) becomes a function of s alone (vertical
-    # iso-mass stripes), which is the heatmap face of panel 4's collapse.
-    s_2d = xx_c * (1.0 + mm_c)
-    pcm5 = ax5.pcolormesh(s_2d, mm_c, img, cmap="viridis", shading="auto")
+    # Fifth panel: the same mass map as panel 1, but over the intrinsic
+    # coordinates (x_grad, |u0|) of doc 4.1, with u0 = mu * x. The (x, mu)
+    # mesh maps to a warped but monotone quadrilateral mesh, which pcolormesh
+    # accepts directly as 2-D coordinate arrays -- no rebinning. In these axes
+    # the reachability boundary |u0| = W is a ray through the origin.
+    u0_2d = xx_c * mm_c
+    pcm5 = ax5.pcolormesh(xx_c, u0_2d, img, cmap="viridis", shading="auto")
     fig.colorbar(pcm5, ax=ax5, label=r"$\log_{10} N\,T^2\!/L^2$")
-    ax5.axhline(np.pi * l1_over_l2, color="w", ls="--", lw=1.0, alpha=0.8)
-    ax5.text(
-        1.25 * s_2d.min(),
-        1.15 * np.pi * l1_over_l2,
-        r"$|u_0|=W$",
-        color="w",
-    )
+    x_ray = np.geomspace(max(xx_c.min(), 1e-6), xx_c.max(), 200)
+    ax5.plot(x_ray, np.pi * l1_over_l2 * x_ray, color="w", ls="--", lw=1.0, alpha=0.8)
+    ax5.text(x_ray[len(x_ray) // 3], 1.4 * np.pi * l1_over_l2 * x_ray[len(x_ray) // 3],
+             r"$|u_0|=W$", color="w")
     ax5.set_xscale("log")
     ax5.set_yscale("log")
-    ax5.set_xlabel(r"$s = x + |u_0| = L(B\|\nabla\Delta\beta\|_2 + |\Delta\beta_0|)$ [rad]")
-    ax5.set_ylabel(r"$|\mu| = |\Delta\beta_{\rm center}|/(B\|\nabla\Delta\beta\|_2)$")
-    ax5.set_title(r"per-tuple mass over $(s, |\mu|)$")
+    ax5.set_xlabel(r"$x_\nabla = LB\|\nabla\Delta\beta\|_2$ [rad]")
+    ax5.set_ylabel(r"$|u_0| = L|\Delta\beta_0|$ [rad]")
+    ax5.set_title(r"per-tuple mass over $(x_\nabla, |u_0|)$")
 
-    # Sixth panel: dense RECTANGULAR grid directly in (s, |mu|) — no missing
-    # wedges, every point computed from x = s/(1+|mu|), u0 = s|mu|/(1+|mu|).
-    # Dense enough in s to resolve the cos(u0) fringes (period 2pi in u0);
-    # since the fringe amplitude only survives where x <~ 3, i.e. mu >~ 1
-    # where u0 ~= s, the fringes should appear as near-vertical stripes at
-    # s ~= 2 pi k. Also saved standalone as s0_synthetic_smu_dense.png.
-    s_grid = np.logspace(
-        np.log10(args.s_min), np.log10(args.s_max), args.n_s
+    # Sixth panel: dense RECTANGULAR grid directly in the intrinsic
+    # coordinates (x_grad, |u0|) -- no missing wedges. Dense enough in |u0| to
+    # resolve the cos(u0) fringes (period 2pi in u0); since the fringe
+    # amplitude only survives where x_grad <~ 1, the fringes appear as
+    # HORIZONTAL stripes at u0 = 2 pi k. Also saved standalone as
+    # s0_synthetic_xu0_dense.png.
+    x_grid6 = np.logspace(
+        np.log10(args.x_min_dense), np.log10(args.x_max_dense), args.n_x_dense
     )
-    mu_g2 = np.logspace(np.log10(args.mu_min), np.log10(args.mu_max), args.n_mu_dense)
-    ss6, mm6 = np.meshgrid(s_grid, mu_g2, indexing="xy")
-    x6 = (ss6 / (1.0 + mm6)).reshape(-1)
-    u06 = (ss6 * mm6 / (1.0 + mm6)).reshape(-1)
+    u_g2 = np.logspace(np.log10(args.u_min_dense), np.log10(args.u_max_dense), args.n_u_dense)
+    xx6, uu6 = np.meshgrid(x_grid6, u_g2, indexing="xy")
+    x6 = xx6.reshape(-1)
+    u06 = uu6.reshape(-1)
     dir6 = directions[0]
     f6 = np.empty(x6.size)
     chunk = 200_000
@@ -319,27 +317,31 @@ def main() -> None:
         f6[lo:hi] = linear_tuple_estimate(
             u06[lo:hi], coeffs6, np.full(hi - lo, args.d)
         ).values
-    img6 = np.log10(np.maximum(f6.reshape(ss6.shape), 1e-300))
-    pcm6 = ax6.pcolormesh(s_grid, mu_g2, img6, cmap="viridis", shading="auto")
+    img6 = np.log10(np.maximum(f6.reshape(xx6.shape), 1e-300))
+    pcm6 = ax6.pcolormesh(x_grid6, u_g2, img6, cmap="viridis", shading="auto")
     fig.colorbar(pcm6, ax=ax6, label=r"$\log_{10} N\,T^2\!/L^2$")
-    ax6.axhline(np.pi * l1_over_l2, color="w", ls="--", lw=1.0, alpha=0.8)
+    ax6.plot(x_grid6, np.pi * l1_over_l2 * x_grid6, color="w", ls="--", lw=1.0, alpha=0.8)
     ax6.set_xscale("log")
     ax6.set_yscale("log")
-    ax6.set_xlabel(r"$s = x + |u_0|$ [rad]")
-    ax6.set_ylabel(r"$|\mu|$")
-    ax6.set_title(rf"dense $(s, |\mu|)$ grid ({args.n_s}$\times${args.n_mu_dense})")
+    ax6.set_xlim(x_grid6[0], x_grid6[-1])
+    ax6.set_ylim(u_g2[0], u_g2[-1])
+    ax6.set_xlabel(r"$x_\nabla$ [rad]")
+    ax6.set_ylabel(r"$|u_0|$ [rad]")
+    ax6.set_title(rf"dense $(x_\nabla, |u_0|)$ grid ({args.n_x_dense}$\times${args.n_u_dense})")
 
     fig6, ax6b = plt.subplots(figsize=(9.5, 7.0))
-    pcm6b = ax6b.pcolormesh(s_grid, mu_g2, img6, cmap="viridis", shading="auto")
+    pcm6b = ax6b.pcolormesh(x_grid6, u_g2, img6, cmap="viridis", shading="auto")
     fig6.colorbar(pcm6b, ax=ax6b, label=r"$\log_{10} N\,T^2\!/L^2$")
-    ax6b.axhline(np.pi * l1_over_l2, color="w", ls="--", lw=1.0, alpha=0.8)
+    ax6b.plot(x_grid6, np.pi * l1_over_l2 * x_grid6, color="w", ls="--", lw=1.0, alpha=0.8)
     ax6b.set_xscale("log")
     ax6b.set_yscale("log")
-    ax6b.set_xlabel(r"$s = x + |u_0| = L(B\|\nabla\Delta\beta\|_2 + |\Delta\beta_0|)$ [rad]")
-    ax6b.set_ylabel(r"$|\mu| = |\Delta\beta_{\rm center}|/(B\|\nabla\Delta\beta\|_2)$")
-    ax6b.set_title(rf"per-tuple mass, dense $(s, |\mu|)$ grid ({args.n_s}$\times${args.n_mu_dense})")
+    ax6b.set_xlim(x_grid6[0], x_grid6[-1])
+    ax6b.set_ylim(u_g2[0], u_g2[-1])
+    ax6b.set_xlabel(r"$x_\nabla = LB\|\nabla\Delta\beta\|_2$ [rad]")
+    ax6b.set_ylabel(r"$|u_0| = L|\Delta\beta_0|$ [rad]")
+    ax6b.set_title(rf"per-tuple mass, dense $(x_\nabla, |u_0|)$ grid ({args.n_x_dense}$\times${args.n_u_dense})")
     fig6.tight_layout()
-    fig6.savefig(args.out_dir / "s0_synthetic_smu_dense.png", dpi=250)
+    fig6.savefig(args.out_dir / "s0_synthetic_xu0_dense.png", dpi=250)
     plt.close(fig6)
 
     fig.suptitle("Lorenzi Fast S0-syn: synthetic FWM mass territory (by-hand variables)")

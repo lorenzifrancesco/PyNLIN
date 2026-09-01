@@ -78,7 +78,16 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("input/studies.toml"))
     parser.add_argument("--out-dir", type=Path, default=Path("media/lorenzi-fast"))
     parser.add_argument("--n-targets", type=int, default=7)
+    parser.add_argument(
+        "--replot", type=Path, default=None,
+        help="re-render the figure from an existing s0_territory.npz and exit, "
+             "without recomputing the census (leaves the npz untouched)",
+    )
     args = parser.parse_args()
+
+    if args.replot is not None:
+        replot_from_npz(args.replot, args.out_dir)
+        return
 
     system = System.from_toml(args.config)
     # Full grid always: interferer decimation changes the tuple population.
@@ -270,6 +279,23 @@ def _territory_panel(
         fig.colorbar(pcm, ax=ax, label=r"$\log_{10}$")
 
 
+def _overlay_phase_regions(ax) -> None:
+    """Figure 10's demarcations, which are straight in (x_grad, |u0|).
+
+    The data limits are restored afterwards: the coherence line x_grad = 1 sits
+    outside the populated range on this grid, and letting it stretch the axis
+    would open an empty strip.
+    """
+    x_lim, y_lim = ax.get_xlim(), ax.get_ylim()
+    x_line = np.geomspace(max(x_lim[0], 1e-12), x_lim[1], 300)
+    ax.plot(x_line, np.pi * x_line / np.sqrt(3.0), color="w", lw=1.4)
+    ax.plot(x_line, np.pi * np.sqrt(3.0) * x_line, color="w", lw=1.0, ls=":")
+    if x_lim[0] <= 1.0 <= x_lim[1]:
+        ax.axvline(1.0, color="w", lw=1.0, ls="--", alpha=0.8)
+    ax.set_xlim(*x_lim)
+    ax.set_ylim(*y_lim)
+
+
 def plot_territory(
     u0: np.ndarray,
     W: np.ndarray,
@@ -278,16 +304,24 @@ def plot_territory(
     mu: np.ndarray,
     out_dir: Path,
 ) -> None:
-    """Render the four territory panels from per-tuple arrays.
+    """Render the six territory panels from per-tuple arrays.
 
     Also usable standalone to re-render ``s0_territory.png`` from a saved
-    ``s0_territory.npz`` without recomputing the tuples.
+    ``s0_territory.npz`` without recomputing the tuples -- see ``--replot``.
+
+    Rows, in the coordinates of doc §4.1:
+      0  raw       (|u0|, W)        -- both axes carry x_grad, hence entangled
+      1  fundamental (x_grad, |u0|) -- the axes of Figure 10; the population is
+                                       just as correlated here (u0 = mu x_grad),
+                                       but the region boundaries are rays, so
+                                       the census can be read against them
+      2  derived   (x_grad, |mu|)   -- the pair that actually decorrelates
     """
     if u0.size == 0:
         lg.warning("plot_territory: no tuples to plot")
         return
     _set_readable_fonts()
-    fig, axes = plt.subplots(2, 2, figsize=(9.4, 7.4))
+    fig, axes = plt.subplots(3, 2, figsize=(9.4, 11.1))
     abs_u0 = np.abs(u0)
     abs_mu = np.abs(mu)
 
@@ -297,29 +331,51 @@ def plot_territory(
         title="fast-pass mass, per-target normalized (raw axes)",
     )
     for ax in axes[0]:
-        ax.set_xlabel(r"$|u_0| = L\,|\Delta\beta_{\rm center}|$ [rad]")
+        ax.set_xlabel(r"$|u_0| = L\,|\Delta\beta_0|$ [rad]")
     axes[0, 0].set_ylabel(r"$W = \pi(|\nu_a|+|\nu_b|+|\nu_c|)$ [rad]")
 
-    _territory_panel(axes[1, 0], x_grad, abs_mu, None, title="tuple count (natural axes)")
+    _territory_panel(axes[1, 0], x_grad, abs_u0, None,
+                     title="tuple count (fundamental axes)")
     _territory_panel(
-        axes[1, 1], x_grad, abs_mu, F,
-        title="fast-pass mass, per-target normalized (natural axes)",
+        axes[1, 1], x_grad, abs_u0, F,
+        title="fast-pass mass, per-target normalized (fundamental)",
     )
     for ax in axes[1]:
-        ax.set_xlabel(r"$x = LB\|\nabla\Delta\beta\|_2$ [rad]")
-    axes[1, 0].set_ylabel(
-        r"$|\mu| = |\Delta\beta_{\rm center}|/(B\|\nabla\Delta\beta\|_2)$"
+        ax.set_xlabel(r"$x_\nabla = LB\|\nabla\Delta\beta\|_2$ [rad]")
+        _overlay_phase_regions(ax)
+    axes[1, 0].set_ylabel(r"$|u_0| = L\,|\Delta\beta_0|$ [rad]")
+
+    _territory_panel(axes[2, 0], x_grad, abs_mu, None,
+                     title="tuple count (decorrelating axes)")
+    _territory_panel(
+        axes[2, 1], x_grad, abs_mu, F,
+        title="fast-pass mass, per-target normalized (decorrelating)",
     )
+    for ax in axes[2]:
+        ax.set_xlabel(r"$x_\nabla = LB\|\nabla\Delta\beta\|_2$ [rad]")
+    axes[2, 0].set_ylabel(r"$|\mu| = |u_0| / x_\nabla$")
+
     fig.suptitle(
         f"Lorenzi Fast S0: FWM tuple territory (full grid, {u0.size:,} tuples, "
         "mass per-target normalized)\n"
-        "top: raw (u0, W) axes (entangled: u0 = mu * x) -- "
-        "bottom: natural (x, mu) axes; raw bins, no smoothing"
+        "raw $(|u_0|,W)$ -- fundamental $(x_\\nabla,|u_0|)$ with the Figure 10 "
+        "rays -- decorrelating $(x_\\nabla,|\\mu|)$"
     )
     fig.tight_layout()
     out_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_dir / "s0_territory.png", dpi=200)
     plt.close(fig)
+
+
+def replot_from_npz(npz_path: Path, out_dir: Path) -> None:
+    """Re-render the figure from a saved census, without recomputing tuples."""
+    lg.info(f"re-plotting from {npz_path}")
+    with np.load(npz_path, allow_pickle=False) as z:
+        u0 = z["u0"]; W = z["W"]; F = z["F_norm"]
+        x_grad = z["x_grad"]; mu = z["mu"]
+        lg.info(f"loaded {u0.size:,} tuples, {np.unique(z['target_of']).size} targets")
+        plot_territory(u0, W, F, x_grad, mu, out_dir)
+    lg.success(f"S0 territory figure re-rendered into {out_dir}")
 
 
 if __name__ == "__main__":

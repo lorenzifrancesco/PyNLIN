@@ -12,6 +12,9 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / '.'))
+import pubstyle
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -32,10 +35,12 @@ from pynlin.system import System
 def main() -> None:
     init_logging()
     parser = argparse.ArgumentParser(description=__doc__)
+    pubstyle.add_argument(parser)
     parser.add_argument("--config", type=Path, default=Path("input/studies.toml"))
     parser.add_argument("--out-dir", type=Path, default=Path("media/lorenzi-fast"))
     parser.add_argument("--s5-npz", type=Path, default=Path("media/lorenzi-fast/s5_fullband.npz"))
     args = parser.parse_args()
+    pubstyle.apply(args)
 
     system = System.from_toml(args.config)
     data = np.load(args.s5_npz)
@@ -71,7 +76,7 @@ def main() -> None:
 
     zdw = estimate_zdw_frequency(system)
     f_thz = freqs * 1e-12
-    fig, axes = plt.subplots(2, 1, figsize=(7.0, 5.4), sharex=True)
+    fig, axes = plt.subplots(2, 1, figsize=pubstyle.figsize(7.0, 5.4), sharex=True)
     axes[0].plot(f_thz, xpm_w, lw=1.2, color="tab:blue", label="XPM")
     axes[0].plot(f_thz, fwm_w, lw=1.2, color="tab:red", label="FWM (strict)")
     axes[0].plot(f_thz, total_w, lw=1.0, color="black", alpha=0.6, label="total")
@@ -91,7 +96,7 @@ def main() -> None:
         f"gamma(f) per-channel, flat launch {lp_dbm:.0f} dBm, Gaussian symbols"
     )
     fig.tight_layout()
-    fig.savefig(args.out_dir / "s6_physical.png", dpi=200)
+    fig.savefig(args.out_dir / "s6_physical.png", dpi=pubstyle.dpi(200))
     plt.close(fig)
     lg.success(f"S6 saved to {args.out_dir}")
 

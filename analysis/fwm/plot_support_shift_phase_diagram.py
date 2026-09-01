@@ -6,8 +6,11 @@ the exact mask-mismatch correlation of the equal-split direction and does not
 use the production estimator's marginal-mask approximation.
 
 Outputs (media/lorenzi-fast and docs/source/_static/lorenzi-fast):
-  support_shift_phase_slices.png   -- exact signed-mu slices at d/pi=0,1,2,3
+  support_shift_phase_slices.png   -- exact signed-u0 slices at d/pi=0,1,2,3
   support_shift_marginal_error.png -- error of E_0 A(d)/A(0) at d/pi=1,2,3
+
+Coordinates are the two intrinsic accumulated-phase scales (x_grad, signed u0)
+of doc §4.1; every mask/density boundary is then a ray u0 = slope * x_grad.
 """
 
 from __future__ import annotations
@@ -16,6 +19,9 @@ import argparse
 from pathlib import Path
 
 import matplotlib
+import sys as _sys
+_sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / '.'))
+import pubstyle
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -147,24 +153,22 @@ def _quadratic_density_segment(
 
 
 def equal_split_efficiency(
-    s: np.ndarray,
-    detuning_mu: np.ndarray,
+    gradient_scale: np.ndarray,
+    u_0: np.ndarray,
     support_shift: float,
 ) -> np.ndarray:
-    """Exact equal-split linear efficiency on arrays of (s, signed mu)."""
-    s, detuning_mu = np.broadcast_arrays(
-        np.asarray(s, dtype=float), np.asarray(detuning_mu, dtype=float)
+    """Exact equal-split linear efficiency on arrays of (x_grad, signed u0)."""
+    gradient_scale, u_const = np.broadcast_arrays(
+        np.asarray(gradient_scale, dtype=float), np.asarray(u_0, dtype=float)
     )
-    gradient_scale = s / (1.0 + np.abs(detuning_mu))
-    u_const = gradient_scale * detuning_mu
     width = np.pi * gradient_scale / SQRT3
 
     accepted_lo = max(-3.0, -1.0 - support_shift / np.pi)
     accepted_hi = min(3.0, 1.0 - support_shift / np.pi)
     if accepted_lo >= accepted_hi:
-        return np.zeros_like(s)
+        return np.zeros_like(gradient_scale)
 
-    efficiency = np.zeros_like(s)
+    efficiency = np.zeros_like(gradient_scale)
     for branch_lo, branch_hi, branch in (
         (-3.0, -1.0, "negative"),
         (-1.0, 1.0, "central"),
@@ -181,33 +185,38 @@ def equal_split_efficiency(
     return np.maximum(efficiency, 0.0)
 
 
-def _draw_boundaries(ax: plt.Axes, support_shift: float, s_limits) -> None:
+def _draw_boundaries(ax: plt.Axes, support_shift: float, x_limits) -> None:
+    """All mask/density boundaries are rays u0 = slope * x_grad."""
+    x_line = np.geomspace(x_limits[0], x_limits[1], 400)
     sheet_lo = (support_shift - np.pi) / SQRT3
     sheet_hi = (support_shift + np.pi) / SQRT3
-    for detuning_mu in (sheet_lo, sheet_hi):
-        ax.axhline(detuning_mu, color="w", lw=1.2)
-    for detuning_mu in (-MU_UNMASKED, MU_UNMASKED):
-        ax.axhline(detuning_mu, color="w", lw=0.8, ls=":")
+    for slope in (sheet_lo, sheet_hi):
+        ax.plot(x_line, slope * x_line, color="w", lw=1.2)
+    for slope in (-MU_UNMASKED, MU_UNMASKED):
+        ax.plot(x_line, slope * x_line, color="w", lw=0.8, ls=":")
+    ax.axvline(1.0, color="w", lw=1.0, ls="--")
 
-    detuning_line = np.linspace(-8.0, 8.0, 600)
-    s_line = 1.0 + np.abs(detuning_line)
-    visible = (s_line >= s_limits[0]) & (s_line <= s_limits[1])
-    ax.plot(s_line[visible], detuning_line[visible], color="w", lw=1.0, ls="--")
+
+def _symlog_grid(u_max: float, linthresh: float, n_side: int) -> np.ndarray:
+    """Signed u0 samples spaced logarithmically away from zero."""
+    tail = np.geomspace(linthresh, u_max, n_side)
+    core = np.linspace(-linthresh, linthresh, max(9, n_side // 8))[1:-1]
+    return np.concatenate([-tail[::-1], core, tail])
 
 
 def plot_phase_slices(args, output_dirs: list[Path]) -> None:
-    s_grid = np.geomspace(args.s_min, args.s_max, args.n_s)
-    mu_grid = np.linspace(-args.mu_max, args.mu_max, args.n_mu)
-    ss, mm = np.meshgrid(s_grid, mu_grid, indexing="xy")
+    x_grid = np.geomspace(args.x_min, args.x_max, args.n_x)
+    u_grid = _symlog_grid(args.u_max, args.linthresh, args.n_u)
+    xx, uu = np.meshgrid(x_grid, u_grid, indexing="xy")
     support_shifts = np.pi * np.array([0.0, 1.0, 2.0, 3.0])
-    efficiencies = [equal_split_efficiency(ss, mm, d) for d in support_shifts]
+    efficiencies = [equal_split_efficiency(xx, uu, d) for d in support_shifts]
 
     positive = np.concatenate([values[values > 0.0] for values in efficiencies])
     color_limits = dict(vmin=max(-8.0, np.log10(positive).min()), vmax=np.log10(PLATEAU))
     fig, axes = plt.subplots(
         2,
         2,
-        figsize=(14.0, 10.0),
+        figsize=pubstyle.figsize(14.0, 10.0),
         sharex=True,
         sharey=True,
         constrained_layout=True,
@@ -216,71 +225,77 @@ def plot_phase_slices(args, output_dirs: list[Path]) -> None:
         zip(axes.flat, support_shifts, efficiencies)
     ):
         image = ax.pcolormesh(
-            s_grid,
-            mu_grid,
+            x_grid,
+            u_grid,
             np.log10(np.maximum(efficiency, 1e-300)),
             cmap="viridis",
             shading="auto",
             **color_limits,
         )
-        _draw_boundaries(ax, support_shift, (args.s_min, args.s_max))
+        _draw_boundaries(ax, support_shift, (args.x_min, args.x_max))
         ax.set_xscale("log")
+        ax.set_yscale("symlog", linthresh=args.linthresh)
+        ax.set_xlim(args.x_min, args.x_max)
+        ax.set_ylim(-args.u_max, args.u_max)
         ax.set_title(rf"({chr(97 + panel)}) $d/\pi={support_shift / np.pi:g}$")
-        ax.set_xlabel(r"$s=x_\nabla+|u_{\rm const}|$")
-        ax.set_ylabel(r"signed detuning $\mu=u_{\rm const}/x_\nabla$")
+        ax.set_xlabel(r"$x_\nabla$ [rad]")
+        ax.set_ylabel(r"signed $u_0$ [rad]")
 
     colorbar = fig.colorbar(image, ax=axes, shrink=0.94, pad=0.02)
     colorbar.set_label(r"$\log_{10} E_d$")
     fig.suptitle(
         "Exact equal-split phase diagrams under a translated output-support mask\n"
-        r"solid: $|d-\sqrt{3}\mu|=\pi$; dotted: $|\mu|=\pi\sqrt{3}$; "
-        r"dashed: $x_\nabla=1$"
+        r"solid: $u_0=(d\pm\pi)x_\nabla/\sqrt{3}$; "
+        r"dotted: $|u_0|=\pi\sqrt{3}\,x_\nabla$; dashed: $x_\nabla=1$"
     )
     for output_dir in output_dirs:
         fig.savefig(
             output_dir / "support_shift_phase_slices.png",
-            dpi=220,
-            bbox_inches="tight",
+            dpi=pubstyle.dpi(220),
+            bbox_inches=None if pubstyle.current() != "screen" else "tight",
         )
     plt.close(fig)
 
 
 def plot_marginal_error(args, output_dirs: list[Path]) -> None:
-    s_grid = np.geomspace(args.s_min, args.s_max, args.n_s)
-    mu_grid = np.linspace(-args.mu_max, args.mu_max, args.n_mu)
-    ss, mm = np.meshgrid(s_grid, mu_grid, indexing="xy")
-    centered = equal_split_efficiency(ss, mm, 0.0)
+    x_grid = np.geomspace(args.x_min, args.x_max, args.n_x)
+    u_grid = _symlog_grid(args.u_max, args.linthresh, args.n_u)
+    xx, uu = np.meshgrid(x_grid, u_grid, indexing="xy")
+    centered = equal_split_efficiency(xx, uu, 0.0)
     support_shifts = np.pi * np.array([1.0, 2.0, 3.0])
 
     fig, axes = plt.subplots(
         1,
         3,
-        figsize=(18.0, 5.4),
+        figsize=pubstyle.figsize(18.0, 5.4),
         sharex=True,
         sharey=True,
         constrained_layout=True,
     )
     for panel, (ax, support_shift) in enumerate(zip(axes, support_shifts)):
-        exact = equal_split_efficiency(ss, mm, support_shift)
+        exact = equal_split_efficiency(xx, uu, support_shift)
         marginal = centered * support_acceptance(support_shift) / PLATEAU
         log_ratio = np.log10(
             np.maximum(exact, 1e-14) / np.maximum(marginal, 1e-14)
         )
         image = ax.pcolormesh(
-            s_grid,
-            mu_grid,
+            x_grid,
+            u_grid,
             log_ratio,
             cmap="RdBu_r",
             shading="auto",
             vmin=-3.0,
             vmax=3.0,
         )
-        ax.contour(s_grid, mu_grid, log_ratio, levels=[0.0], colors="k", linewidths=0.6)
-        _draw_boundaries(ax, support_shift, (args.s_min, args.s_max))
+        ax.contour(x_grid, u_grid, log_ratio, levels=[0.0], colors="k", linewidths=0.6)
+        _draw_boundaries(ax, support_shift, (args.x_min, args.x_max))
         ax.set_xscale("log")
+        ax.set_yscale("symlog", linthresh=args.linthresh)
+        ax.set_xlim(args.x_min, args.x_max)
+        ax.set_ylim(-args.u_max, args.u_max)
         ax.set_title(rf"({chr(97 + panel)}) $d/\pi={support_shift / np.pi:g}$")
-        ax.set_xlabel(r"$s=x_\nabla+|u_{\rm const}|$")
-        ax.set_ylabel(r"signed detuning $\mu=u_{\rm const}/x_\nabla$")
+        ax.set_xlabel(r"$x_\nabla$ [rad]")
+        ax.set_ylabel(r"signed $u_0$ [rad]")
 
     colorbar = fig.colorbar(image, ax=axes, shrink=0.92, pad=0.02)
     colorbar.set_label(r"$\log_{10}\{E_d/[E_0 A(d)/A(0)]\}$")
@@ -291,24 +306,27 @@ def plot_marginal_error(args, output_dirs: list[Path]) -> None:
     for output_dir in output_dirs:
         fig.savefig(
             output_dir / "support_shift_marginal_error.png",
-            dpi=220,
-            bbox_inches="tight",
+            dpi=pubstyle.dpi(220),
+            bbox_inches=None if pubstyle.current() != "screen" else "tight",
         )
     plt.close(fig)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    pubstyle.add_argument(parser)
     parser.add_argument("--out-dir", type=Path, default=Path("media/lorenzi-fast"))
     parser.add_argument(
         "--docs-dir", type=Path, default=Path("docs/source/_static/lorenzi-fast")
     )
-    parser.add_argument("--s-min", type=float, default=0.1)
-    parser.add_argument("--s-max", type=float, default=300.0)
-    parser.add_argument("--n-s", type=int, default=900)
-    parser.add_argument("--mu-max", type=float, default=8.0)
-    parser.add_argument("--n-mu", type=int, default=481)
+    parser.add_argument("--x-min", type=float, default=0.05)
+    parser.add_argument("--x-max", type=float, default=300.0)
+    parser.add_argument("--n-x", type=int, default=900)
+    parser.add_argument("--u-max", type=float, default=300.0)
+    parser.add_argument("--linthresh", type=float, default=0.5)
+    parser.add_argument("--n-u", type=int, default=260)
     args = parser.parse_args()
+    pubstyle.apply(args)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     output_dirs = [args.out_dir]

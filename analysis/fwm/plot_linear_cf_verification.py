@@ -62,26 +62,25 @@ def retained_offset_transform(argument: np.ndarray) -> np.ndarray:
 
 
 def characteristic_function_efficiencies(
-    s: np.ndarray,
-    detuning_mu_abs: np.ndarray,
+    gradient_scale: np.ndarray,
+    u_0: np.ndarray,
     *,
     n_nodes: int,
     chunk_size: int = 256,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return masked and unmasked equal-split CF integrals.
 
-    Inputs are dimensionless arrays with matching shapes. The returned arrays
-    have the same shape and contain dimensionless interaction efficiencies.
+    Inputs are the intrinsic coordinates (x_grad, |u0|) as dimensionless arrays
+    with matching shapes. The returned arrays have the same shape and contain
+    dimensionless interaction efficiencies.
     """
-    s, detuning_mu_abs = np.broadcast_arrays(
-        np.asarray(s, dtype=float), np.asarray(detuning_mu_abs, dtype=float)
+    gradient_scale, u_0 = np.broadcast_arrays(
+        np.asarray(gradient_scale, dtype=float), np.asarray(u_0, dtype=float)
     )
-    shape = s.shape
-    s_flat = s.reshape(-1)
-    mu_flat = detuning_mu_abs.reshape(-1)
-    gradient_scale = s_flat / (1.0 + mu_flat)
-    u_const = s_flat * mu_flat / (1.0 + mu_flat)
-    mismatch_halfwidth = np.pi * gradient_scale / SQRT3
+    shape = gradient_scale.shape
+    s_flat = gradient_scale.reshape(-1)
+    u_const = u_0.reshape(-1)
+    mismatch_halfwidth = np.pi * s_flat / SQRT3
 
     lag, weights = cf_gauss_legendre(n_nodes)
     triangular_weight = 2.0 * (1.0 - lag) * weights
@@ -101,15 +100,14 @@ def characteristic_function_efficiencies(
     return masked.reshape(shape), unmasked.reshape(shape)
 
 
-def draw_boundaries(ax: plt.Axes, s_limits: tuple[float, float]) -> None:
-    detuning = np.geomspace(1e-2, 1e3, 500)
-    plateau = np.pi * (1.0 + detuning) / (detuning + MASKED_REACHABILITY)
-    ax.plot(plateau, detuning, color="w", lw=1.2)
-    ax.axhline(MASKED_REACHABILITY, color="w", lw=1.2)
-    ax.axhline(UNMASKED_REACHABILITY, color="w", lw=0.8, ls=":")
-    coherence = 1.0 + detuning
-    visible = (coherence >= s_limits[0]) & (coherence <= s_limits[1])
-    ax.plot(coherence[visible], detuning[visible], color="w", lw=1.0, ls="--")
+def draw_boundaries(ax: plt.Axes, x_limits: tuple[float, float]) -> None:
+    """Same demarcations as Figure 10, all straight in (x_grad, |u0|)."""
+    x_line = np.geomspace(x_limits[0], x_limits[1], 500)
+    ax.plot(x_line, MASKED_REACHABILITY * x_line, color="w", lw=1.2)
+    ax.plot(x_line, UNMASKED_REACHABILITY * x_line, color="w", lw=0.8, ls=":")
+    x_plateau = np.linspace(x_limits[0], SQRT3 * (1 - 1e-9), 400)
+    ax.plot(x_plateau, np.pi * (1.0 - x_plateau / SQRT3), color="w", lw=1.2)
+    ax.axvline(1.0, color="w", lw=1.0, ls="--")
 
 
 def main() -> None:
@@ -118,19 +116,20 @@ def main() -> None:
     parser.add_argument(
         "--docs-dir", type=Path, default=Path("docs/source/_static/lorenzi-fast")
     )
-    parser.add_argument("--s-max", type=float, default=300.0)
-    parser.add_argument("--n-s", type=int, default=220)
-    parser.add_argument("--n-mu", type=int, default=170)
+    parser.add_argument("--x-max", type=float, default=300.0)
+    parser.add_argument("--u-max", type=float, default=300.0)
+    parser.add_argument("--n-x", type=int, default=220)
+    parser.add_argument("--n-u", type=int, default=220)
     parser.add_argument("--n-nodes", type=int, default=2048)
     args = parser.parse_args()
 
-    s_grid = np.geomspace(0.1, args.s_max, args.n_s)
-    mu_grid = np.geomspace(1e-2, 1e3, args.n_mu)
-    ss, mm = np.meshgrid(s_grid, mu_grid, indexing="xy")
+    x_grid = np.geomspace(1e-2, args.x_max, args.n_x)
+    u_grid = np.geomspace(1e-2, args.u_max, args.n_u)
+    xx, uu = np.meshgrid(x_grid, u_grid, indexing="xy")
     masked_cf, unmasked_cf = characteristic_function_efficiencies(
-        ss, mm, n_nodes=args.n_nodes
+        xx, uu, n_nodes=args.n_nodes
     )
-    masked_reference = equal_split_efficiency(ss, mm, 0.0)
+    masked_reference = equal_split_efficiency(xx, uu, 0.0)
 
     reliable = masked_reference > 1e-10
     relative_error = np.full_like(masked_reference, np.nan)
@@ -153,8 +152,8 @@ def main() -> None:
         (axes[0, 1], masked_cf, "(b) mask-corrected characteristic-function integral"),
     ):
         image = ax.pcolormesh(
-            s_grid,
-            mu_grid,
+            x_grid,
+            u_grid,
             np.log10(np.maximum(values, 1e-300)),
             cmap="viridis",
             shading="auto",
@@ -163,16 +162,18 @@ def main() -> None:
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_title(title)
-        ax.set_xlabel(r"$s=x_\nabla+|u_{\rm const}|$")
-        ax.set_ylabel(r"$|\mu|=|u_{\rm const}|/x_\nabla$")
-        draw_boundaries(ax, (s_grid[0], s_grid[-1]))
+        ax.set_xlabel(r"$x_\nabla$ [rad]")
+        ax.set_ylabel(r"$|u_0|$ [rad]")
+        draw_boundaries(ax, (x_grid[0], x_grid[-1]))
+        ax.set_xlim(x_grid[0], x_grid[-1])
+        ax.set_ylim(u_grid[0], u_grid[-1])
         fig.colorbar(image, ax=ax, label=r"$\log_{10} E$")
 
     ax = axes[1, 0]
     log_error = np.log10(np.maximum(np.abs(relative_error), 1e-16))
     image = ax.pcolormesh(
-        s_grid,
-        mu_grid,
+        x_grid,
+        u_grid,
         log_error,
         cmap="magma",
         shading="auto",
@@ -181,9 +182,11 @@ def main() -> None:
     )
     ax.set_xscale("log")
     ax.set_yscale("log")
+    ax.set_xlim(x_grid[0], x_grid[-1])
+    ax.set_ylim(u_grid[0], u_grid[-1])
     ax.set_title("(c) pointwise numerical agreement")
-    ax.set_xlabel(r"$s=x_\nabla+|u_{\rm const}|$")
-    ax.set_ylabel(r"$|\mu|=|u_{\rm const}|/x_\nabla$")
+    ax.set_xlabel(r"$x_\nabla$ [rad]")
+    ax.set_ylabel(r"$|u_0|$ [rad]")
     fig.colorbar(
         image,
         ax=ax,
@@ -192,25 +195,25 @@ def main() -> None:
     )
 
     ax = axes[1, 1]
-    cut_s = np.geomspace(0.1, args.s_max, 500)
+    cut_u = np.geomspace(1e-2, args.u_max, 500)
     colors = plt.cm.plasma(np.linspace(0.15, 0.85, 3))
-    for detuning, color in zip((0.1, 2.0, 20.0), colors):
-        cut_mu = np.full_like(cut_s, detuning)
+    for gradient, color in zip((0.3, 3.0, 30.0), colors):
+        cut_x = np.full_like(cut_u, gradient)
         cut_masked_cf, cut_unmasked_cf = characteristic_function_efficiencies(
-            cut_s, cut_mu, n_nodes=args.n_nodes
+            cut_x, cut_u, n_nodes=args.n_nodes
         )
-        cut_reference = equal_split_efficiency(cut_s, cut_mu, 0.0)
+        cut_reference = equal_split_efficiency(cut_x, cut_u, 0.0)
         ax.loglog(
-            cut_s,
+            cut_u,
             cut_reference,
             color=color,
             lw=1.8,
-            label=rf"masked, $|\mu|={detuning:g}$",
+            label=rf"masked, $x_\nabla={gradient:g}$",
         )
-        ax.loglog(cut_s[::16], cut_masked_cf[::16], "o", color=color, ms=3)
-        ax.loglog(cut_s, cut_unmasked_cf, color=color, ls="--", lw=1.0)
+        ax.loglog(cut_u[::16], cut_masked_cf[::16], "o", color=color, ms=3)
+        ax.loglog(cut_u, cut_unmasked_cf, color=color, ls="--", lw=1.0)
     ax.set_title("(d) values: masked (solid/points), unmasked sinc$^3$ (dashed)")
-    ax.set_xlabel(r"$s=x_\nabla+|u_{\rm const}|$")
+    ax.set_xlabel(r"$|u_0|$ [rad]")
     ax.set_ylabel("dimensionless efficiency")
     ax.set_ylim(1e-10, 2.0)
     ax.legend(loc="lower left")
