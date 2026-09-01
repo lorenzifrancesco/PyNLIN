@@ -4,21 +4,15 @@
 :maxdepth: 2
 :caption: Contents:
 
-overview
 theory
 fwm_dispersion_scales_and_coordinates
 fwm_single_tuple_scaling
-fwm_high_mu_oscillations
-calculation_correctness_audit
 logical_analysis/index
-repository_consolidation_todo
-noise_calculations
 direct_sector_mc
 npc_sector_asymptotics
+xpm_in_channel_curvature
 lorenzi_fast_method
-lorenzi_fast_cost_anatomy
-publication_novelty
-pcfm_td_scientific_spec
+inband_phase_truncation
 io
 uwb
 api/modules

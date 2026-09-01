@@ -1,11 +1,5 @@
 # Logical Specification of the Lorenzi Fast Analysis
 
-```{toctree}
-:hidden:
-
-PROBLEMS
-```
-
 ## 0. Purpose, scope, and authority
 
 This document pins down the logical chain implemented by the Lorenzi Fast
@@ -25,7 +19,7 @@ The present scope is deliberately narrow:
 
 This is an implementation specification, not a claim of experimental
 validity. Known failures of the logical or numerical contract are collected in
-[PROBLEMS](PROBLEMS.md). If this specification and an older narrative document
+[PROBLEMS](../stale/PROBLEMS.md). If this specification and an older narrative document
 disagree about the active code, this specification plus the cited source code
 is the intended description. A disagreement must still be resolved rather
 than hidden.
@@ -829,8 +823,12 @@ M_{pq}=\sum_i\bar F_i
 \tag{11.7}
 $$
 
-Top panels use $(X,Y)=(|u_0|,W)$; bottom panels use
-$(X,Y)=(x_\nabla,|\mu|)$. Displayed color is
+Top panels use $(X,Y)=(|u_0|,W)$; middle panels the fundamental pair
+$(X,Y)=(x_\nabla,|u_0|)$, overlaid with the sheet/gap ray
+$|u_0|=\pi x_\nabla/\sqrt3$ and the unmasked reference
+$|u_0|=\pi\sqrt3\,x_\nabla$; bottom panels use
+$(X,Y)=(x_\nabla,|\mu|)$, the only one of the three that decorrelates.
+Displayed color is
 $\log_{10}\max(C_{pq},10^{-300})$ or
 $\log_{10}\max(M_{pq},10^{-300})$. Values below $10^{-6}$ on an axis are
 clipped into its first bin. The current source uses raw bins without
@@ -965,4 +963,4 @@ following:
 10. Is a stated trend exact, asymptotic, fitted, or merely observed on a
     finite sweep?
 
-The unresolved cases are indexed in [PROBLEMS](PROBLEMS.md).
+The unresolved cases are indexed in [PROBLEMS](../stale/PROBLEMS.md).

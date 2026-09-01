@@ -131,7 +131,7 @@ approach XPM at the ZDW, where the mismatch collapses and $\mu\to0$.
 The two-channel XPM noise power is $\sum_{h,r,m}|X[h,r,m]|^2$ over the collision
 tensor $X[h,r,m]=X_{h,\,m+r,\,m}$. It is decomposed into pulse-collision sectors
 by which of the two symbol offsets vanish (see
-[`noise_calculations.md`](noise_calculations.md)):
+[`noise_calculations.md`](stale/noise_calculations.md)):
 
 $$
 N_{2\mathrm{PC}}=\!\!\sum_{h=0,r=0,m}\!\!|X|^2,\;

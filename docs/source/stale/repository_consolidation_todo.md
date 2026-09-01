@@ -6,10 +6,10 @@ Simplify the repository by giving repeated operations one canonical owner while
 preserving numerical behavior, scientific conventions, and supported legacy
 interfaces. This is a staged consolidation, not a module-layout rewrite.
 
-The active code and [logical analysis](logical_analysis/index.md) define what
+The active code and [logical analysis](../logical_analysis/index.md) define what
 the repository currently calculates. The
 [calculation correctness audit](calculation_correctness_audit.md) and
-[open logical problems](logical_analysis/PROBLEMS.md) constrain this work.
+[open logical problems](PROBLEMS.md) constrain this work.
 Known-invalid implementations must be corrected or quarantined before they are
 made canonical.
 

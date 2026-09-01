@@ -9,7 +9,7 @@ notes; to be merged with this note when transcribed); it supersedes the
 fitted $\nu^{\mp 0.3}$ power laws of the original sector-scaling sweep
 ([`direct_sector_mc.md`](direct_sector_mc.md)), which are shown here to be
 pre-asymptotic transients. Companion claim record:
-[`publication_novelty.md`](publication_novelty.md), Claim A.*
+[`publication_novelty.md`](stale/publication_novelty.md), Claim A.*
 
 ## 1. Setting and notation
 

@@ -17,7 +17,10 @@ release = '0.2.0'
 extensions = []
 
 templates_path = ['_templates']
-exclude_patterns = []
+
+# ``stale/`` holds superseded notes kept for provenance only. They are not part
+# of the published documentation set; see stale/README.md.
+exclude_patterns = ['stale']
 
 
 

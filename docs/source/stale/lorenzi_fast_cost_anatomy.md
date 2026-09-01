@@ -4,9 +4,9 @@ Measured comparison of the two per-target FWM evaluators of the Lorenzi Fast
 method — the reference pipeline `target_fast_sums` and the v1 analytic path
 `target_analytic_sums` — explaining, stage by stage, why the analytic path is
 *not* currently faster than the reference despite pruning 99.8%+ of the
-tuples, and what that implies for the [`lorenzi_fast_method.md`](lorenzi_fast_method.md)
+tuples, and what that implies for the [`lorenzi_fast_method.md`](../lorenzi_fast_method.md)
 §15 roadmap. Companion to the GN-style ease-of-computation exploration
-([`analysis/fwm/fast_gn_comparison.py`](../../analysis/fwm/fast_gn_comparison.py),
+([`analysis/fwm/fast_gn_comparison.py`](../../../analysis/fwm/fast_gn_comparison.py),
 `media/lorenzi-fast/gn_comparison.{npz,png}`), which produced the end-to-end
 timings quoted here.
 
@@ -18,7 +18,7 @@ been regenerated and must not be quoted as current measurements.
 
 ## 1. The system at hand
 
-The OESCLU case study of [`input/studies.toml`](../../input/studies.toml):
+The OESCLU case study of [`input/studies.toml`](../../../input/studies.toml):
 
 | Parameter | Value |
 |---|---|
@@ -31,7 +31,7 @@ The OESCLU case study of [`input/studies.toml`](../../input/studies.toml):
 Quantity evaluated: the per-target strict-FWM sum of the prefactor-free
 per-tuple efficiency $N\,T^2\!/L^2 = \mathbb E[\hat K(u)\,\mathbb 1_{\rm mask}]$
 in the normalized variables of
-[`lorenzi_fast_method.md`](lorenzi_fast_method.md) §3.
+[`lorenzi_fast_method.md`](../lorenzi_fast_method.md) §3.
 
 **Tuple-count arithmetic.** Where the 7.8M–11.7M per-target counts come
 from, order of magnitude first:
@@ -180,9 +180,9 @@ The evaluator dispatch predicates are curves in the $(W, |u_0|)$ plane, but
 the current tube predicate is not: it also depends on the signed mismatch
 orientation, $d$, and $P_q$. The archived figure overlays the former
 unmasked-box tube ceiling on the evaluator regions
-([`analysis/fwm/plot_dispatch_regions.py`](../../analysis/fwm/plot_dispatch_regions.py)):
+([`analysis/fwm/plot_dispatch_regions.py`](../../../analysis/fwm/plot_dispatch_regions.py)):
 
-![Dispatch regions vs tuple population, FWM mass, and tube survivors](_static/lorenzi-fast/dispatch_regions.png)
+![Dispatch regions vs tuple population, FWM mass, and tube survivors](../_static/lorenzi-fast/dispatch_regions.png)
 
 *Dispatch-plane census for the near-ZDW (top) and mid-C (bottom) targets.
 Columns: all tuples, bulk-model FWM mass, $\varepsilon$-tube survivors
@@ -213,7 +213,7 @@ What the figure shows:
   $W$ — the broadband phase matching that makes the near-ZDW target keep
   92k survivors.
 
-**Archived seam audit** ([`analysis/fwm/fast_dispatch_audit.py`](../../analysis/fwm/fast_dispatch_audit.py);
+**Archived seam audit** ([`analysis/fwm/fast_dispatch_audit.py`](../../../analysis/fwm/fast_dispatch_audit.py);
 mid-C target, 10 tuples per seam, ground truth = randomized-Sobol QMC of the
 linear model with exact output mask, $2^{16}\times4$ replicates). The evaluator
 seam ratios do not depend on tube selection, but survivor counts and sheet

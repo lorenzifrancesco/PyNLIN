@@ -9,7 +9,7 @@ longitudinal propagator.
 ## Exact starting point
 
 Using the notation of
-[Single-tuple FWM scaling](fwm_single_tuple_scaling.md), write the
+[Single-tuple FWM scaling](../fwm_single_tuple_scaling.md), write the
 dimensionless mismatch as
 
 $$

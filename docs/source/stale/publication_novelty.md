@@ -3,9 +3,9 @@
 *Compiled 2026-08-24. Inventory of the verifiable, quantitative claims supported
 by this repository, a literature check of each against the state of the art,
 and a bundling/priority plan. Companion documents:
-[`lorenzi_fast_method.md`](lorenzi_fast_method.md),
-[`direct_sector_mc.md`](direct_sector_mc.md),
-[`fwm_single_tuple_scaling.md`](fwm_single_tuple_scaling.md).*
+[`lorenzi_fast_method.md`](../lorenzi_fast_method.md),
+[`direct_sector_mc.md`](../direct_sector_mc.md),
+[`fwm_single_tuple_scaling.md`](../fwm_single_tuple_scaling.md).*
 
 ## 1. Candidate publishable claims
 
@@ -18,7 +18,7 @@ $\rho_4 = 4\mathrm{PC}/2\mathrm{PC}$ tend to nonzero constants that depend on
 the pair geometry through the spacing-to-baud ratio $q = \Delta f/B$. Proven
 analytically (F. Lorenzi, private notes; an independent in-repo derivation
 with explicit formulas for the asymptotic constants is
-[`npc_sector_asymptotics.md`](npc_sector_asymptotics.md)) and verified with
+[`npc_sector_asymptotics.md`](../npc_sector_asymptotics.md)) and verified with
 the direct CRN estimator far beyond the original sweep range,
 $\nu = L/L_W$ up to $10^5$ at $q \in \{1, 2, 4\}$. The limit-theorem
 constants match the MC plateaus to $<1\%$ on all four sectors and all three
@@ -58,7 +58,7 @@ coordinate).
 
 Supporting verifiable facts: 3PCa = 3PCb to 1% across the band (median
 $|{\rm ratio}-1| = 0.0105$), and **exactly** in the scaling limit (symmetry
-proof in [`npc_sector_asymptotics.md`](npc_sector_asymptotics.md) §3); the
+proof in [`npc_sector_asymptotics.md`](../npc_sector_asymptotics.md) §3); the
 natural guess $4\mathrm{PC} = \rho^2\,2\mathrm{PC}$ is falsified by 13×; at
 $q = 1$ the 4PC-over-3PC crossover is a genuine asymptotic feature
 ($C_{4\mathrm{PC}} > C_{3\mathrm{PC,tot}}$).
@@ -239,7 +239,7 @@ counterpart).
 | Finish S5 full-resolution run (2284 ch, dec 1) | Claim B | checkpointed 835/2284, resumable |
 | SSFM end-to-end spot-check at probe channels | Claim B | interface exists (`ssfm_interface.py`) |
 | ISRS: implement $\rho(z)$ kernel or scope explicitly | Claim B | extension point documented |
-| Merge F. Lorenzi's proof with the in-repo derivation | Claim A | in-repo reconstruction done ([`npc_sector_asymptotics.md`](npc_sector_asymptotics.md)); private-notes proof to merge |
+| Merge F. Lorenzi's proof with the in-repo derivation | Claim A | in-repo reconstruction done ([`npc_sector_asymptotics.md`](../npc_sector_asymptotics.md)); private-notes proof to merge |
 | Closed forms for $C_{2\mathrm{PC}}, C_{3\mathrm{PC}}, C_{4\mathrm{PC}}$ | Claim A (polish) | limit integrals derived + verified <1%; only $C_{N_1}$ closed so far |
 | Large-$q$ asymptotics of the constants (Dar-$\Omega^{-2}$ link) | Claim A | reconciliation stated (§5 of the note); $q$-law derivation open |
 | 3PCa = 3PCb symmetry proof | Claim A | **done in the scaling limit** (note §3); finite-$\nu$ case open |

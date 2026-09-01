@@ -808,7 +808,7 @@ $\mu_{\mathrm{natural}}=0$. Therefore a command containing both `natural` and
 
 The coherent sinc lobes that can appear as jumping points at large $|\mu|$
 and intermediate $x$ are derived separately in
-[High-detuning FWM oscillations at intermediate scale](fwm_high_mu_oscillations.md).
+[High-detuning FWM oscillations at intermediate scale](stale/fwm_high_mu_oscillations.md).
 
 ## Cubic ZDW model
 
