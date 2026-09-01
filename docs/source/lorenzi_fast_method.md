@@ -153,7 +153,7 @@ any channel or tuple is singled out):
 | Symbol | Definition | Units |
 |---|---|---|
 | $L$ | span length | m |
-| $\alpha$ | power attenuation coefficient (0 throughout: flat power profile) | 1/m |
+| $\alpha$ | power attenuation coefficient (0 throughout: flat power profile; §10.6 relaxes this) | 1/m |
 | $\gamma$ | Kerr nonlinear coefficient; frequency-dependent $\gamma(f)$ in S6 | 1/(W·m) |
 | $P$ | per-channel launch power (flat across the band) | W |
 | $B$ | baud rate = symbol rate; one channel's spectral support is $B$ wide | Hz |
@@ -191,10 +191,13 @@ or one XPM pair $(t,b)$; all phases in radians after multiplying by $L$):
 | $W = \sum_{j\in\{a,b,c\}} w_j$ | total width: $u$ ranges over $[u_0 - W, u_0 + W]$ | §3 |
 | $\sigma^2 = \tfrac13\sum_{j\in\{a,b,c\}} w_j^2$ | variance of the linear offset; code `sigma`$^2$ | §7 |
 | $x_\nabla = \sqrt{\sum_{j\in\{a,b,c\}} \nu_j^2}$ | loudness scale (L2 walk-off norm), $= LB\lVert\nabla\Delta\beta\rVert_2$; code `x_grad` | §3 |
-| $\mu = u_0 / x_\nabla$ | pure dimensionless detuning (single-tuple-scaling convention); code `mu` | §3 |
+| $\mu = u_0 / x_\nabla$ | pure dimensionless detuning (single-tuple-scaling convention); code `mu`. **Derived** — the phase-matching test, not a plot axis | §3 |
+| $s = x_\nabla + \lvert u_0\rvert$ | **Derived** radial coordinate; the phase-diagram abscissa of earlier revisions, retained only for the collapse of [`fwm_single_tuple_scaling.md`](fwm_single_tuple_scaling.md) and the translation table at the end of §10.2.7 | §10.2.7 |
+| $p = \left(\lvert u_0\rvert + \pi x_\nabla/\sqrt3\right)/\pi$ | plateau-edge collapse variable (equal split, $d=0$); region 1 is $p\lesssim1$ | §10.2.2 |
 | $g_{\rm box} = \max(\lvert u_0\rvert-W,0)$ | distance from zero to the unmasked linear box interval | §9 |
 | $g_{\rm mask}$ | distance from zero to the certified mask-aware linear outer interval | §9 |
 | $P_q = \pi^2 \sum \lvert q\rvert$ | quadratic padding of the certificate ($g_{\rm mask}\to\max(g_{\rm mask}-P_q,0)$) | §9 |
+| $\mathcal M = \lvert u_0\rvert/(3W + 3000)$ | far-dispatch margin; $\mathcal M = 1$ is the far/quadrature switch, $\mathcal M \to 0$ the phase-matched interior. **Derived** | §16.1 |
 | $\nu = \Delta\beta_1 B L$ | XPM pair walk-off $=$ Dar collision count $L/L_W$ | §12 |
 | $y = x_1 - x_2$ | interferer in/out frequency difference (XPM) | §12 |
 
@@ -203,7 +206,7 @@ or one XPM pair $(t,b)$; all phases in radians after multiplying by $L$):
 | Symbol | Definition | Introduced |
 |---|---|---|
 | $\Lambda(\Delta\beta) = \int_0^L e^{(i\Delta\beta - \alpha)z} dz$ | link/propagator (build-up integral) | §2 |
-| $\hat K(u) = 4\sin^2(u/2)/u^2$ | normalized lossless link kernel $= \lvert\Lambda\rvert^2/L^2$ at $\alpha = 0$ | §2 |
+| $\hat K(u) = 4\sin^2(u/2)/u^2$ | normalized lossless link kernel $= \lvert\Lambda\rvert^2/L^2$ at $\alpha = 0$; the decaying-profile kernel $K_a$ is (10.6.1) | §2, §10.6 |
 | $N\,T^2\!/L^2 = \mathbb E[\hat K(u)\mathbf 1_{\rm mask}]$ | per-tuple efficiency (the quantity the whole method computes) | §2 |
 | $\mathbf 1_{\rm mask}$ | indicator of frequency matching, $\lvert x_d\rvert < \pi$ | §2 |
 | $\rho_{\mathbf w}(v)$ | Irwin–Hall density of the linear offset $\sum_{j\in\{a,b,c\}} c_j x_j$ | §4 |
@@ -255,7 +258,8 @@ decaying as $4\sin^2(u/2)/u^2$ with mismatch.
 This is the same object as the **link/propagator**
 $\Lambda(\Delta\beta) = \int_0^L e^{(i\Delta\beta - \alpha)z}\,dz$ of
 [`direct_sector_mc.md`](direct_sector_mc.md): at $\alpha = 0$ (flat power
-profile), $\hat K(u) = |\Lambda(\Delta\beta)|^2 / L^2$. Likewise $N\,T^2\!/L^2$ is
+profile), $\hat K(u) = |\Lambda(\Delta\beta)|^2 / L^2$; for $\alpha\ne0$ the same
+normalization gives the decaying-profile kernel of §10.6. Likewise $N\,T^2\!/L^2$ is
 exactly the *Dar frequency-domain MC* integrand of that note — the masked
 average of $|\Lambda|^2$ over uniformly sampled in-channel frequencies —
 evaluated here analytically instead of by sampling. The two documents are the
@@ -820,7 +824,7 @@ $$
 =\int_0^1\!\!\int_0^1 e^{iu(s-s')}\,ds\,ds'.
 $$
 
-Set $t=s-s'$.  For a fixed $t$, the constraints $0\leq s,s'\leq1$ and
+Set $t=s-s'$. For a fixed $t$, the constraints $0\leq s,s'\leq1$ and
 $s'=s-t$ restrict $s$ to
 
 $$
@@ -828,7 +832,7 @@ $$
 $$
 
 This interval is empty for $|t|>1$ and has length $1-|t|$ for
-$-1\leq t\leq1$.  Consequently, for any integrable function $g$,
+$-1\leq t\leq1$. Consequently, for any integrable function $g$,
 
 $$
 \int_0^1\!\!\int_0^1 g(s-s')\,ds\,ds'
@@ -846,7 +850,7 @@ $$
 
 Finally, because $u$ is real,
 $\varphi_u(-t)=\overline{\varphi_u(t)}$; pairing the positive- and
-negative-$t$ contributions yields the last equality above.  Thus
+negative-$t$ contributions yields the last equality above. Thus
 $(1-|t|)_+$ is the autocorrelation of the unit-interval indicator, rather
 than an additional approximation.
 
@@ -902,10 +906,10 @@ $\hat K$ is nearly constant over the averaging window and
 $\mathbb E[\hat K(u)]\approx\hat K(u_0)$, so its nulls and side lobes remain.
 If the distribution spans many periods, the average smooths the fringes
 toward the local period average. This is exactly the transition plotted in
-Figure 10: its region 4 has
+Figure 12: its region 4 has
 $N\,T^2\!/L^2\simeq(2/3)\hat K(u_0)$ and full-contrast coherent fringes, while
-region 3 is the dephased, approximately fringe-averaged $s^{-2}$ regime (with
-residual stripes through the crossover). Here *linear model* describes the
+region 3 is the dephased, approximately fringe-averaged $4/(3u_0^2)$ regime
+(with residual stripes through the crossover). Here *linear model* describes the
 affine phase-mismatch model, not a nonoscillatory dependence of the result on
 its parameters.
 
@@ -924,7 +928,10 @@ the tuple population: carrier mismatch and group-slowness differences become
 small for many tuples, so coherent, phase-matchable interactions proliferate.
 The resulting small $x_\nabla$ can make $\mu=u_0/x_\nabla$ ill-conditioned,
 which is a coordinate limitation rather than evidence that the local linear
-phase model has failed.
+phase model has failed. §10.5 generalizes this example: the omitted
+phase is small at the ZDW *because* the dominant quadratic term carries a
+factor $\beta_2(\bar\omega)$, which is the same factor that has to vanish for a
+tuple to reach the sheet regime at all.
 
 An equivalent, mask-friendly representation goes through the density of $u$.
 The linear combination $\sum_{j\in\{a,b,c\}} c_j x_j$ of independent uniforms has the
@@ -936,39 +943,47 @@ $$
 (N\,T^2\!/L^2)_{\rm lin} = \int_{-W}^{W} \hat K(u_0 + v)\,\rho_{\mathbf w}(v)\,dv .
 $$
 
-### 4.1 From the linear average to the $(s,|\mu|)$ phase diagram
+### 4.1 From the linear average to the $(x_\nabla,|u_0|)$ phase diagram
 
 The phase diagram of §10.2 is not a separate model. It is the linear average
 above, with the output-support mask restored and then expressed in natural
 coordinates. The connection is easiest to see before introducing the general
 mask machinery of §§5–6.
 
-Let $\boldsymbol\nu$ be the signed vector of the three linear mismatch
-coefficients and define
+The linear model has exactly **two** intrinsic accumulated-phase scales, and
+they are the two coordinates used throughout: the walk-off spread sampled
+across the interferer legs and the center mismatch,
 
 $$
 x_\nabla=\lVert\boldsymbol\nu\rVert_2,
 \qquad
+|u_0| = |\Delta\beta_0| L ,
+$$
+
+with $\boldsymbol\nu$ the signed vector of the three linear mismatch
+coefficients. Both are phases in radians accumulated over the span. They are
+independent — $x_\nabla$ says how much the mismatch *varies* over the
+in-channel band, $|u_0|$ says how far the band center sits *from* phase
+matching — and every law, boundary, and fringe below is a statement about one
+or the other. In particular the region-3 and region-4 laws turn out to depend
+on $|u_0|$ alone, and the region-2 law to decay in $x_\nabla$ alone, its
+$|u_0|$ dependence being confined to a bounded factor between $2/3$ and $1$.
+
+Two derived combinations recur and are recorded here once (see the end of
+§10.2.7 for their use as alternative coordinates):
+
+$$
 |\mu|=\frac{|u_0|}{x_\nabla},
 \qquad
 s=x_\nabla+|u_0|=x_\nabla(1+|\mu|).
 $$
 
-Thus
+$|\mu|$ is the dimensionless detuning of the single-tuple-scaling convention
+(code `mu`) and remains the natural *test* for phase matching; $s$ is the
+radial combination used by earlier revisions of this note as the abscissa.
+Neither is needed to state the theory.
 
-$$
-x_\nabla=\frac{s}{1+|\mu|},
-\qquad
-|u_0|=\frac{s|\mu|}{1+|\mu|}.
-$$
-
-Here $x_\nabla$ controls how much mismatch variation is sampled across the
-channels, while $|\mu|$ compares the center mismatch with that variation.
-The radial coordinate $s$ increases both accumulated scales together; it is
-therefore the convenient coordinate for distinguishing coherent,
-surface-crossing, and gapped behavior.
-
-Figure 10 uses the equal-split direction at zero support shift,
+Figure 12 uses the equal-split direction at zero support shift,
 
 $$
 \boldsymbol\nu
@@ -987,15 +1002,18 @@ The output condition $|m|<\pi$ therefore truncates the mismatch distribution
 to $|v|<w$, where
 
 $$
-w=\frac{\pi x_\nabla}{\sqrt3}
-=\frac{\pi s}{\sqrt3(1+|\mu|)}.
+w=\frac{\pi x_\nabla}{\sqrt3}.
 $$
+
+$w$ is a function of $x_\nabla$ alone: in this direction the mask
+half-width is *proportional* to the walk-off spread, which is what makes the
+two coordinates below so clean.
 
 After this specialization, the general linear expectation becomes the single
 masked integral
 
 $$
-E(s,|\mu|)
+E(x_\nabla,|u_0|)
 =\int_{-w}^{w}\hat K(|u_0|+v)\,\rho(v)\,dv,
 $$
 
@@ -1005,38 +1023,37 @@ and directly generates its four regions:
 | Region | Test in the linear integral | Approximation to $\hat K$ | Result |
 |---|---|---|---|
 | 1. Coherent plateau | $\lvert u_0\rvert+w\lesssim\pi$ | $\hat K(u)=1-u^2/12+\cdots$ | $E\simeq2/3$ |
-| 2. Phase-matched sheet | $\lvert u_0\rvert<w$ and $w\gg2\pi$ | $\hat K(u)\to2\pi\delta(u)$ under the integral | $E\propto s^{-1}$ |
-| 3. Gapped, dephased | $\lvert u_0\rvert>w$ and $x_\nabla\gg1$ | $\hat K(u)$ replaced by its local period average $2/u^2$ | $E\propto s^{-2}$ |
+| 2. Phase-matched sheet | $\lvert u_0\rvert<w$ and $w\gg2\pi$ | $\hat K(u)\to2\pi\delta(u)$ under the integral | $E\propto x_\nabla^{-1}$ |
+| 3. Gapped, dephased | $\lvert u_0\rvert>w$ and $x_\nabla\gg1$ | $\hat K(u)$ replaced by its local period average $2/u^2$ | $E\propto u_0^{-2}$ |
 | 4. Gapped, coherent | $\lvert u_0\rvert>w$ and $x_\nabla\lesssim1$ | $\hat K$ nearly constant across the window | $E\simeq(2/3)\hat K(u_0)$ |
 
-The corresponding demarcation lines also follow immediately:
+Note the exponents are attached to *different* coordinates: the sheet decays
+in $x_\nabla$ at fixed $|u_0|$, the gapped regions decay in $|u_0|$ at fixed
+$x_\nabla$. This is the structural fact that a single radial coordinate
+obscures.
+
+The corresponding demarcation lines are all **straight lines through the
+$(x_\nabla,|u_0|)$ plane**, three of them rays through the origin:
 
 $$
 \begin{aligned}
-|u_0|+w=\pi
-&\quad\Longrightarrow\quad
-s=s_1(|\mu|)
-=\frac{\pi(1+|\mu|)}{|\mu|+\pi/\sqrt3},\\
-|u_0|=w
-&\quad\Longrightarrow\quad
-|\mu|=\frac{\pi}{\sqrt3},\\
-x_\nabla=1
-&\quad\Longrightarrow\quad
-s=1+|\mu|.
+\text{plateau edge:}\quad &|u_0|+\frac{\pi x_\nabla}{\sqrt3}=\pi ,\\
+\text{sheet/gap:}\quad &|u_0|=w=\frac{\pi x_\nabla}{\sqrt3},\\
+\text{coherence:}\quad &x_\nabla=1 .
 \end{aligned}
 $$
 
-The dotted reference line in Figure 10 is instead the *unmasked* box-crossing
+The dotted reference line in Figure 12 is instead the *unmasked* box-crossing
 condition $|u_0|=W$. For equal split,
-$W=3w=\pi\sqrt3\,x_\nabla$, so this line is
-$|\mu|=\pi\sqrt3$. Its factor-of-three separation from the masked boundary
-$|\mu|=\pi/\sqrt3$ shows why the mask cannot be appended as an independent
-acceptance factor in this phase diagram.
+$W=3w=\pi\sqrt3\,x_\nabla$, so this line is the ray
+$|u_0|=\pi\sqrt3\,x_\nabla$. Its factor-of-three separation in slope from the
+masked boundary $|u_0|=\pi x_\nabla/\sqrt3$ shows why the mask cannot be
+appended as an independent acceptance factor in this phase diagram.
 
 Sections 5 and 6 next derive that mask dependence for a general coefficient
 direction and support shift. Section 10.2 then returns to the equal-split case
 above and derives the constants, expansions, crossover behavior, and fringe
-contrast used in Figure 10.
+contrast used in Figure 12.
 
 ### 4.2 Numerical verification in characteristic-function form
 
@@ -1045,7 +1062,7 @@ expectation. In the equal-split direction its three widths are all equal to
 $w$, so it becomes
 
 $$
-E_{\rm unmasked}(s,|\mu|)
+E_{\rm unmasked}(x_\nabla,|u_0|)
 =2\int_0^1(1-t)\cos(u_0t)\operatorname{sinc}^3(wt)\,dt.
 $$
 
@@ -1068,13 +1085,13 @@ characteristic-function representation is therefore
 
 $$
 \boxed{
-E_{\rm masked}(s,|\mu|)
+E_{\rm masked}(x_\nabla,|u_0|)
 =2\int_0^1(1-t)\cos(u_0t)J_w(t)\,dt.
 }
 $$
 
-The following figure evaluates this oscillatory integral directly and compares
-it pointwise with the independent mismatch-space integral
+Figure 1 evaluates this oscillatory integral directly and compares it
+pointwise with the independent mismatch-space integral
 $\int_{-w}^{w}\hat K(u_0+v)\rho(v)\,dv$. The last panel also plots the
 unmasked $\operatorname{sinc}^3$ result, making the effect of the correlated
 mask visible in actual values rather than only in the boundary formulas.
@@ -1083,14 +1100,22 @@ mask visible in actual values rather than only in the boundary formulas.
 
 *Figure 1 — Numerical verification of the §4-to-§10.2 bridge
 ([`plot_linear_cf_verification.py`](../../analysis/fwm/plot_linear_cf_verification.py)):
+on the $(x_\nabla,|u_0|)$ grid of Figure 12:
 (a) the nonnegative mismatch-space reference; (b) the direct oscillatory
 characteristic-function quadrature; (c) their pointwise relative error away
-from efficiencies below $10^{-10}$; (d) representative values, with the
-mask-corrected result shown as solid lines and points and the original
+from efficiencies below $10^{-10}$; (d) iso-$x_\nabla$ cuts vs $|u_0|$, with
+the mask-corrected result shown as solid lines and points and the original
 unmasked product-of-sincs integral shown dashed. The white lines are the same
-demarcations used in Figure 10. On the plotted grid, the median relative error
-between (a) and (b) is $1.27\times10^{-13}$ and the maximum is
-$4.89\times10^{-5}$ after excluding reference efficiencies below $10^{-10}$.*
+demarcations used in Figure 12. On the plotted grid, restricted to reference
+efficiencies above $10^{-10}$, the median relative error between (a) and (b)
+is $5.3\times10^{-14}$ and the 99th percentile is $3.2\times10^{-4}$. The
+pointwise maximum is $\mathcal O(1)$, attained only on the kernel nulls — the
+worst point sits at $u_0/2\pi = 35.998$, where the reference is
+$7.5\times10^{-9}$, nine decades below the plateau, and the oscillatory
+$t$-space quadrature loses its cancellation. This is the expected near-null
+behaviour of the CF representation (§4), visible as the bright horizontal
+striping at small $x_\nabla$ in panel (c), not a discrepancy between the two
+representations.*
 
 ![3-uniform densities and the regime partition](_static/lorenzi-fast/density_regimes.png)
 
@@ -1123,7 +1148,7 @@ $$
 with $\Phi_3$ the 3-uniform cumulative distribution function. $A(d)$ vanishes
 at $|d| = 4\pi$ (i.e. $|f_a+f_b-f_c-f_t| = 2B$), which is precisely the
 *hard* enumeration cut in `fwm_tuple_variables` — the support pruning loses
-nothing, exactly.
+nothing, exactly. Figure 3 plots $A(d)$ over its whole support.
 
 ![Unconditional acceptance A(d)](_static/lorenzi-fast/support_acceptance.png)
 
@@ -1237,7 +1262,7 @@ Thus the mask intersects the cube with a diagonal slab, producing a
 three-dimensional polytope. If one frequency is eliminated using frequency
 conservation, or if a fixed-output-frequency section is taken, the same
 support condition becomes the two-dimensional lozenges and edge triangles
-usually called **GN islands** in Poggiolini's formulation. The fixed-$t$
+called **GN islands** in Poggiolini's formulation. The fixed-$t$
 sections displayed in
 [`fwm_dispersion_scales_and_coordinates.md`](fwm_dispersion_scales_and_coordinates.md)
 are examples of exactly this geometry.
@@ -1315,7 +1340,7 @@ at Nyquist spacing the center-family island covers $3/4$ of that rectangle
 and the two neighbor-family corner triangles cover $1/8$ each — so the
 rectangle conserves total accepted volume while assigning *all* of it the
 center family's $\phi_0$. This is the same approximation class as the
-marginal rescaling whose failure Figure 13 quantifies: order-of-magnitude
+marginal rescaling whose failure Figure 15 quantifies: order-of-magnitude
 signed errors wherever mask and mismatch correlate (sheet boundaries,
 near-ZDW tuples). GN-NI avoids this by brute force and correspondingly
 drops from 1.75 dB (GN-CFM) to 0.21 dB mean O-band NLI error against SSFM.
@@ -1542,6 +1567,33 @@ inequality that holds by construction at its stated linear or local-quadratic
 phase-model level, with no statistical assumption — never on an *estimate* of $N\,T^2\!/L^2$, which can be wrong in the
 dangerous direction.
 
+### 9.1 What is selected in the current implementation
+
+There are two logically different selections, and only the second is the
+"tube" selection.
+
+1. **Exact support enumeration.** For every ordered pair $(a,b)$, the carrier
+   relation $f_a+f_b-f_c\approx f_t$ identifies a short interval of possible
+   $c$ channels. The code sorts the channel frequencies and finds that interval
+   by binary search. It then removes every repeated-index case, so the resulting
+   population contains exactly the ordered strict tuples $(a,b,c)\to t$ with
+   $|d|<4\pi$. This first cut is lossless under the rectangular Nyquist model:
+   $A(d)=0$ outside it. It is a support test, not a phase-matching
+   approximation.
+2. **Certified phase-mismatch selection.** For every support-surviving tuple,
+   `fwm_tuple_variables` constructs $(u_0,\boldsymbol\nu,\mathbf q,d)$.
+   `select_tube` then bounds the tuple efficiency from above using the
+   mask-aware reachable phase interval and the quadratic padding below. A
+   tuple is retained when that upper bound is at least $\varepsilon$; otherwise
+   its bound is added to the discarded-set certificate.
+
+Thus S3 v1 does not yet avoid construction of the full support population. It
+reduces the number of tuples sent to the expensive evaluator, but it first
+materializes the variables needed to test every admissible tuple. In complexity
+terms, frequency matching has already reduced a naive three-free-index search
+to an ordered $(a,b)$ search with a short $c$ window, but the current selector
+still performs work proportional to the complete support-surviving population.
+
 **Baseline theorem (unmasked-box envelope).** For every tuple, in the linear
 model,
 
@@ -1559,6 +1611,8 @@ $|u_0| > W$ then $|u| \ge g_{\rm box}$ on the whole support and
 $\hat K(u) \le 4/g_{\rm box}^2$. (iii) The mask region has probability $A(d)$ and
 $\hat K \ge 0$, so the masked mean is at most the supremum of the integrand
 times the mask probability. $\square$
+
+Figure 6 draws the three ingredients of that proof for one gapped tuple.
 
 ![Kernel, envelope, and the reachable set of a gapped tuple](_static/lorenzi-fast/kernel_envelope.png)
 
@@ -1595,8 +1649,8 @@ $$
 N\,T^2\!/L^2\le A(d)\min\left(1,\frac4{g_{\rm mask}^2}\right).
 $$
 
-The shift $-\kappa d$ is essential: tuples with identical $(u_0,W,A(d))$
-but opposite $d$ can have different reachable phase intervals. For
+The shift $-\kappa d$ cannot be dropped: tuples with identical
+$(u_0,W,A(d))$ but opposite $d$ have different reachable phase intervals. For
 $\kappa=0$ the projection adds no narrowing; for zero mismatch coefficients
 the interval degenerates safely to the point $u_0$.
 
@@ -1609,8 +1663,8 @@ Remarks:
 * **Baseline looseness**: the density of $u$ vanishes toward the unmasked
   support endpoints, so
   the bound overestimates the true $N\,T^2\!/L^2$ by a shape factor of order
-  $2(u_0/g_{\rm box})^2$ for $u_0 \gg W$. Loose in the safe direction: pruning keeps
-  somewhat more tuples than strictly needed, and never certifies away a heavy
+  $2(u_0/g_{\rm box})^2$ for $u_0 \gg W$. Loose in the safe direction: pruning
+  keeps more tuples than strictly needed, and never certifies away a heavy
   one.
 * **Quadratic padding**: the confinement argument used the linear model. The
   quadratic terms shift $u$ by at most
@@ -1639,10 +1693,10 @@ Properties:
 * **Band adaptivity is automatic.** Near the ZDW many tuples have low
   mask-aware gaps and survive finite $\varepsilon$. Away
   from the ZDW, $|u_0|$ grows quadratically as $c$ walks off and the $1/g^2$
-  collapse discards almost everything — matching the full-grid S0 finding
-  that the box-gapped (far) population is 99.1% of all tuples yet carries
-  $< 10^{-4}$ of the mass, and a band-edge target's top 10 tuples already
-  hold 28% of its mass. One number, no per-band tuning.
+  collapse discards almost everything — matching the full-grid S0 census of
+  §10, where the box-gapped (far) population is 99.3% of all tuples yet
+  carries 0.51% of the mass, and a target's top 10 tuples hold 22–67% of its
+  mass. One number, no per-band tuning.
 * **Every run self-certifies**: the output carries
   `discarded_bound / kept_sum` per target; convergence sweeps in
   $\varepsilon$ then check the *sharpness* of the bound rather than being the
@@ -1665,6 +1719,113 @@ natural-coordinates analysis: on the full grid (2026-08-24 S0 run, 7 targets,
 per-target normalized) it is satisfied by $\approx 0.0\%$ of tuples but
 $99.1\%$ of mass.
 
+### 9.2 Is there room for a more efficient selection?
+
+Yes, at two different levels.
+
+**Streaming selection (same arithmetic, lower memory).** The smallest safe
+change is to construct one $a$ row, or one bounded block of ordered $(a,b)$
+pairs, compute its candidate $c$ values and tuple variables, apply
+`select_tube`, and retain only the survivors. This removes the multi-million
+tuple temporary arrays and permits evaluation to overlap enumeration. It does
+not change the asymptotic ordered-pair cost, and its discarded certificate is
+identical to the current singleton sum, but it is an immediate implementation
+improvement with a simple equality test against S3 v1.
+
+**Direct geometric selection (less arithmetic as well as less memory).** On a
+commensurate grid, $d$ takes only a small finite set of values. For fixed
+target $t$ and one such $d$ family, choosing $(a,b)$ determines $c$; guard
+bands enter only through the test that this reconstructed $c$ is occupied.
+The admissible tuples can therefore be viewed as a two-dimensional integer
+lattice in $(a,b)$, cut by band-occupancy polygons and the strict-FWM
+index-exclusion lines. The desired survivor set on that lattice is
+
+$$
+T_\varepsilon
+=\left\{(a,b,c)\to t:\ |d|<4\pi,\quad
+A(d)\min\left(1,\frac{4}{g_q^2}\right)\ge\varepsilon\right\}.
+$$
+
+At $g_q=0$ the bound in this expression is understood as $A(d)$.
+
+This set is a tube around the **mask-admissible reachable phase-matching
+set** $g_q=0$. It is not, in general, merely a tube around $u_0=0$:
+in-channel offsets can bring the mismatch through zero when the carrier-center
+mismatch is nonzero, while the output mask can exclude a crossing that is
+present in the unmasked cube. Consequently the classical constant-$\beta_2$
+axes and the additional ZDW-related line are useful geometric guides, but they
+are not by themselves a complete selection predicate.
+
+A direct algorithm must also preserve the discarded-set certificate without
+visiting every discarded tuple. One sufficient construction is certified
+block subdivision. For a lattice block $R$, bound over every tuple in the
+block the quantities entering the mask-aware interval and obtain
+
+$$
+0\le g_{q,R}^{\rm lower}\le \min_{i\in R}g_{q,i},
+\qquad
+A_R^{\rm upper}\ge \max_{i\in R}A(d_i).
+$$
+
+Then every tuple in the block obeys
+
+$$
+F_i\le B_R,
+\qquad
+B_R=
+\begin{cases}
+A_R^{\rm upper}\min\left(1,4/(g_{q,R}^{\rm lower})^2\right),
+&g_{q,R}^{\rm lower}>0,\\
+A_R^{\rm upper},&g_{q,R}^{\rm lower}=0.
+\end{cases}
+$$
+
+If $B_R<\varepsilon$, the whole block may be discarded and
+$|R|B_R$, where $|R|$ counts admissible strict tuples in the block, added to
+the certificate. Otherwise the block is subdivided until it
+can be discarded or until its unresolved boundary cells are emitted as
+individual survivor candidates. Singleton blocks recover the current
+`select_tube` decision exactly. Coarse discarded blocks give a looser but still
+rigorous certificate; adaptive subdivision tightens it where needed.
+
+This block construction does not require the complete predicate to be
+monotone along an $(a,b)$ row. That matters because $g_q$ depends not only on
+$u_0$, but also on the signed coefficient projection $\kappa$, the
+perpendicular width, $d$, and $P_q$. A simple bisection around roots of $u_0$
+would therefore need an additional monotonicity proof and is not presently a
+certified replacement.
+
+The likely outcome is strong empirical sub-quadratic behavior because most
+far-from-matching blocks can be rejected high in the subdivision tree. The
+worst case remains quadratic, especially for a target near the ZDW where the
+reachable tube is broad. No stronger complexity claim is justified until the
+block bounds and their subdivision counts have been measured on the full
+O–U-band grid.
+
+The expected wall-time gain should also be kept in perspective. Historical
+instrumentation with the former selector put support enumeration and tube
+selection at only a few seconds per target, while exact-acceptance evaluation
+of the retained fallback population cost tens to hundreds of seconds. Direct
+enumeration is therefore valuable for memory scaling and for making the
+selection genuinely constructive, but it is not by itself the dominant Fast
+method speedup. A cheaper retained-tuple bridge remains the larger runtime
+opportunity; current mask-aware timings must be measured before assigning a
+new percentage to either optimization.
+
+The required validation ladder is:
+
+1. streaming output equals the present post-enumeration selector tuple for
+   tuple and certificate for certificate;
+2. singleton subdivision reproduces the same survivor set;
+3. block certificates dominate the sum of the corresponding singleton bounds;
+4. the discarded block certificate covers an independent local-quadratic QMC
+   sum over those discarded tuples on tractable grids and probe blocks;
+5. full-grid tests include band edges, guard gaps, and targets around the ZDW.
+
+This optimization addresses enumeration and selection only. It does not fix
+the separate fact that the retained-tuple evaluator is presently linear while
+the discarded confinement includes local-quadratic padding.
+
 **What $\varepsilon$-selection cannot fix: decimation.** Striding the channel
 grid (`decimated_frequency_grid`) removes *interferers*, not just targets,
 and therefore deletes tuples that would pass any efficiency test — it changes
@@ -1674,7 +1835,7 @@ spike pattern that is completely smooth at full resolution. **Decimation
 $\ge 4$ must not be used to judge FWM/XPM balance, FWM smoothness, or
 absolute FWM level.** The two mechanisms are complementary: $\varepsilon$
 thins tuples per target with a certificate; decimation may only thin the
-*target list*.
+*target list*. Figure 7 shows the artifact.
 
 ![S5 spectrum at decimation 4 — cautionary](_static/lorenzi-fast/s5_fullband_dec4.png)
 
@@ -1683,35 +1844,394 @@ run). The fine structure includes decimation artifacts —
 grid-commensurability spikes that do not exist at full resolution — and must
 not be read as physics.*
 
+### 9.3 What the tube actually keeps
+
+§9 asserts that band adaptivity is automatic and §15.3 records survivor counts
+at four probe targets, but those numbers document the *former unmasked-box*
+selector. This section measures the current mask-aware selector across the
+band, on the full 2284-channel grid, and additionally asks *which* part of the
+phase-matching geometry the survivors occupy.
+
+**Selectivity.** Enumeration is nearly flat at $\sim10^7$ tuples per target —
+it is pure grid combinatorics, peaking mid-band only because a mid-band target
+has the most channels on both sides. The tube retains between $0.09\%$ and
+$0.94\%$ of that, and its profile is entirely different: a floor of
+$\sim9.4$–$13$k tuples everywhere below $217$ THz, rising to $89$k at
+$226.9$ THz and holding above $83$k across the ZDW. One $\varepsilon$, no
+per-band tuning: a $\sim10^3\times$ reduction where nothing is phase-matched, $\sim10^2\times$
+where something is. This is the quantitative form of the band-adaptivity claim
+in §9.
+
+Against the historical table of §15.3 at the same $\varepsilon=10^{-6}$, the
+mask-aware selector is about twice as selective mid-band ($0.10\%$ vs
+$0.17\%$ at mid-E) and unchanged to within $8\%$ near the ZDW ($0.86\%$ vs
+$0.93\%$ at $227.4$ THz) — the narrowing bites precisely where tuples are
+*not* phase matched, which is what the $-\kappa d$ shift and the $\mathbf c_\perp$
+confinement of §9 are for.
+
+**Where the survivors sit.** Each survivor is labelled by which of the three
+phase-matching surfaces of §10.4 it lies closest to, in the
+$(\omega_a,\omega_b,\omega_c)$ coordinates of that section:
+
+| surface | distance tested | character |
+|---|---|---|
+| $P_1$ | $\lvert\omega_a-\omega_c\rvert$ | degenerate: a leg meets the conjugated leg |
+| $P_2$ | $\lvert\omega_b-\omega_c\rvert$ | the other degenerate plane |
+| $Q$ | $\lvert\omega_a+\omega_b-2\omega_{\rm ZDW}\rvert$ | genuine FWM: the ZDW sheet |
+
+All three surface normals have the same norm, so these raw distances are
+directly comparable and the $\arg\min$ is a fair Euclidean nearest-surface
+test. Two caveats on reading it. First, the normals are also *equally
+inclined* to the energy-conservation slice
+$\omega_a+\omega_b-\omega_c=\omega_t$ — each has
+$|\hat{\mathbf n}\cdot\hat{\mathbf s}|=\sqrt{2/3}$, the same constant as in
+§10.4.1 — so restricting to a target's accessible plane scales every distance
+by $\sqrt3$ and leaves the $\arg\min$ unchanged. But the three surfaces are
+*not equally reachable* within that slice: intersecting each with it gives
+$\omega_b=\omega_t$ for $P_1$ and $\omega_a=\omega_t$ for $P_2$, both
+forbidden for strict FWM, against $\omega_c=2\omega_{\rm ZDW}-\omega_t$ for
+$Q$, an ordinary channel. The $Q$ distance can vanish exactly while
+$P_1/P_2$ are floored at one channel spacing. Second, the currency is
+inhomogeneous: $\Delta\beta$ is the *product*
+$(\omega_a-\omega_c)(\omega_c-\omega_b)\beta_2(\bar\omega)$, whose first two
+factors are frequencies and whose third is a dispersion, so comparing them as
+raw Hz implicitly fixes the conversion. The label is a geometric proximity
+statement, not a decomposition of the efficiency.
+
+#### 9.3.1 Analytic landmarks: where the census has structure
+
+Two features of this census are located in closed form, from the fiber and the
+channel plan alone, before a single tuple is enumerated. Both are narrow
+enough that a uniform target sweep aliases them, so they are worth computing
+first and sampling around
+([`census_landmarks`](../../analysis/fwm/plot_tube_census.py)).
+
+**1. The $Q$ threshold.** Energy conservation gives
+$\bar\omega=(\omega_a+\omega_b)/2=(\omega_c+\omega_t)/2$, so the sheet
+condition $\bar\omega=\omega_{\rm ZDW}$ fixes the conjugated leg outright,
+
+$$
+f_c^\star=2f_{\rm ZDW}-f_t .
+\tag{9.3.1}
+$$
+
+That channel exists only while $f_c^\star$ lies in the band, so $Q$ is
+reachable exactly on
+
+$$
+\boxed{\;2f_{\rm ZDW}-f_{\max}\;\le\;f_t\;\le\;2f_{\rm ZDW}-f_{\min}\;}
+\tag{9.3.2}
+$$
+
+intersected with the band. Below that edge **no tuple of the target can put
+its pump mean on the ZDW**, and the $Q$ population is identically empty — a
+hard band-edge fact, not a sampling accident. For the O–U grid this predicts
+$219.657$ THz.
+
+The nearest-surface *label* turns on slightly earlier than exact
+reachability. The $\arg\min$ calls a tuple $Q$ as soon as
+$|\omega_a+\omega_b-2\omega_{\rm ZDW}|$ beats the $P_1/P_2$ distance, and the
+latter is floored at one channel spacing because $\omega_a=\omega_c$ is
+forbidden for strict FWM (§9.2). Using $\omega_a+\omega_b=\omega_c+\omega_t$
+this reads $|\omega_c+\omega_t-2\omega_{\rm ZDW}|<\delta\!f$, so the observable
+onset sits one spacing below (9.3.2):
+
+$$
+f_t^{\rm label}=2f_{\rm ZDW}-f_{\max}-\delta\!f .
+\tag{9.3.3}
+$$
+
+Unlike (9.3.2) this edge *is* grid dependent, and that dependence is
+measurable: it predicts $219.632$ THz at $k=1$ and $219.456$ THz at $k=8$,
+against observed onsets of $219.65$ and $219.43$ THz — both within half a
+channel, on grids whose spacings differ by a factor $8$.
+
+**2. The ZDW resonance of the near-degenerate sector.** With $\beta_2$
+locally linear, $\beta_2(\bar\omega)=\beta_3(\bar\omega-\omega_{\rm ZDW})$,
+the accumulated mismatch of a near-degenerate tuple whose two leg separations
+are $m$ and $n$ channels is
+$u_0=L(\omega_a-\omega_c)(\omega_c-\omega_b)\beta_3(\bar\omega-\omega_{\rm ZDW})$,
+so requiring $|u_0|\lesssim\pi$ bounds the family's detuning by
+
+$$
+\left|\bar f-f_{\rm ZDW}\right|
+\;\lesssim\;\frac{\Delta_1}{mn},
+\qquad
+\Delta_1=\frac{\pi}{2\pi L\,(2\pi\,\delta\!f)^2\,|\beta_3|},
+\tag{9.3.4}
+$$
+
+with $\delta\!f$ the channel spacing. This is a *family* width; the observed
+resonance is the envelope over families, so (9.3.4) is a scaling law rather
+than an exact width. For this grid $\Delta_1=1.98$ THz, and the dominant
+$mn\simeq1$–$10$ gives $0.2$–$2$ THz, bracketing the $0.75$ THz FWHM measured
+by direct scan. It is enough to place the sampling: span $\pm\Delta_1$ about
+the ZDW with a step $\Delta_1/10\simeq0.2$ THz.
+
+**3. An aliasing guard that needs no prior knowledge.** The two facts above
+predict *where* structure is; a resolved sweep also has a signature that
+detects structure nobody predicted. Adjacent samples of a resolved curve stay
+close — in the $0.25$ THz reference scan no neighbouring pair differs by more
+than $2.1\times$ — whereas stepping over a feature produces a jump. Flagging
+any adjacent pair beyond $\sim3\times$ and bisecting there catches both
+features automatically, and is run after every census
+([`aliasing_guard`](../../analysis/fwm/plot_tube_census.py)).
+
+These are cheap: the whole set costs one polynomial fit for $\beta_3$.
+Increasing the uniform target count is *not* an adequate substitute — the
+resonance is $0.75$ THz wide on a $57$ THz band, so a uniform sweep needs
+hundreds of targets to resolve what three closed forms locate for free. Nor
+does decimation help: it coarsens the available target frequencies, so it can
+only worsen aliasing, and it changes the interferer population besides (§9).
+
+The result is a sharp partition of the band, with the boundary predicted by
+(9.3.2) at $219.66$ THz.
+
+* **Below it, $Q$ is empty — exactly $0\%$ of survivors, by count and by
+  mass.** The retained set splits $50.4/49.6$ between $P_1$ and $P_2$, which
+  is the $a\leftrightarrow b$ relabelling symmetry of the ordered enumeration
+  rather than physics (the two absolute masses agree to $1.7\%$ everywhere).
+  Everything the tube keeps in the O, E, S and C bands is near-degenerate
+  geometry; no tuple there comes close to ZDW phase matching.
+* **Across the boundary the retained mass jumps discontinuously** — $P_1+P_2$
+  goes from $0.19$ at $219.85$ THz to $6.7$ at $220.05$ THz, a $35\times$
+  step over $0.2$ THz — and $Q$ switches on in the same interval, from
+  identically zero at $219.45$ to $1.4$ at $219.85$ THz. The two events are one
+  transition, not two, and (9.3.2) places it there in advance.
+* **Above it $Q$ carries most of the retained mass at most targets**: its
+  share over the sampled targets above the threshold runs from $42\%$ to
+  $88\%$ with median $69\%$, reaching $86\%$ at $226.3$ THz across the
+  plateau and $88\%$ at $219.9$ THz immediately at onset; its absolute
+  maximum is $177$ at $228.5$ THz. Its *count* share never exceeds $44\%$,
+  so $Q$ tuples are individually heavier than the $P_1/P_2$ ones — which is
+  what the sheet regime of §10.2 predicts.
+
+**Why the share panel dips at the ZDW.** Panel (c) shows $Q$ falling to
+$42\%$ at $228.3$ THz, between neighbours well above $80\%$. The absolute
+panel shows this is *not* a fall in $Q$, which in fact peaks there. It is
+$P_1/P_2$ rising by $\sim22\times$ — from $\simeq8.7$ across the plateau to
+$189$ at $228.07$ THz — while $Q$ rises $\sim19\times$, from $9.1$ to $177$.
+The two rises are comparable in factor; the share dips only because $P_1/P_2$
+starts from a slightly lower base and peaks marginally higher. At the ZDW the
+local GVD passes through zero, so *every* geometry becomes phase-matchable,
+degenerate ones included; the normalized view hides that both classes rise and
+only reports which rises faster. This is why the absolute panel is the primary
+one and the share panel is a companion.
+
+The $P_1/P_2$ feature is a genuine resonance, not a spike: sampled at the
+$0.2$ THz step of (9.3.4) it is smooth and symmetric about the ZDW, with a
+FWHM of $0.78$ THz — consistent with the $0.75$ THz of an independent
+$0.25$ THz reference scan, and with the $0.2$–$2$ THz bracket that (9.3.4)
+predicts for the dominant $mn$. An earlier version of this figure sampled the
+same region at $0.7$–$1.65$ THz, comparable to the width itself, and
+therefore caught only a flank point ($112$ at $228.7$ THz, understating the
+peak by $1.7\times$) with distant neighbours on either side; the resonance
+then read as an isolated spike on a jagged plateau. The mechanism is that the
+near-degenerate family can *also* sit at the ZDW, so all three factors of
+$\Delta\beta=(\omega_a-\omega_c)(\omega_c-\omega_b)\beta_2(\bar\omega)$ are
+small at once: the mass-weighted mean leg separation falls from $\sim60$
+channels at $226$ THz to $\sim6$ at the peak.
+
+This boundary is independently corroborated: the corrected band sums put the
+FWM share of FWM+XPM at $52\%$ at $222$ THz and $1\%$ at $215$ THz, the same
+transition seen here in a statistic that never touches the efficiency values.
+
+![Tube selectivity and survivor composition, full resolution](_static/lorenzi-fast/tube_census.png)
+
+*Figure 8 — Tube census at $\varepsilon=10^{-6}$, full 2284-channel grid,
+46 probe targets placed by the landmarks of §9.3.1 — a uniform sweep plus
+refinement at the $Q$ threshold and across the ZDW resonance
+([`plot_tube_census.py`](../../analysis/fwm/plot_tube_census.py)). The dashed
+line is the predicted threshold (9.3.2), drawn from the fiber alone and not
+fitted to the data:
+(a) enumerated vs retained tuples per target, log scale, ZDW marked;
+(b) absolute retained mass per nearest surface, log scale — $P_2$ is dashed
+because it coincides with $P_1$ under the $a\leftrightarrow b$ symmetry, and
+$Q$'s line stops below the transition, where it is identically zero rather
+than small; (c) the same as a share. (d) the two *disjoint* populations on one
+axis, **physically weighted**: the XPM pair sum as $4C^{\rm XPM}$ (blue, all
+pairs, no tube) against the tube-retained strict-FWM total as $2C^{\rm FWM}$
+(orange), the common $\gamma^2P^3$ cancelling; the shaded band marks
+$227.3$–$229.3$ THz, where $2C^{\rm FWM}$ exceeds $4C^{\rm XPM}$.*
+
+Below the $Q$ threshold XPM exceeds strict FWM by up to $630\times$. The
+shaded $227.3$–$229.3$ THz window is the only sampled interval in which
+strict FWM is the larger of the two, peaking at a $75.4\%$ FWM share at
+$228.07$ THz. Panel (d) costs $\sim10$ ms per target against the $\sim27$ s
+of the FWM pass.
+
+**The prefactor weighting is not optional.** §13 gives
+$\sigma^2_{\rm XPM}=4\gamma^2P^3C^{\rm XPM}$ against
+$\sigma^2_{\rm FWM}=2\gamma^2P^3C^{\rm FWM}$ — the XPM pair carries field
+multiplicity $2$ once, while the ordered-$(a,b)$ enumeration of strict FWM
+halves its coefficient. Comparing the bare sums $C^{\rm XPM}$ and
+$C^{\rm FWM}$ therefore overstates FWM by exactly $2\times$, which is not a
+cosmetic error: on the prefactor-free sums FWM appears to overtake XPM across
+$226$–$232$ THz, roughly three times the width of the true
+$227.3$–$229.3$ THz window. Any figure that plots the two sums on one axis, or
+forms a share $C^{\rm FWM}/(C^{\rm XPM}+C^{\rm FWM})$, must apply the $4{:}2$
+weighting first.
+
+**Panels (b)–(c) contain no XPM.** This census enumerates strict-FWM *triples*
+$(a,b,c)\to t$ only; the XPM sector is a disjoint population of *pairs*
+$(t,b)$, $\mathcal O(N)$ of them against $\mathcal O(N^3)$ triples, carried by
+the separate reduction of §12. The $P_1/P_2$ labels are a geometric statement
+about strict-FWM tuples lying near the degenerate planes — near-degenerate
+FWM, *not* the XPM sector. The scope note of §10.4 makes the same point from
+the other side: the exact planes require two legs to coincide in frequency,
+which on a WDM grid means a repeated channel index, so the surfaces themselves
+belong to §12 while the tuples clustered near them do not.
+
+Panel (d) is there because the two are easy to conflate, and conflating them
+suggests a contradiction that does not exist. The $P_1+P_2$ mass is flat
+across $221$–$226$ THz while the XPM spectrum rises monotonically over the
+same interval — but these are different populations, differing by more than
+two orders of magnitude, and neither statement bears on the other. The
+flatness of $P_1+P_2$ is itself a labelling effect rather than a saturation:
+as the ZDW is approached, $|\omega_a+\omega_b-2\omega_{\rm ZDW}|$ shrinks for
+more and more tuples and the $\arg\min$ migrates them from the $P_1/P_2$
+label to $Q$, so $P_1+P_2$ loses members at about the rate the population
+grows. The *total* rises continuously — $13.1\to17.8\to63.3$ at $220.5$, $221.2$
+and $226.3$ THz — and equals the strict-FWM total to better than $0.1\%$,
+because at $\varepsilon=10^{-6}$ the tube retains essentially all of it.
+
+**Resolving the transition: a density-preserving decimation.** Figure 8's
+46 probes leave the $220.5$–$226.3$ THz interval coarsely sampled, and full
+resolution costs $\sim27$ s per target ($17$ h for all $2284$). Decimating
+the target list is not an option here — §9 already establishes that striding
+the grid deletes *interferers*, changing the physics rather than the sampling
+density.
+
+The usable alternative is not a sampling of this system but a *similarity
+scaling* of it. Plain striding divides both the filling factor $B/\Delta f$
+and the average power density $P/\Delta f$ by the decimation factor $k$;
+holding both fixed under $\Delta f\to k\,\Delta f$ forces
+
+$$
+B\to k\,B, \qquad P\to k\,P,
+$$
+
+which additionally leaves $d = 2\pi(f_a+f_b-f_c-f_t)/B$ invariant, so $r$,
+the support acceptance $A(d)$ and the carrier-residual family structure are
+identical across $k$. The normalized variables $(u_0,\boldsymbol\nu,
+\mathbf q)$ then scale together as $k^2$. This is implemented as
+`decimated_system` in
+[`fullband_mc.py`](../../src/pynlin/methods/td/fullband_mc.py); at $k=8$ it
+gives $286$ channels at $200.7$ GHz spacing, $196$ GBd and $+4.03$ dBm, with
+$B/\Delta f$ and $P/\Delta f$ preserved to $2\times10^{-5}$.
+
+The resulting system is a self-consistent analogue, **not** an approximation
+to the full-resolution one: its absolute masses differ by the $k^2$ scaling
+and its per-target tuple population is genuinely smaller ($2.2\times10^5$ vs
+$1.2\times10^7$). What transfers is the dimensionless structure. §9's
+prohibition on judging absolute FWM level or FWM/XPM balance from decimated
+runs therefore still stands; what the criterion buys is a cheap, densely
+sampled view of *where* the structure sits.
+
+![Tube census at decimation 8, all targets](_static/lorenzi-fast/tube_census_dec8.png)
+
+*Figure 9 — The same census on the density- and fill-preserving decimation
+$k=8$, all $270$ targets, $19$ min
+([`plot_tube_census.py --decimation 8`](../../analysis/fwm/plot_tube_census.py)).
+Panels as in Figure 8. Absolute masses are $\sim10^{2}$ below Figure 8's by
+the $k^2$ scaling; the shapes are the comparable quantity.*
+
+With $270$ targets the transition is pinned to a $0.2$ THz window, and the ZDW
+notch resolves into a single narrow feature:
+
+| | Figure 8 ($k=1$, 46 targets) | Figure 9 ($k=8$, 270 targets) |
+|---|---|---|
+| survivor fraction | $0.091\%$–$0.940\%$ | $0.090\%$–$1.055\%$ |
+| $Q$ onset, observed | between $219.45$ and $219.65$ THz | between $219.22$ and $219.43$ THz |
+| $Q$ onset, predicted (9.3.3) | $219.632$ THz | $219.456$ THz |
+| $Q$ share maximum | $86\%$ at $226.3$ THz | $98.9\%$ at $226.5$ THz |
+| $P_1$ absolute peak | $228.07$ THz | $228.47$ THz |
+
+The two agree on every structural feature — the empty-$Q$ plateau, the
+$50/50$ degenerate split below the transition, the onset, the $Q$-dominated
+window and the $P_1/P_2$ resonance at the ZDW — which is the check that the
+scaling is behaving as intended. Both onsets land within half a channel of
+(9.3.3), on grids differing by a factor $8$ in spacing, which is a sharper
+test of the closed form than either run alone.
+
+The scaling also predicts the *width* difference. By (9.3.4) the resonance
+half-width goes as $\delta\!f^{-2}$, so the $k=8$ grid should show it $64$
+times narrower — $0.031$ THz against $1.98$ THz — which is why Figure 9
+renders it as a single narrow notch where Figure 8 shows a broad symmetric
+peak. The two are the same feature at two spacings, not a discrepancy.
+
+**Two caveats on reading this.** First, the nearest-surface label is a
+*geometric guide*, not the selection predicate — the distinction §9.2 draws
+when it notes the tube is centred on $g_q=0$ and "not, in general, merely a
+tube around $u_0=0$". Survival is decided by $g_q\le2\sqrt{A(d)/\varepsilon}$,
+which depends on the signed projection $\kappa$, the support shift
+$-\kappa d$, $\lVert\mathbf c_\perp\rVert_1$, $A(d)$ and the quadratic
+padding $P_q$. The figures report which surface a survivor sits nearest to;
+they do not assert that nearness is why it survived.
+
+Second, in Figure 8 the curve *between* sampled targets is not resolved. The
+quantities are exact deterministic sums, not estimates — adjacent-channel
+targets agree to $1\%$ ($50.6\%$ vs $51.6\%$ at $228.57$ and $228.60$ THz) —
+but they vary on a $\sim1$ THz scale. Figure 9 is the one to read for the
+shape; Figure 8 for the full-resolution values.
+
 ## 10. Territory: where the mass lives (S0)
 
 ![S0 territory census](_static/lorenzi-fast/s0_territory.png)
 
-*Figure 8 — S0 census (2026-08-24 run: full 2284-channel grid, 7 targets,
-69.5M tuples, mass per-target normalized so each target weighs equally):
-tuple population and fast-pass mass in the raw $(|u_0|, W)$ axes (top,
-visibly entangled along the diagonal because
-$u_0 = \mu\,x_\nabla$) and in the natural
-$(x_\nabla, |\mu|)$ axes (bottom), where the population
-decorrelates and the mass concentrates at low $|\mu|$ across the
-whole $x_\nabla$ range — the regime in which the phase-matched surface
-crosses the integration domain, in the language of the single-tuple scaling
-analysis. An earlier decimation-8 version of this census was strongly
-pixelated and irregular: interferer decimation biased the surviving
-population toward exact zero-sum combinations (59% with $|d| < 0.01$) and a
-single near-ZDW target carried 99.7% of the unnormalized mass overlay.*
+*Figure 10 — S0 census (2026-08-27 run: full 2284-channel grid at decimation 1,
+3 targets — channel indices $0$, $1141$, $2283$ — $2.72\times10^7$ tuples, mass
+per-target normalized so each target weighs equally). Tuple population (left)
+and fast-pass mass (right) in three coordinate pairs. **Top**, the raw
+$(|u_0|, W)$ axes. **Middle**, the fundamental $(x_\nabla, |u_0|)$ axes of
+§4.1, with the Figure 12 demarcations overlaid: the sheet/gap ray
+$|u_0|=\pi x_\nabla/\sqrt3$ (solid) and the unmasked reference
+$|u_0|=\pi\sqrt3\,x_\nabla$ (dotted). **Bottom**, the derived
+$(x_\nabla,|\mu|)$ pair.*
 
-Quantitatively (full-grid 2026-08-24 run, 7 targets, per-target normalized
-mass): the **near regime holds 99.95% of the mass in 0.5% of the tuples**
-(the far population is 99.1% of the 69.5M tuples and carries $< 10^{-4}$ of
-the mass); 50% of the equal-weighted mass sits in the top 380 tuples
-($5.5\times 10^{-6}$ of all), 90% in 1962, 99% in 6547. Per-target top-10
-shares run from 3% (near the ZDW, where the mass spreads over many
-phase-matched tuples) to 28% (band edge, where a handful dominate) — the two
-faces of the phase-matching condition that the $\varepsilon$-selection of §9
-exploits. The earlier decimation-8 numbers (50% of one target's mass in
-$\sim 13$ tuples) sampled the biased zero-sum-dominated population and are
-superseded.
+The census sits almost entirely **above** both rays — the population is
+overwhelmingly gapped — while the mass concentrates in a band hugging the rays
+from above, i.e. at the reachability boundary. The exact unmasked-box test
+$|u_0|<W$ is met by only $0.02\%$ of tuples, but those carry $77.8\%$ of the
+normalized mass; $|\mu|<\pi/\sqrt3$ carries $24\%$ and $|\mu|<\pi\sqrt3$
+carries $91\%$. The mass is concentrated to the point that $50$ tuples carry
+half of it and $1833$ ($0.007\%$) carry $90\%$.
+
+Which coordinate pair "decorrelates" needs care. Since $u_0=\mu\,x_\nabla$
+and, geometrically, $W=\pi\lVert\hat{\mathbf c}\rVert_1\,x_\nabla$ with
+$\lVert\hat{\mathbf c}\rVert_1\in[1,\sqrt3]$, the raw and fundamental axes are
+entangled to the *same* degree — measured $\log$-space Pearson $r$ is $0.79$
+and $0.81$ by population ($0.95$ and $0.94$ by mass). Only the derived
+$(x_\nabla,|\mu|)$ pair genuinely decorrelates ($r=0.32$ population, $0.65$
+mass). The fundamental axes are shown not because they decorrelate but because
+they are the frame of Figure 12, so the census can be read directly against the
+region boundaries; the diagonal band there is physical, and is precisely the
+$|\mu|\simeq\text{const}$ structure that the bottom row unfolds.
+
+An earlier decimation-8 version of this census was pixelated and irregular:
+interferer decimation biased the surviving population toward exact zero-sum
+combinations (59% with $|d| < 0.01$) and a single near-ZDW target carried
+99.7% of the unnormalized mass overlay.
+
+Quantitatively, for the run of Figure 10 (full grid, 3 targets, per-target
+normalized mass): the **near regime holds 96.9% of the mass in 0.27% of the
+tuples**, the far population is 99.3% of the $2.72\times10^7$ tuples but
+carries only 0.51% of the mass, and the wide branch takes the remaining 2.6%
+in 0.43% of tuples. Half of the equal-weighted mass sits in the top 50 tuples
+($1.8\times10^{-6}$ of all), 90% in 1833, 99% in 22807. Per-target top-10
+shares run from 21.9% at the O-band edge (index 0) through 36.7% mid-band
+(1141) to 67.3% at the far edge (2283) — the spread reflecting how broadly the
+phase-matched population is distributed for each target, which is what the
+$\varepsilon$-selection of §9 exploits.
+
+Two cautions on comparing runs. (i) The earlier full-grid census
+(2026-08-24, 7 targets, $6.95\times10^7$ tuples) reported 99.95% of the mass
+in the near regime and 50%/90%/99% of the mass in 380/1962/6547 tuples; those
+figures are *not* directly comparable to the ones above, because per-target
+normalization makes the aggregate depend on which targets are sampled, and the
+concentration is dominated by whichever target sits nearest the ZDW. (ii) The
+earlier decimation-8 numbers (50% of one target's mass in $\sim 13$ tuples)
+sampled the biased zero-sum-dominated population and are superseded outright.
 
 ### 10.1 Factorization of the census: terrain × population
 
@@ -1759,19 +2279,23 @@ $$
 
 ![Factorization: population x kernel x acceptance reproduces the real census](_static/lorenzi-fast/s0_factorization.png)
 
-*Figure 9 — The factorization, verified
-([`analysis/fwm/fast_s0_factorization.py`](../../analysis/fwm/fast_s0_factorization.py)):
-panel (d) is computed from the population histogram (a), the synthetic
-kernel (b), and the closed-form acceptance only — no real per-tuple
-efficiency is used — yet it reproduces the real mass map (c) feature for
-feature (bin-level median deviation $-0.031$ dex, IQR $[-0.07, +0.03]$ dex
-on raw unsmoothed bins). Note the
-two maps that* look *alike are (c) and (d), not (b) and (c): the kernel is
-smooth and defined everywhere ("the terrain"), while the census is the
-terrain sampled at the discrete, quantized tuple families the grid happens
-to generate ("where the rain fell"). The apparent blobbiness and inverted
-brightness ordering of the real map relative to the kernel are entirely
-population effects.*
+*Figure 11 — The factorization
+([`analysis/fwm/fast_s0_factorization.py`](../../analysis/fwm/fast_s0_factorization.py)),
+in the $(x_\nabla,\mu)$ bins of Figure 10: (a) the tuple population histogram
+$N(x_\nabla,\mu)$; (b) the synthetic kernel
+$(N\,T^2\!/L^2)_{\rm syn}(x_\nabla,\mu)$; (c) the real S0 mass map; (d) the
+product of (a), (b) and the closed-form acceptance $\langle A(d)/A(0)\rangle$,
+using no per-tuple efficiency of the real system. All four on a common
+$\log_{10}$ colour scale.*
+
+Figure 11 verifies the factorization: (d) reproduces (c) feature for feature,
+at a bin-level median deviation of $-0.031$ dex with IQR $[-0.07, +0.03]$ dex
+on raw unsmoothed bins. The pair to compare is (c) against (d), not (b)
+against (c): the kernel is smooth and defined everywhere ("the terrain"),
+while the census is that terrain sampled at the discrete, quantized tuple
+families the grid happens to generate ("where the rain fell"). The blobbiness
+and the inverted brightness ordering of the real map relative to the kernel
+are population effects, not kernel structure.
 
 Why this matters: (i) it certifies that the fast model's per-tuple physics
 has no hidden dependence on the direction split at the accuracy level that
@@ -1783,15 +2307,27 @@ meets a still-order-1 kernel; the isolated bright families at
 $\mu \lesssim 10^{-4}$ are exactly-phase-matched zero-sum isles
 where the kernel saturates).
 
-### 10.2 The $(s, |\mu|)$ phase diagram of the kernel
+### 10.2 The $(x_\nabla, |u_0|)$ phase diagram of the kernel
 
-Following the roadmap in §4.1, plot the synthetic kernel over
-$s = x_\nabla + |u_0|$ and $|\mu|$
-(`fast_s0_synthetic.py`, dense rectangular grid, panel 6 and
-`s0_synthetic_smu_dense.png`) exposes a four-region structure. This
-subsection derives every law, boundary, and numerical constant from the base
-expression of §2, for the equal split at $d = 0$; the summary table and the
-assessment figures follow.
+Following §4.1, plotting the synthetic kernel over the two
+intrinsic accumulated-phase scales $x_\nabla$ and $|u_0|$
+(`fast_s0_synthetic.py`, dense rectangular grid) exposes a four-region
+structure. This subsection derives every law, boundary, and numerical constant
+from the base expression of §2, for the equal split at $d = 0$; the summary
+table and the assessment figures follow.
+
+Working directly in $(x_\nabla, |u_0|)$ rather than in a radial combination
+has three consequences that are worth stating in advance, because they are
+what the derivation below keeps exploiting:
+
+1. every region boundary is a straight line (§4.1), three of them rays
+   through the origin;
+2. the gapped laws lose all prefactor structure — region 3 is $4/(3u_0^2)$
+   with $x_\nabla$ absent entirely, and region 4 is $\tfrac23\hat K(u_0)$
+   with no expansion of its argument;
+3. the region-4 fringe nulls sit at $u_0 = 2\pi k$, i.e. on lines
+   *perpendicular to a coordinate axis*, so they can be read off the axis
+   directly.
 
 #### 10.2.1 Reduction of the base expression
 
@@ -1863,7 +2399,7 @@ exactly equivalent:
 
 $$
 \boxed{\;
-E(s,\mu)
+E(x_\nabla,u_0)
 =\int_{-w}^{w}\hat K(u_0+v)\rho(v)\,dv
 =2\int_0^1(1-t)\operatorname{Re}\!\left[e^{iu_0t}\varphi_{v,M}(t)\right]dt
 \;}.
@@ -1872,19 +2408,210 @@ $$
 Thus the **one-dimensional density integral** is
 
 $$
-\boxed{\;E(s,\mu) = \int_{-w}^{w} \hat K(u_0 + v)\,\rho(v)\,dv\;}
+\boxed{\;E(x_\nabla,u_0) = \int_{-w}^{w} \hat K(u_0 + v)\,\rho(v)\,dv\;}
 \qquad
-x_\nabla = \frac{s}{1+\mu},\quad
-u_0 = \frac{s\mu}{1+\mu},\quad
-w = \frac{\pi s}{\sqrt3\,(1+\mu)} ,
+w = \frac{\pi x_\nabla}{\sqrt3} ,
 $$
 
-(taking $\mu, u_0 \ge 0$ w.l.o.g.). Two immediate exact facts: the total
+(taking $u_0 \ge 0$ w.l.o.g.). The two coordinates enter through disjoint
+slots: $x_\nabla$ sets the **integration limits** and the density scale,
+$u_0$ sets the **kernel offset**. Two immediate exact facts: the total
 retained probability is
 $\int_{-w}^{w}\rho = \int_1^2 f(t)\,dt = \tfrac23$ — the mask acceptance
-$A(0)$ — and the retained second moment is
-$\int_{-w}^{w} v^2 \rho\,dv = w^2/5$. Everything below is asymptotics of
-this one integral in the four corners of the $(s, \mu)$ plane.
+$A(0)$, independent of both coordinates — and the retained second moment is
+$\int_{-w}^{w} v^2 \rho\,dv = w^2/5$, a function of $x_\nabla$ alone.
+Everything below is asymptotics of this one integral in the four corners of
+the $(x_\nabla, |u_0|)$ plane.
+
+**Kernel limits used below.** The four regions follow from three consequences
+of the definition
+
+$$
+\hat K(u)=\frac{4\sin^2(u/2)}{u^2}
+=\frac{2(1-\cos u)}{u^2},
+\qquad \hat K(0)=1.
+$$
+
+First, at small phase,
+
+$$
+\frac{\sin(u/2)}{u/2}
+=1-\frac{u^2}{24}+\frac{u^4}{1920}+\mathcal O(u^6),
+$$
+
+and hence
+
+$$
+\boxed{\;
+\hat K(u)=1-\frac{u^2}{12}+\frac{u^4}{360}
++\mathcal O(u^6)
+\;}.
+$$
+
+This is the pointwise expansion used for the coherent plateau.
+
+Second, the kernel has finite area
+
+$$
+\boxed{\;\int_{-\infty}^{\infty}\hat K(u)\,du=2\pi\;},
+$$
+
+from
+$\int_{-\infty}^{\infty}(\sin au/u)^2du=\pi|a|$ with $a=1/2$. After
+changing variables from $v$ to $u=u_0+v$,
+
+$$
+E=\int \hat K(u)\rho(u-u_0)\,du.
+$$
+
+If $u=0$ lies inside the retained mismatch window and $\rho$ varies slowly
+over the order-one kernel core, then
+
+$$
+\boxed{\;E\sim2\pi\rho(-u_0)\;}.
+$$
+
+This is the sheet limit. It is a convolution asymptotic, not a pointwise
+Taylor expansion of $\hat K$. In particular, because
+$\hat K(u)\sim u^{-2}$, its second moment is not finite and a naive
+higher-order moment expansion of the convolution requires separate control of
+the kernel tails.
+
+Both conditions can be quantified in the present equal-split problem. Define
+the distance from the kernel center to the nearest retained-support edge,
+
+$$
+g_{\rm sheet}=w-|u_0|
+=\frac{\pi x_\nabla}{\sqrt3}-|u_0| .
+$$
+
+Thus $u=0$ lies strictly inside the retained mismatch window exactly when
+
+$$
+\boxed{\;g_{\rm sheet}>0
+\iff |u_0|<w
+\iff |u_0|<\frac{\pi x_\nabla}{\sqrt3}\;},
+$$
+
+a half-plane bounded by a ray through the origin of slope $\pi/\sqrt3$.
+
+To state a controlled sheet approximation, choose a kernel-core half-width
+$U<g_{\rm sheet}$. The exact kernel mass inside that core and a simple bound
+on the omitted tails are
+
+$$
+\int_{-U}^{U}\hat K(u)\,du
+=4\left[\operatorname{Si}(U)-\frac{1-\cos U}{U}\right],
+\qquad
+\int_{|u|>U}\hat K(u)\,du\le\frac{8}{U}.
+$$
+
+For the central Irwin–Hall branch used here,
+
+$$
+\rho(-u_0)=\frac{3w^2-u_0^2}{8w^3},
+$$
+
+and its maximum relative variation over $|u|\le U$ obeys
+
+$$
+R_\rho(U)
+\equiv
+\max_{|u|\le U}
+\frac{|\rho(u-u_0)-\rho(-u_0)|}{\rho(-u_0)}
+\le
+\frac{2|u_0|U+U^2}{3w^2-u_0^2}.
+$$
+
+Extending the retained density by zero outside its support then gives the
+conservative relative-error bound
+
+$$
+\boxed{
+\frac{|E-2\pi\rho(-u_0)|}{2\pi\rho(-u_0)}
+\le
+R_\rho(U)
++\frac{4}{\pi U}
+\left(1+\frac{3w^2}{3w^2-u_0^2}\right)
+}.
+$$
+
+Accordingly, a sufficient asymptotic sheet regime is
+
+$$
+1\ll U\ll g_{\rm sheet},
+\qquad
+\frac{2|u_0|U+U^2}{3w^2-u_0^2}\ll1.
+$$
+
+The first inequality keeps nearly all kernel mass away from the support edge;
+the second makes the density locally flat across that mass. The bound is
+deliberately conservative because it controls the oscillatory tails with the
+pointwise envelope $4/u^2$.
+
+Third, in a gapped window the exact decomposition
+
+$$
+\begin{aligned}
+E
+={}&2\int_{-w}^{w}\frac{\rho(v)}{(u_0+v)^2}\,dv\\
+&-2\operatorname{Re}\!\left[
+e^{iu_0}\int_{-w}^{w}
+\frac{e^{iv}\rho(v)}{(u_0+v)^2}\,dv
+\right]
+\end{aligned}
+$$
+
+separates the nonoscillatory mean from the coherent fringe correction. If the
+gap is also deep, $u_0\gg w$, define the unnormalized masked characteristic
+function
+
+$$
+\varphi_{v,M}(1)=\int_{-w}^{w}e^{iv}\rho(v)\,dv
+$$
+
+and use
+
+$$
+\frac{1}{(u_0+v)^2}
+=\frac{1}{u_0^2}\left(1-\frac{2v}{u_0}
++\frac{3v^2}{u_0^2}+\cdots\right)
+$$
+
+to obtain
+
+$$
+\boxed{\;
+E\sim\frac{2}{u_0^2}\left[
+\frac23-\operatorname{Re}\!\left(e^{iu_0}\varphi_{v,M}(1)\right)
+\right]
+\;}.
+$$
+
+For a broad mismatch window,
+$|\varphi_{v,M}(1)|\ll2/3$ through phase cancellation, leaving the dephased
+$4/(3u_0^2)$ law of region 3. For a narrow window,
+$\varphi_{v,M}(1)\simeq2/3$, so the two terms recombine into
+$(2/3)\hat K(u_0)$, the coherent fringes of region 4. More directly, symmetry
+of $\rho$ gives the narrow-window expansion
+
+$$
+\begin{aligned}
+E
+&=\int_{-w}^{w}\left[
+\hat K(u_0)+v\hat K'(u_0)
++\frac{v^2}{2}\hat K''(u_0)+\cdots
+\right]\rho(v)\,dv\\
+&=\boxed{\;\frac23\hat K(u_0)
++\frac{w^2}{10}\hat K''(u_0)+\cdots\;}.
+\end{aligned}
+$$
+
+The $w^2$ correction here is an absolute expansion; it is not a uniform
+relative-error statement near a kernel null, where the leading term vanishes.
+Thus regions 3 and 4 do not use different pointwise large-$u$ expansions of
+$\hat K$: they retain or suppress the same cosine term according to coherence
+across the mismatch distribution.
 
 #### 10.2.2 Region 1 — coherent plateau
 
@@ -1894,66 +2621,95 @@ $\hat K(u) = 1 - u^2/12 + \mathcal O(u^4)$:
 $$
 E = \frac23 - \frac{1}{12}\int_{-w}^{w}(u_0+v)^2\rho(v)\,dv + \dots
 = \frac23\left[1 - \frac{u_0^2 + \tfrac{3}{10}w^2}{12} + \dots\right]
-\;\xrightarrow[\;s\to 0\;]{}\; \frac23 .
+\;\xrightarrow[\;x_\nabla,\,|u_0|\to 0\;]{}\; \frac23 .
 $$
+
+The first correction is a sum of one term per coordinate — $u_0^2$ from the
+kernel offset, $\tfrac{3}{10}w^2 = \tfrac{\pi^2}{10}x_\nabla^2$ from the
+window width — with no cross term, since $\rho$ is symmetric.
 
 The plotted plateau edge uses the order-one-phase criterion
-$u_0+w=\pi$ (halfway to the kernel's first nonzero null at $2\pi$):
+$u_0+w=\pi$ (halfway to the kernel's first nonzero null at $2\pi$), which in
+these coordinates is a **straight line**:
 
 $$
-s_1(\mu) = \frac{\pi(1+\mu)}{\mu + \pi/\sqrt3},
-\qquad s_1(0) = \sqrt3, \quad s_1(\infty) = \pi .
+\boxed{\;|u_0| + \frac{\pi x_\nabla}{\sqrt3} = \pi\;}
 $$
 
-#### 10.2.3 Region 2 — sheet ($u_0 < w$, i.e. $\mu < \pi/\sqrt3$)
-
-The kernel peak $u = 0$ lies *inside* the window iff $u_0 < w$; dividing by
-$x_\nabla$ this is the **masked reachability boundary**
+with intercepts $|u_0| = \pi$ at $x_\nabla = 0$ and $x_\nabla = \sqrt3$ at
+$u_0 = 0$. It is convenient to name the corresponding collapse variable
 
 $$
-\mu < \frac{\pi}{\sqrt3} \approx 1.814
+p \equiv \frac{1}{\pi}\left(|u_0| + \frac{\pi x_\nabla}{\sqrt3}\right),
 $$
 
-— a factor 3 below the unmasked $|u_0| < W \iff \mu < \pi\sqrt3$ of §9,
-because the correlated mask cuts the support at $w = W/3$. When additionally
-the window spans many kernel periods ($w \gg 2\pi$), $\hat K$ acts as a
-delta of weight $\int_{\mathbb R}\hat K = 2\pi$ (§15.1's sheet branch):
+so that region 1 is $p \lesssim 1$; Figure 13(f) shows the plateau edge
+collapsing on $p = 1$ across four decades of $x_\nabla$.
+
+#### 10.2.3 Region 2 — sheet ($|u_0| < w = \pi x_\nabla/\sqrt3$)
+
+The kernel peak $u = 0$ lies *inside* the window iff $|u_0| < w$, i.e. below
+the **masked reachability ray**
+
+$$
+|u_0| < \frac{\pi x_\nabla}{\sqrt3} \approx 1.814\,x_\nabla
+$$
+
+— a factor 3 steeper than the unmasked $|u_0| < W = \pi\sqrt3\,x_\nabla$ of
+§9, because the correlated mask cuts the support at $w = W/3$. When
+additionally the window spans many kernel periods ($w \gg 2\pi$, i.e.
+$x_\nabla \gg 2\sqrt3$), $\hat K$ acts as a delta under convolution, with
+weight $\int_{\mathbb R}\hat K = 2\pi$ (§10.2.1 and §15.1's sheet branch):
 
 $$
 E \to 2\pi\,\rho(-u_0)
 = \frac{2\pi}{2w}\left[\frac34 - \Big(\frac{u_0}{2w}\Big)^2\right]
-= \frac{3\pi}{4w}\left(1 - \frac{\mu^2}{\pi^2}\right),
+= \frac{3\pi}{4w}\left(1 - \frac{u_0^2}{3w^2}\right).
 $$
 
-using $u_0/w = \sqrt3\,\mu/\pi$. Substituting $w(s,\mu)$:
+Substituting $w = \pi x_\nabla/\sqrt3$:
 
 $$
-\boxed{\;E = \frac{3\sqrt3}{4}\,\frac{(1+\mu)\,(1-\mu^2/\pi^2)}{s}\;}
+\boxed{\;E = \frac{3\sqrt3}{4\,x_\nabla}
+\left(1-\frac{u_0^2}{\pi^2 x_\nabla^2}\right)\;}
 $$
 
-— the $s^{-1}$ law, with an $\mathcal O(1)$ prefactor ($\le 1.9\times$
-variation over the region: the $(1+\mu)$ factor is the density narrowing,
-the $(1-\mu^2/\pi^2)$ factor the peak sliding off the density's plateau).
-At $\mu \to 0$ this reproduces $2\pi\rho(0) = \tfrac{3\sqrt3}{4s}$.
+— the $x_\nabla^{-1}$ law. The decay is carried by $x_\nabla$ alone; $u_0$
+enters only through the bracket, which falls from $1$ on the phase-matched
+axis to $1 - 1/3 = 2/3$ at the sheet edge $|u_0| = w$. So the whole sheet is
+the single curve $3\sqrt3/(4x_\nabla)$ modulated by at most a factor $3/2$,
+and at $u_0 = 0$ it is exactly $2\pi\rho(0) = 3\sqrt3/(4x_\nabla)$.
 
-#### 10.2.4 Region 3 — gapped, dephased ($\mu > \pi/\sqrt3$, $x_\nabla \gg 1$)
+#### 10.2.4 Region 3 — gapped, dephased ($|u_0| > \pi x_\nabla/\sqrt3$, $x_\nabla \gg 1$)
 
 Now $u = u_0 + v \ge u_0 - w > 0$ on the whole window. With $w \gg 2\pi$ the
 window smears many kernel oscillations, so replace $\hat K$ by its period
-average $\langle\hat K\rangle = 2/u^2$ (§7's far/wide tail):
+average $\langle\hat K\rangle = 2/u^2$ (§10.2.1 and §7's far/wide tail):
 
 $$
 E \approx \int_{-w}^{w} \frac{2\rho(v)}{(u_0+v)^2}\,dv
 \;\xrightarrow[\;u_0 \gg w\;]{}\;
 \frac{2}{u_0^2}\cdot\frac23
-= \boxed{\;\frac{4}{3}\,\frac{(1+\mu)^2}{\mu^2\,s^2}\;}
+= \boxed{\;\frac{4}{3\,u_0^2}\;}
 $$
 
-— the $s^{-2}$ law, again with only an $\mathcal O(1)$ $\mu$-dependence
-($(1+1/\mu)^2 \in [1, 2.6]$ over the region). For $u_0$ comparable to $w$
-(just above the boundary) the full tail integral — elementary, since $\rho$
-is piecewise quadratic — must be kept; this is the crossover strip visible
-in the ratio map (Figure 10c).
+— the $u_0^{-2}$ law. **The walk-off scale $x_\nabla$ has dropped out
+entirely**: the region-3 value is a pure function of the center mismatch,
+and the law is manifestly just the mask acceptance $A(0)=2/3$ times the
+period-averaged kernel $2/u_0^2$. There is no $\mathcal O(1)$ prefactor left
+to explain — the $(1+1/\mu)^2 \in [1, 2.6]$ factor carried by earlier
+revisions of this note was an artifact of using a radial abscissa that mixes
+the two scales, not a physical modulation. Consequently the compensated
+quantity $u_0^2\,N T^2\!/L^2$ collapses on the single constant $4/3$ for
+every $x_\nabla$ (Figure 13b).
+
+For $u_0$ comparable to $w$ (just above the boundary ray) the full tail
+integral — elementary, since $\rho$ is piecewise quadratic — must be kept;
+this is the crossover strip visible in the ratio map (Figure 12c). The
+replacement by $2/u^2$ is not a pointwise large-$u$ approximation: the
+omitted $-2\cos u/u^2$ term has the same pointwise order and is suppressed
+only by averaging over the broad mismatch window — which is the one place
+$x_\nabla$ still matters, through the fringe contrast of §10.2.6.
 
 #### 10.2.5 Region 4 — gapped, coherent ($x_\nabla \lesssim 1$)
 
@@ -1961,19 +2717,34 @@ When $w \lesssim \pi/\sqrt3$ the window is *narrower than one kernel
 oscillation*: $\hat K$ is effectively constant across it,
 
 $$
-E = \frac23\,\hat K(u_0)\,\big[1 + \mathcal O(w^2)\big],
-\qquad
-u_0 = s\Big(1 - \frac1\mu + \mathcal O(\mu^{-2})\Big),
+\boxed{\;E = \frac23\,\hat K(u_0)
++\frac{w^2}{10}\hat K''(u_0)+\mathcal O(w^4)\;}
 $$
 
-so all $\mu$-dependence reduces to an $\mathcal O(s/\mu)$ fringe-phase
-shift: **asymptotically exact $\mu$-independence**, with complete nulls at
-$u_0 = 2\pi k$, i.e. $s_k = 2\pi k\,(1 + 1/\mu) \to 2\pi k$ — the vertical
-fringes. The condition $w \lesssim \pi/\sqrt3$ is $x_\nabla \lesssim 1$ rad,
-which on the map (where $s \gg 1$) reads $\mu \gtrsim s$. Envelope:
+with $w = \pi x_\nabla/\sqrt3$. The leading term depends on $u_0$ **only**,
+and needs no reparametrization of its argument: the complete nulls sit at
+
+$$
+u_0 = 2\pi k ,
+$$
+
+exactly, i.e. on lines *perpendicular to the $|u_0|$ axis* — the horizontal
+fringes of Figure 12(a). (Earlier revisions of this note, using a radial
+abscissa $s$, had to place the same nulls at $s_k = 2\pi k(1 + 1/\mu)$ and
+carry $u_0 = s(1 - 1/\mu + \mathcal O(\mu^{-2}))$; both corrections are
+coordinate artifacts and disappear here.) The only role of $x_\nabla$ is the
+$w^2$ smoothing correction, i.e. the loss of fringe contrast quantified in
+§10.2.6.
+
+The condition $w \lesssim \pi/\sqrt3$ is $x_\nabla \lesssim 1$ rad — a
+**vertical line** on the map. Envelope:
 $\tfrac23\cdot 4/u_0^2 = \tfrac{8}{3}u_0^{-2}$, exactly twice the region-3
 mean (since $\langle 2\sin^2\rangle = 1$), and consistent with §9's
 certified $A(d)\cdot 4/g^2$.
+
+The correction above is an absolute small-$w$ expansion. Near a null of
+$\hat K(u_0)$ the leading term vanishes, so it does not imply a uniform
+relative error of order $w^2$.
 
 #### 10.2.6 Fringe contrast across the 3↔4 crossover
 
@@ -2001,26 +2772,44 @@ $$
 \qquad (w \gtrsim 1;\ \text{contrast} \to 1 \text{ in region 4}).
 $$
 
-Two consequences, both verified in Figure 11e: (i) the envelope decays as
+Two consequences, both verified in Figure 13e: (i) the envelope decays as
 $1/x_\nabla$ — set by the **hard mask edge** — vastly slower than the
 $|\!\operatorname{sinc}^3\!(w)| \sim w^{-3}$ of the unmasked $C^1$ density
 (the sharp band edges of frequency conservation *preserve* fringe
-visibility); (ii) sweeping one fringe period changes $x_\nabla$ by
-$2\pi/\mu$ — at moderate $\mu$ the $|\sin w|$ factor is averaged toward its
-envelope, at large $\mu$ it is *frozen*, producing the measured contrast
-dips at $w = k\pi$ ($x_\nabla = k\sqrt3$).
+visibility); (ii) the contrast is a function of $x_\nabla$ alone, so
+sweeping the fringes — which means advancing $u_0$ by one period $2\pi$ at
+fixed $x_\nabla$ — leaves the edge factor $|\sin w|$ **frozen**. The measured
+contrast therefore tracks the full $3|\sin w|/(4w)$ including its dips at
+$w = k\pi$, i.e. at
+
+$$
+x_\nabla = k\sqrt3 ,\qquad k = 1, 2, \dots
+$$
+
+This is a second instance of the coordinate separation: fringe *position* is
+governed by $u_0$, fringe *visibility* by $x_\nabla$, and in these axes the
+two never mix. (In a radial abscissa the two are swept together, which is why
+earlier revisions reported the dips as partially averaged away except at
+large detuning.)
 
 #### 10.2.7 Summary table
 
-All formulas
-verified against `linear_tuple_estimate` to $\lesssim 1\%$ (2026-08-24):
+All formulas verified against `linear_tuple_estimate` (2026-08-27, recast to
+the intrinsic coordinates). The last column gives the median and 95th
+percentile of the relative error over 600 points sampled log-uniformly in each
+region *interior*; errors grow, as expected, in the crossover strips and at
+the kernel nulls:
 
-| Region | Domain | Law | Verified |
+| Region | Domain | Law | Median (p95) error |
 |---|---|---|---|
-| 1. coherent plateau | $s \lesssim s_1(\mu) = \pi(1+\mu)/(\mu + \pi/\sqrt3) \in [\sqrt3, \pi]$ | $N\,T^2\!/L^2 = 2/3$ $(= A(0))$ | 0.2–5% |
-| 2. sheet | $s \gtrsim s_1$, $\lvert\mu\rvert < \pi/\sqrt3$ | $\dfrac{3\sqrt3}{4}\dfrac{(1+\mu)(1-\mu^2/\pi^2)}{s}$ | $\le 0.8\%$ |
-| 3. gapped, dephased | $\lvert\mu\rvert > \pi/\sqrt3$, $x_\nabla \gg 1$ | $\dfrac{4(1+\mu)^2}{3\mu^2 s^2}$ (fringe-averaged) | $\le 0.8\%$ |
-| 4. gapped, coherent | $\lvert\mu\rvert > \pi/\sqrt3$, $x_\nabla \lesssim 1$ (i.e. $\mu \gtrsim s$) | $\tfrac23 \hat K(u_0)$, $u_0 = s(1 - 1/\mu + \dots)$: full-contrast fringes, nulls at $u_0 = 2\pi k$ | 0.4% |
+| 1. coherent plateau | $\lvert u_0\rvert + \pi x_\nabla/\sqrt3 \lesssim \pi$ | $N\,T^2\!/L^2 = 2/3$ $(= A(0))$ | 0.3% (5.8%) |
+| 2. sheet | $\lvert u_0\rvert < \pi x_\nabla/\sqrt3$, $x_\nabla \gg 2\sqrt3$ | $\dfrac{3\sqrt3}{4x_\nabla}\left(1-\dfrac{u_0^2}{\pi^2 x_\nabla^2}\right)$ | 0.3% (2.7%) |
+| 3. gapped, dephased | $\lvert u_0\rvert > \pi x_\nabla/\sqrt3$, $x_\nabla \gg 1$ | $\dfrac{4}{3u_0^2}$ (fringe-averaged) | 1.1% (4.0%) |
+| 4. gapped, coherent | $\lvert u_0\rvert > \pi x_\nabla/\sqrt3$, $x_\nabla \lesssim 1$ | $\tfrac23 \hat K(u_0)$: full-contrast fringes, nulls at $u_0 = 2\pi k$ | 0.3% (1.3%) |
+
+Every domain in the middle column is a half-plane cut by a straight line, and
+each law depends on **one** coordinate: regions 3 and 4 on $|u_0|$, region 2
+on $x_\nabla$ up to the bounded bracket, region 1 on neither.
 
 Notes. (i) All constants above are specific to the equal split at $d = 0$;
 §10.2.8 derives the nonzero-$d$ equal-split problem. Generic directions keep
@@ -2035,34 +2824,85 @@ $A\cdot 4/g^2$ of §9, the 2-vs-(3,4) split is the
 $x_\nabla^{-1}$/$x_\nabla^{-2}$ classification of
 [`fwm_single_tuple_scaling.md`](fwm_single_tuple_scaling.md), and the
 region-4 fringes are the subject of
-[`fwm_high_mu_oscillations.md`](fwm_high_mu_oscillations.md).
+[`fwm_high_mu_oscillations.md`](stale/fwm_high_mu_oscillations.md).
 
-![Four-region phase diagram: model, prediction, ratio](_static/lorenzi-fast/smu_phase_diagram.png)
+**Derived coordinates $|\mu|$ and $s$, and the previous form of these laws.**
+Earlier revisions of this note used the radial abscissa
+$s = x_\nabla + |u_0|$ together with the dimensionless detuning
+$|\mu| = |u_0|/x_\nabla$, so that
 
-*Figure 10 — The phase diagram assessed
-([`analysis/fwm/plot_smu_phase_diagram.py`](../../analysis/fwm/plot_smu_phase_diagram.py)):
-(a) exact linear model on a dense $(s,|\mu|)$ grid with the region
-boundaries $s_1(\mu)$ (solid), $|\mu| = \pi/\sqrt3$ (solid),
-$x_\nabla = 1$ (dashed) and the unmasked $|u_0| = W$ reference (dotted);
-(b) the piecewise four-region closed form — no model evaluation — which
-reproduces (a) feature for feature including the fringes; (c) their ratio:
-white $\approx$ exact agreement over all region interiors (median
-$|\log_{10}|$ ratio $0.001$–$0.009$, i.e. $0.3$–$2\%$), with deviations
-confined to the crossover strips and to the near-null fringe lines where
-the region-3 prediction is deliberately fringe-averaged.*
+$$
+x_\nabla=\frac{s}{1+|\mu|},
+\qquad
+|u_0|=\frac{s|\mu|}{1+|\mu|},
+\qquad
+u_0 = |\mu|\,x_\nabla .
+$$
 
-![Quantitative cuts through the phase diagram](_static/lorenzi-fast/smu_phase_cuts.png)
+Both remain useful derived quantities — $|\mu|$ is the code property `mu` and
+is the natural phase-matching *test* (§9, §10.3, §15), and $s$ is the
+collapse variable of the single-tuple scaling study
+([`fwm_single_tuple_scaling.md`](fwm_single_tuple_scaling.md)) — so the
+translation is recorded here. Substituting the two relations above into the
+table gives the previously published forms, which are **algebraically
+identical**, not approximations:
 
-*Figure 11 — Line-plot assessment: (a) iso-$\mu$ cuts vs $s$ with the region
-laws overlaid (dashed); (b) compensated $s^2 N\,T^2\!/L^2$ gapped cuts —
-plateaus at $\tfrac43(1+1/\mu)^2$, envelope $8/3$; (c) iso-$s$ cuts vs
-$|\mu|$ — flat inside regions, step at $\pi/\sqrt3$, fringe onset at
-$\mu \approx s$; (d) region-4 fringes vs $\tfrac23\hat K(u_0)$ — visually
-indistinguishable, nulls at $u_0 = 2\pi k$; (e) fringe contrast vs
-$x_\nabla$: the mask-edge $1/x_\nabla$ envelope, with the high-$\mu$ points
-dipping along the frozen edge factor $|\sin(\pi x_\nabla/\sqrt3)|$ and the
-unmasked $\operatorname{sinc}^3$ shown for contrast; (f) the plateau edge
-collapsing on $s = s_1(\mu)$ for $\mu$ spanning six orders of magnitude.*
+| Region | law in $(x_\nabla,|u_0|)$ | equivalent form in $(s,|\mu|)$ |
+|---|---|---|
+| 1 | $2/3$ for $\lvert u_0\rvert+\pi x_\nabla/\sqrt3\le\pi$ | $2/3$ for $s \le s_1(\mu) = \dfrac{\pi(1+\mu)}{\mu+\pi/\sqrt3} \in [\sqrt3,\pi]$ |
+| 2 | $\dfrac{3\sqrt3}{4x_\nabla}\left(1-\dfrac{u_0^2}{\pi^2x_\nabla^2}\right)$ | $\dfrac{3\sqrt3}{4}\dfrac{(1+\mu)(1-\mu^2/\pi^2)}{s}$ |
+| 3 | $\dfrac{4}{3u_0^2}$ | $\dfrac{4(1+\mu)^2}{3\mu^2s^2}$ |
+| 4 | $\tfrac23\hat K(u_0)$, nulls at $u_0=2\pi k$ | $\tfrac23\hat K(u_0)$ with $u_0=s\left(1-\tfrac1\mu+\mathcal O(\mu^{-2})\right)$, nulls at $s_k=2\pi k(1+1/\mu)$ |
+
+The comparison is the argument for the change of variables: the $(1+\mu)$,
+$(1+\mu)^2$ and $(1-1/\mu+\dots)$ factors on the right are Jacobian debris
+from mixing the two scales into one abscissa, and all three vanish on the
+left. The boundary $s_1(\mu)$, a curve, becomes a straight line; the
+region-4 null locus, a $\mu$-dependent family, becomes the fixed set
+$u_0 = 2\pi k$.
+
+Section 10.3 recasts these four mechanisms for an arbitrary signed phase-gradient
+orientation. It gives the exact masked-domain crossing test, a certified outer
+interval and efficiency bound, and then specializes the general framework to
+equal-, one-, and two-leg directions.
+
+![Four-region phase diagram: model, prediction, ratio](_static/lorenzi-fast/xu0_phase_diagram.png)
+
+*Figure 12 — The phase diagram assessed
+([`analysis/fwm/plot_xu0_phase_diagram.py`](../../analysis/fwm/plot_xu0_phase_diagram.py)):
+(a) exact linear model on a dense $(x_\nabla,|u_0|)$ grid with the region
+boundaries — the plateau edge $|u_0| + \pi x_\nabla/\sqrt3 = \pi$ and the
+sheet/gap ray $|u_0| = \pi x_\nabla/\sqrt3$ (solid), the coherence line
+$x_\nabla = 1$ (dashed), and the unmasked $|u_0| = W = \pi\sqrt3\,x_\nabla$
+reference (dotted); all four are straight lines, three of them rays through
+the origin. (b) the piecewise four-region closed form — no model evaluation —
+which reproduces (a) feature for feature including the fringes; (c) their
+ratio: white $\approx$ exact agreement over all region interiors (median
+$|\log_{10}|$ ratio $0.0009$–$0.009$, i.e. $0.2$–$2.1\%$), with deviations
+confined to the crossover strips and to the near-null fringe lines where the
+region-3 prediction is deliberately fringe-averaged. Note the region-4
+fringes run **horizontally**, at $u_0 = 2\pi k$.*
+
+![Quantitative cuts through the phase diagram](_static/lorenzi-fast/xu0_phase_cuts.png)
+
+*Figure 13 — Line-plot assessment
+([`analysis/fwm/plot_xu0_phase_diagram.py`](../../analysis/fwm/plot_xu0_phase_diagram.py)):
+(a) iso-$x_\nabla$ cuts vs $|u_0|$ with the region laws overlaid (dashed) —
+the plateau, then either the sheet or the $4/3u_0^2$ tail; (b) compensated
+$u_0^2\,N\,T^2\!/L^2$ gapped cuts, which collapse on the **single universal
+constant $4/3$** for every $x_\nabla$ (envelope $8/3$) — the sharpest
+statement of the $x_\nabla$-independence of region 3; (c) iso-$|u_0|$ cuts
+vs $x_\nabla$ — a flat gapped plateau, then a step up onto the common
+$3\sqrt3/4x_\nabla$ sheet as each cut crosses its ray
+$|u_0| = \pi x_\nabla/\sqrt3$; (d) region-4 fringes vs $\tfrac23\hat K(u_0)$
+— visually indistinguishable, nulls at exactly $u_0 = 2\pi k$ with no
+detuning-dependent correction; (e) fringe contrast vs $x_\nabla$, measured by
+advancing $u_0$ through one period $2\pi$ at fixed $x_\nabla$: it follows the
+mask-edge $1/x_\nabla$ envelope with the frozen edge factor
+$|\sin(\pi x_\nabla/\sqrt3)|$ dipping at $x_\nabla = k\sqrt3$, far above the
+unmasked $\operatorname{sinc}^3$; (f) the plateau edge collapsing on
+$p = (|u_0| + \pi x_\nabla/\sqrt3)/\pi = 1$ along rays through the origin
+whose slope $|u_0|/x_\nabla$ spans six orders of magnitude.*
 
 #### 10.2.8 Moving the support window: the equal split at nonzero $d$
 
@@ -2096,7 +2936,7 @@ $$
 $$
 
 The unmasked variable $v$ is supported on $[-3w,3w]$, with full equal-width
-Irwin--Hall density
+Irwin–Hall density
 
 $$
 \rho_{\rm full}(v)=
@@ -2158,16 +2998,18 @@ E_d(u_0,x_\nabla)=E_{-d}(-u_0,x_\nabla),
 $$
 
 but in general $E_d(u_0,x_\nabla)\ne E_d(-u_0,x_\nabla)$. Consequently a
-nonzero-$d$ diagram cannot be a function of $(s,|\mu|)$ alone. It requires at
-least $(s,\mu,d)$, with
+nonzero-$d$ diagram cannot be a function of $(x_\nabla,|u_0|)$ alone: the
+absolute value is no longer legitimate, and the required arguments are
 
 $$
-x_\nabla=\frac{s}{1+|\mu|},\qquad
-u_0=\frac{s\mu}{1+|\mu|}.
+\left(x_\nabla,\;u_0,\;d\right),
+\qquad u_0 \in \mathbb R ,
 \tag{10.2.8.4}
 $$
 
-Only the simultaneous sign reversal $(\mu,d)\mapsto(-\mu,-d)$ is redundant.
+i.e. the same two intrinsic scales with the **signed** center mismatch, plus
+the support shift. Only the simultaneous sign reversal
+$(u_0,d)\mapsto(-u_0,-d)$ is redundant.
 
 **Region 1: shifted coherent plateau.** Introduce the unnormalized accepted
 moments
@@ -2197,9 +3039,10 @@ $$
 $$
 
 This is a practical plateau criterion, not the location of a kernel zero: the
-first nonzero null of $\hat K$ is at $|u|=2\pi$. Unlike $s_1(\mu)$ at $d=0$,
-the criterion (10.2.8.6) depends on the signs of both $\mu$ and $d$ and changes
-branch when the accepted interval is clipped.
+first nonzero null of $\hat K$ is at $|u|=2\pi$. Unlike the straight plateau
+edge $|u_0|+\pi x_\nabla/\sqrt3=\pi$ at $d=0$, the criterion (10.2.8.6)
+depends on the signs of both $u_0$ and $d$ and changes branch when the
+accepted interval is clipped.
 
 **Exact sheet/gap boundary.** A sheet contribution exists when the
 phase-matched point $v=-u_0$ lies inside both the unmasked density support and
@@ -2214,12 +3057,21 @@ $$
 \tag{10.2.8.7}
 $$
 
-The second condition defines two tilted boundaries
-$\mu=(d\pm\pi)/\sqrt3$. For $d=0$ it reduces to
-$|\mu|<\pi/\sqrt3$ and automatically implies the first condition. For
-$d\ne0$, positive $d$ moves the sheet territory toward positive $\mu$ and
-negative $d$ moves it toward negative $\mu$. This is why taking $|\mu|$
-before applying the mask loses physical information.
+In the intrinsic coordinates these are again **rays through the origin**,
+
+$$
+u_0=\frac{(d\pm\pi)\,x_\nabla}{\sqrt3},
+\qquad
+|u_0|=\pi\sqrt3\,x_\nabla ,
+$$
+
+so the sheet territory is the wedge between two rays whose slopes are set by
+$d$. For $d=0$ the wedge is symmetric, $|u_0|<\pi x_\nabla/\sqrt3$, and
+automatically implies the first condition. For $d\ne0$ the whole wedge tilts:
+positive $d$ rotates it toward positive $u_0$, negative $d$ toward negative
+$u_0$, and at $|d|=\pi$ one edge degenerates to the horizontal axis
+$u_0 = 0$. This is why taking $|u_0|$ before applying the mask loses physical
+information.
 
 **Region 2: translated sheet.** Suppose (10.2.8.7) holds, the phase-matched
 point stays away from the mask and density boundaries by many kernel widths,
@@ -2232,21 +3084,24 @@ $$
 
 The leading value has no additional factor $A(d)$: in this perfectly
 correlated direction, changing $d$ determines whether the phase-matched slice
-is accepted, rather than fractionally accepting that slice. In terms of
-signed $\mu$ and $s=x_\nabla(1+|\mu|)$,
+is accepted, rather than fractionally accepting that slice. In the intrinsic
+coordinates, with the signed $u_0$,
 
 $$
 E_d\sim
 \begin{cases}
-\dfrac{3\sqrt3}{4}\dfrac{1+|\mu|}{s}
-\left(1-\dfrac{\mu^2}{\pi^2}\right),
-&|\mu|\le\dfrac{\pi}{\sqrt3},\\[10pt]
-\dfrac{\sqrt3}{8}\dfrac{1+|\mu|}{s}
-\left(3-\dfrac{\sqrt3|\mu|}{\pi}\right)^2,
-&\dfrac{\pi}{\sqrt3}<|\mu|<\pi\sqrt3.
+\dfrac{3\sqrt3}{4x_\nabla}
+\left(1-\dfrac{u_0^2}{\pi^2x_\nabla^2}\right),
+&|u_0|\le\dfrac{\pi x_\nabla}{\sqrt3},\\[10pt]
+\dfrac{\sqrt3}{8x_\nabla}
+\left(3-\dfrac{\sqrt3\,|u_0|}{\pi x_\nabla}\right)^2,
+&\dfrac{\pi x_\nabla}{\sqrt3}<|u_0|<\pi\sqrt3\,x_\nabla .
 \end{cases}
 \tag{10.2.8.9}
 $$
+
+Both branches carry the same $x_\nabla^{-1}$ sheet decay; only the shape
+factor, a function of the ray slope $|u_0|/x_\nabla$, distinguishes them.
 
 The second branch is absent from the $d=0$ sheet because the centered mask
 cannot retain its phase-matched point. A nonzero shift can expose it. Exactly
@@ -2274,9 +3129,10 @@ E_d=\frac{2A(d)}{u_0^2}
 \tag{10.2.8.11}
 $$
 
-The leading $s^{-2}$ law survives, with $2A(d)$ replacing $4/3$. The odd
-$M_1/u_0^3$ correction vanishes only for the centered mask and is another
-explicit manifestation of the signed $(\mu,d)$ dependence.
+The leading $u_0^{-2}$ law survives, with $2A(d)$ replacing $4/3$ — and, as
+at $d=0$, with no $x_\nabla$ in the leading term. The odd $M_1/u_0^3$
+correction vanishes only for the centered mask and is another explicit
+manifestation of the signed $(u_0,d)$ dependence.
 
 **Region 4: translated gapped, coherent fringes.** If $x_\nabla\lesssim1$,
 the accepted mismatch interval is narrow on the kernel scale. Taylor
@@ -2330,7 +3186,8 @@ $x_\nabla^{-1}$ but no longer follows the single factor $|\sin w|$.
 
 **Interpretation.** For every $|d|<4\pi$, the coherent, sheet, gapped
 dephased, and gapped coherent mechanisms remain meaningful, and their
-$s^0$, $s^{-1}$, and $s^{-2}$ exponents are unchanged. What changes are the
+exponents are unchanged: flat, $x_\nabla^{-1}$, and $u_0^{-2}$
+respectively. What changes are the
 accepted volume, the sheet/gap boundary, the density branch sampled by the
 sheet, the plateau edge, and the fringe phase and contrast. None of these
 changes is represented exactly by multiplying the $d=0$ phase diagram by
@@ -2341,32 +3198,35 @@ acceptance $A_{\rm cond}(v;d,\boldsymbol\nu)$ from §6.
 
 ![Signed-detuning phase diagrams at four support shifts](_static/lorenzi-fast/support_shift_phase_slices.png)
 
-*Figure 12 — Exact nonzero-support-shift phase diagrams
+*Figure 14 — Exact nonzero-support-shift phase diagrams
 ([`plot_support_shift_phase_diagram.py`](../../analysis/fwm/plot_support_shift_phase_diagram.py)).
 Each panel evaluates (10.2.8.1) analytically against the full piecewise-quadratic
-Irwin--Hall density; it does not use the production estimator's marginal-mask
-approximation. The solid lines are the translated mask boundaries
-$|d-\sqrt3\mu|=\pi$, the dotted lines are the unmasked density boundaries
-$|\mu|=\pi\sqrt3$, and the dashed curve is $x_\nabla=1$. As $d$ increases,
-the sheet migrates toward positive detuning, the negative-detuning side
-becomes gapped, and the outer Irwin--Hall sheet branch appears between
-$\pi/\sqrt3<\mu<\pi\sqrt3$. The coherent plateau also falls from
+Irwin–Hall density; it does not use the production estimator's marginal-mask
+approximation. Coordinates are $x_\nabla$ (log) against the **signed** $u_0$
+(symlog), as required by (10.2.8.4). The solid lines are the translated mask
+boundaries, the rays $u_0=(d\pm\pi)x_\nabla/\sqrt3$; the dotted lines are the
+unmasked density boundaries $|u_0|=\pi\sqrt3\,x_\nabla$; the dashed line is
+$x_\nabla=1$. As $d$ increases, the sheet wedge rotates toward positive
+$u_0$ — at $d=\pi$ its lower edge lies exactly on $u_0=0$ — the
+negative-$u_0$ side becomes gapped, and the outer Irwin–Hall sheet branch
+appears between the two ray families. The coherent plateau also falls from
 $A(0)=2/3$ to $A(\pi)=23/48$, $A(2\pi)=1/6$, and $A(3\pi)=1/48$.*
 
 ![Error from replacing conditional support by marginal acceptance](_static/lorenzi-fast/support_shift_marginal_error.png)
 
-*Figure 13 — Failure of marginal support rescaling for the equal-split
+*Figure 15 — Failure of marginal support rescaling for the equal-split
 direction, computed as
 $\log_{10}\{E_d/[E_0A(d)/A(0)]\}$ using the same analytic evaluator as
-Figure 12. White denotes agreement, red means that marginal rescaling
+Figure 14. White denotes agreement, red means that marginal rescaling
 underestimates the exact efficiency, and blue means that it overestimates it;
 the color range is clipped at factors $10^{-3}$ and $10^3$. The approximation
-is correct on the small-$s$ coherent plateau because both expressions tend to
-$A(d)$, but it cannot translate the sheet boundary or its fringes. It
+is correct on the coherent plateau near the origin of the
+$(x_\nabla,u_0)$ plane, because both expressions tend to
+$A(d)$, but it cannot rotate the sheet wedge or translate its fringes. It
 therefore produces order-of-magnitude errors of opposite sign on the two
 sides of the shifted phase-matched territory. The black contour marks exact
 equality; white solid, dotted, and dashed lines have the meanings of
-Figure 12.*
+Figure 14.*
 
 #### 10.2.9 Grid specialization $1\le r<2$: the three-family noise decomposition
 
@@ -2399,7 +3259,7 @@ $$
 
 which is nonempty precisely for $r<2$ and satisfies $v\le-w$ throughout.
 The entire accepted interval of a shifted family therefore lies in the
-**outer Irwin--Hall branch**: the piecewise density reduces to the single
+**outer Irwin–Hall branch**: the piecewise density reduces to the single
 quadratic $(3w+v)^2/(16w^3)$, vanishing at the lower endpoint $-3w$, and the
 exact equal-split efficiency (10.2.8.1) becomes the one-branch integral
 
@@ -2423,7 +3283,7 @@ M_2(2\pi r)=\frac{g^3\,(4g^2-15g+15)}{10}\,w^2,
 \tag{10.2.9.3}
 $$
 
-so the accepted mean is simply
+so the accepted mean is
 
 $$
 \bar v_{2\pi r}=\frac{M_1}{A}=-\frac{3r}{2}\,w .
@@ -2480,7 +3340,7 @@ domain is the full $B\times B$ square, while each shifted family occupies a
 right isoceles corner triangle with legs $(2-r)B$ (area
 $\tfrac12(2-r)^2B^2$), pushed to the signed corner that compensates the
 carrier residual — the projected-plane counterpart of the sheet migration in
-Figure 12. The mean admissible thickness in the eliminated coordinate is
+Figure 14. The mean admissible thickness in the eliminated coordinate is
 $A(2\pi r)B^3$ divided by that area, i.e. $\tfrac13(2-r)B$, tapering linearly
 to zero at the hypotenuse.
 
@@ -2495,12 +3355,12 @@ against $1/6$ at exact Nyquist, and a total accepted volume
 $2/3+2\times0.1567\approx0.980$ of the Nyquist unity. These are
 acceptance-level statements — upper envelopes on the family noise shares.
 The exact contribution of each tuple must be taken from (10.2.9.2) with its
-own $(u_0,\boldsymbol\nu)$; per Figure 13, replacing this by the marginal
+own $(u_0,\boldsymbol\nu)$; per Figure 15, replacing this by the marginal
 rescaling $E_0A(d)/A(0)$ fails precisely in these shifted families, whose
 sheets live in the signed band (10.2.9.5) that the centered diagram does not
 contain.
 
-### 10.3 The masked mismatch density: mask inhomogeneity across the width simplex ($d=0$)
+### 10.3 The masked mismatch density: general orientation and width-simplex anchors
 
 This section is the unified home of an object whose two factors appear
 separately earlier in the note. Every per-tuple efficiency is a
@@ -2509,16 +3369,207 @@ one-dimensional average
 $$
 N\,T^2\!/L^2=\int \hat K(u_0+v)\,\rho_{\rm masked}(v)\,dv,
 \qquad
-\rho_{\rm masked}(v)=\rho_{\mathbf w}(v)\,A_{\rm cond}(v),
+\rho_{\rm masked}(v)=\rho_{\mathbf w}(v)\,
+A_{\rm cond}(v;d,\mathbf c),
 $$
 
 where $\rho_{\mathbf w}$ is the unmasked Irwin–Hall marginal of Figure 2(a)
 and $A_{\rm cond}$ the conditional acceptance of §6; the sheet formula of
-§15.1, $2\pi\rho_{\mathbf w}(-u_0)A_{\rm cond}(0)$, is this same
-factorization evaluated at the phase-matched point. What follows classifies
-the *product* $\rho_{\rm masked}$ across the width simplex — and shows that
-the mask reshuffles the unmasked classification of Figure 2(a) rather than
-inheriting it.
+§15.1 is this same factorization evaluated at the phase-matched point,
+$2\pi\rho_{\mathbf w}(-u_0)
+A_{\rm cond}(-u_0;d,\mathbf c)$. Equivalently, the latter factor is the
+acceptance conditioned on complete phase $u=0$. This section first gives the
+orientation-independent regime structure and bounds, then classifies the
+*product* $\rho_{\rm masked}$ across the $d=0$ width simplex. The mask
+reshuffles the unmasked classification of Figure 2(a) rather than inheriting
+it.
+
+**General orientation and four-regime structure.** Let
+
+$$
+\mathbf c=(\nu_a,\nu_b,-\nu_c),
+\qquad
+\mathbf n=(1,1,-1),
+\qquad
+v=\mathbf c\cdot\mathbf x,
+$$
+
+where $\mathbf n$ is fixed by frequency conservation but $\mathbf c$ is the
+signed phase-gradient direction. Define the accepted polytope
+
+$$
+D_d=\{\mathbf x\in[-\pi,\pi]^3:
+|\mathbf n\cdot\mathbf x+d|\le\pi\}
+$$
+
+and write the masked density above equivalently as the pushforward
+
+$$
+\rho_{\mathbf c,d}(v)
+=\frac{1}{(2\pi)^3}\int_{D_d}
+\delta(v-\mathbf c\cdot\mathbf x)\,d^3\mathbf x,
+\qquad
+\int\rho_{\mathbf c,d}(v)\,dv=A(d).
+$$
+
+The equal-split calculation of §10.2 is the special case
+$\mathbf c\parallel\mathbf n$. For every orientation, however, the reduced
+observable remains
+
+$$
+\boxed{\;E=\int\hat K(u_0+v)\rho_{\mathbf c,d}(v)\,dv\;}.
+$$
+
+Only the support and shape of the masked density change. Since $D_d$ is
+convex, its image under $\mathbf x\mapsto\mathbf c\cdot\mathbf x$ is one exact
+interval
+
+$$
+I_{\mathbf c,d}=[v_-,v_+],
+\qquad
+v_-=\min_{\mathbf x\in D_d}\mathbf c\cdot\mathbf x,
+\qquad
+v_+=\max_{\mathbf x\in D_d}\mathbf c\cdot\mathbf x.
+$$
+
+The endpoints follow from two three-variable linear programs, or equivalently
+finite vertex enumeration. They give the exact orientation-dependent
+classification
+
+$$
+\boxed{
+-u_0\in[v_-,v_+]\ \Longleftrightarrow\quad
+\text{masked-domain crossing},
+\qquad
+-u_0\notin[v_-,v_+]\ \Longleftrightarrow\quad
+\text{gapped}.
+}
+$$
+
+A closed certified bound is available without solving those programs.
+Decompose the gradient relative to the mask normal,
+
+$$
+\kappa=\frac{\mathbf c\cdot\mathbf n}{3},
+\qquad
+\mathbf c_\perp=\mathbf c-\kappa\mathbf n,
+\qquad
+W=\pi\|\mathbf c\|_1,
+$$
+
+and define
+
+$$
+H_M=\pi|\kappa|+\pi\|\mathbf c_\perp\|_1.
+$$
+
+The mask confines the parallel component while the cube bounds the
+perpendicular component, so
+
+$$
+I_{\mathbf c,d}
+\subseteq I_{\rm out}
+\equiv[-W,W]\cap[-\kappa d-H_M,-\kappa d+H_M].
+$$
+
+For the equal split this interval is exact; at $d=0$ its half-width is
+$w=W/3$. For a generic direction it is a conservative superset. If
+$I_{\rm out}$ excludes $-u_0$, let $g_{\rm out}$ be their distance. Every
+accepted phase then satisfies $|u_0+v|\ge g_{\rm out}$, and therefore
+
+$$
+\boxed{\;E\le A(d)\min\!\left(1,\frac{4}{g_{\rm out}^2}\right)\;}.
+$$
+
+Using the exact interval gives the same bound with the exact, generally
+larger gap. No comparable positive lower bound exists without additional
+phase localization because the kernel has exact nulls.
+
+To state the four limits, define accepted moments
+
+$$
+M_r=\int_{v_-}^{v_+}v^r\rho_{\mathbf c,d}(v)\,dv,
+\qquad
+\bar v=\frac{M_1}{A(d)},
+\qquad
+\sigma_v^2=\frac{M_2}{A(d)}-\bar v^2.
+$$
+
+At $d=0$, inversion symmetry of $D_0$ gives $\bar v=0$ for every orientation.
+The four regions of §10.2 then become the following orientation-independent
+mechanisms with orientation-dependent boundaries and prefactors:
+
+1. **Coherent plateau.** If
+   $U_{\max}=\max(|u_0+v_-|,|u_0+v_+|)\ll1$, then
+
+   $$
+   E=A(d)-\frac1{12}
+   \left[A(d)u_0^2+2u_0M_1+M_2\right]
+   +\mathcal O\!\left(A(d)U_{\max}^4\right).
+   $$
+
+   The plateau height $A(d)$ is orientation-independent, while its curvature
+   depends on the accepted second moment.
+
+2. **Sheet.** If $-u_0$ is interior to $I_{\mathbf c,d}$ and the masked
+   density is locally flat over the kernel core, then
+
+   $$
+   E\sim2\pi\rho_{\mathbf c,d}(-u_0).
+   $$
+
+   More quantitatively, put
+
+   $$
+   \Delta_{\rm edge}=\min(-u_0-v_-,v_++u_0)
+   $$
+
+   and choose $U<\Delta_{\rm edge}$. The core-and-tail construction of
+   §10.2.1 applies with
+
+   $$
+   R_{\mathbf c,d}(U)=
+   \max_{|q|\le U}
+   \frac{|\rho_{\mathbf c,d}(-u_0+q)
+   -\rho_{\mathbf c,d}(-u_0)|}
+   {\rho_{\mathbf c,d}(-u_0)}.
+   $$
+
+   The sufficient conditions $1\ll U<\Delta_{\rm edge}$ and
+   $R_{\mathbf c,d}(U)\ll1$ replace the equal-split inequalities. The sheet
+   height is the local cross-sectional area of $D_d$ at phase matching.
+
+3. **Gapped, dephased.** If the exact interval excludes $-u_0$ and the
+   accepted phase range spans many kernel periods, the cosine term averages
+   away:
+
+   $$
+   E\sim\int_{v_-}^{v_+}
+   \frac{2\rho_{\mathbf c,d}(v)}{(u_0+v)^2}\,dv.
+   $$
+
+   Deep in the gap, with $u_c=u_0+\bar v$ large compared with the accepted
+   phase spread, this becomes $E\sim2A(d)/u_c^2$. Orientation enters through
+   the accepted mean, higher moments, and residual fringe contrast.
+
+4. **Gapped, coherent.** If the accepted phase spread is narrow on the kernel
+   scale, expansion about $u_c=u_0+\bar v$ gives
+
+   $$
+   E=A(d)\hat K(u_c)
+   +\frac{A(d)\sigma_v^2}{2}\hat K''(u_c)+\cdots.
+   $$
+
+   The fringes survive, with their phase shifted by the accepted mean and
+   their first smoothing correction controlled by the conditional variance.
+
+Thus the useful structure is still a $2\times2$ classification: crossing
+versus gapped, and coherent/narrow versus dephased/broad. What is lost is the
+universal straight partition in $(x_\nabla,u_0)$. A normalized generic direction has
+two orientation degrees of freedom, and the cube is not rotationally
+invariant, so one alignment angle cannot determine the full density shape.
+The remainder of this section sets $d=0$ and gives exact width-simplex anchors
+for that general framework.
 
 **Physical reading.** A tuple's noise involves two different linear
 functionals of the same three in-band frequencies: where the mixing product
@@ -2578,8 +3629,9 @@ E_{\rm one\text{-}leg}(u_0,x_\nabla)=E_{\rm equal}(u_0)\big|_{w=\pi x_\nabla},
 \tag{10.3.2}
 $$
 
-so the entire $(s,\mu)$ phase diagram of Figure 10 applies verbatim with the
-sheet edge at $|\mu|=\pi$ instead of $\pi/\sqrt3$. The two-leg entry — the
+so the entire $(x_\nabla,|u_0|)$ phase diagram of Figure 12 applies verbatim
+with the sheet-edge ray at $|u_0|=\pi x_\nabla$ instead of
+$\pi x_\nabla/\sqrt3$. The two-leg entry — the
 triangular marginal of $x_a+x_b$ times its conditional acceptance
 $1-|t|/2\pi$ — is the genuinely different class: **cusped at the center and
 vanishing to second order at the edges**, with no hard edge anywhere.
@@ -2670,9 +3722,76 @@ the target. Near the ZDW, $\beta_1$ becomes non-monotonic, distant channels
 can share a group velocity, and the whole simplex — including the
 $(w,-w,\epsilon)$ geometry of Figure 4(b) — opens up.
 
+**Exhaustive real-system direction census.** The directions do not uniformly
+fill that simplex or the unit sphere. A streaming census over all 2284 targets
+on the full interferer grid
+([`gradient_direction_census.py`](../../analysis/fwm/gradient_direction_census.py))
+enumerates 23,667,485,696 support-surviving ordered strict-FWM tuples. For each
+tuple it normalizes the signed vector
+$\mathbf c=(\nu_a,\nu_b,-\nu_c)$ and bins its azimuth
+$\operatorname{atan2}(c_b,c_a)$ and elevation
+$\arcsin(c_c/\|\mathbf c\|_2)$. No tuple has a zero gradient. The uniform
+reference uses each bin's exact solid angle,
+
+$$
+P_{ij}^{\rm unif}
+=\frac{\Delta\phi_i}{2\pi}
+\frac{\sin e_{j+1}-\sin e_j}{2},
+$$
+
+so equal raw counts per elevation bin are not mistaken for spherical
+uniformity.
+
+The population is **strongly nonuniform**. On the $144\times72$ angular grid,
+the observed distribution has total-variation distance $0.7633$ and
+Kullback–Leibler divergence $1.9335$ nats from the uniform-sphere reference;
+the most overpopulated bin contains $71.5$ times its uniform expectation. The
+eigenvalues of
+$\mathbb E[\hat{\mathbf c}\hat{\mathbf c}^{\mathsf T}]$ are
+$(0.0551,0.3176,0.6273)$ rather than $(1/3,1/3,1/3)$. The small first-moment
+resultant, $0.0550$, does not indicate isotropy: opposite anisotropic
+populations partially cancel.
+
+Relative to the equal-split mask axis
+$\hat{\mathbf n}=(1,1,-1)/\sqrt3$, half of all tuples satisfy
+$|\hat{\mathbf c}\cdot\hat{\mathbf n}|\ge0.8$ (uniform-sphere expectation:
+$20\%$). The two signs are not populated identically: the share with
+$\hat{\mathbf c}\cdot\hat{\mathbf n}\ge0.95$ is only
+$3.1\times10^{-6}$, whereas
+$\hat{\mathbf c}\cdot\hat{\mathbf n}\le-0.95$ contains $12.15\%$ of tuples
+(uniform expectation: $2.5\%$ per sign). The equal-split axis is therefore a
+useful analytic anchor but not a representative random direction.
+
+Figure 16 shows the resulting angular distribution. The census counts
+tuples; it does not weight them by efficiency. It states
+which directions occur geometrically, and bounds nothing about which
+directions carry the efficiency sum — that distribution can be more
+concentrated still.
+
+![Exhaustive real-system gradient-direction census](_static/lorenzi-fast/gradient_direction_census.png)
+
+*Figure 16 — Strict-FWM gradient-direction census over all 2284 targets on the
+full interferer grid
+([`gradient_direction_census.py`](../../analysis/fwm/gradient_direction_census.py)),
+$2.37\times10^{10}$ ordered tuples on a $144\times72$ angular grid. Left:
+tuple probability density in azimuth $\operatorname{atan2}(c_b,c_a)$ and
+elevation $\arcsin(c_c/\lVert\mathbf c\rVert_2)$ of the normalized signed
+gradient $\mathbf c=(\nu_a,\nu_b,-\nu_c)$. Center: $\log_{10}$ of the ratio to
+the uniform-solid-angle reference $P^{\rm unif}_{ij}$. Stars mark the three
+plane normals $\mathbf u_1$, $\mathbf u_2$, $\mathbf u_3$ defined in §10.4.1,
+eq. (10.4.7), after the slot permutation stated there. Right: density of the
+alignment cosine $\hat{\mathbf c}\cdot\hat{\mathbf n}$ with the mask normal
+$\hat{\mathbf n}=(1,1,-1)/\sqrt3$; the horizontal line at $1/2$ is the
+uniform-sphere density, and the $\mathbf u_1$ and $\mathbf u_3$ stars coincide
+at $+\sqrt{2/3}$.*
+
+Figure 17 compares the three closed-form masked densities (10.3.1), the
+efficiencies they produce in the sheet regime, and their gapped fringe
+contrast.
+
 ![Mask inhomogeneity across the width simplex](_static/lorenzi-fast/mask_inhomogeneity.png)
 
-*Figure 14 — Mask inhomogeneity at $d=0$
+*Figure 17 — Mask inhomogeneity at $d=0$
 ([`plot_mask_inhomogeneity.py`](../../analysis/fwm/plot_mask_inhomogeneity.py)):
 (a) the three masked mismatch densities (10.3.1) at fixed $x_\nabla$, with
 Monte-Carlo verification (dots); equal and one-leg splits share the
@@ -2687,35 +3806,879 @@ $\mathcal O(x_\nabla^{-2})$ for the cusped class.*
 
 **Orientation phase diagrams.** Because all three masked densities are
 piecewise quadratic, the same closed-form kernel primitives that produce
-Figures 10 and 12 evaluate the full $(s,\mu)$ phase diagram for each
+Figures 12 and 14 evaluate the full $(x_\nabla,u_0)$ phase diagram for each
 orientation exactly — and the same holds for *any* orientation, since the
 zonotope joint density of §6 is piecewise linear and one mask integration
-makes the masked marginal piecewise quadratic. Figure 15 shows the three
-diagrams in the coordinates of Figure 10. The one-leg panel is the
-equal-split panel under the exact remap (10.3.2) — the sheet band dilates
-from $|\mu|<\pi/\sqrt3$ to $|\mu|<\pi$ with no structural change. The
-two-leg panel is the cusped class: the widest sheet band
-($|\mu|<\sqrt2\pi$) with *soft* edges — the sheet fades continuously
+makes the masked marginal piecewise quadratic. Figure 18 shows the three
+diagrams in the coordinates of Figure 12, with the signed $u_0$ as ordinate.
+The one-leg panel is the equal-split panel under the exact remap (10.3.2) —
+the sheet wedge dilates from $|u_0|<\pi x_\nabla/\sqrt3$ to
+$|u_0|<\pi x_\nabla$ with no structural change. The two-leg panel is the
+cusped class: the widest sheet wedge ($|u_0|<\sqrt2\pi\,x_\nabla$) with
+*soft* edges — the sheet fades continuously
 because the edge density vanishes to second order, where the parabolic
 panels cut off sharply. The ratio panel quantifies the inhomogeneity
-effect tuple-by-tuple: order-of-magnitude excess in the band
-$\pi/\sqrt3<|\mu|<\sqrt2\pi$, where a two-leg tuple is still phase-matched
-while an equal-split tuple of the same $(s,\mu)$ is already gapped; a mild
-deficit near $\mu=0$, where the finite kernel width averages the cusp peak
+effect tuple-by-tuple: order-of-magnitude excess in the wedge
+$\pi x_\nabla/\sqrt3<|u_0|<\sqrt2\pi\,x_\nabla$, where a two-leg tuple is
+still phase-matched while an equal-split tuple of the same
+$(x_\nabla,u_0)$ is already gapped; a mild deficit near $u_0=0$, where the finite kernel width averages the cusp peak
 down more than the flatter parabola (the same effect visible at $u_0=0$ in
-Figure 14b); and sign-alternating fringe-phase differences beyond the
+Figure 17b); and sign-alternating fringe-phase differences beyond the
 sheet edges.
 
 ![Orientation phase diagrams at d=0](_static/lorenzi-fast/orientation_phase_diagrams.png)
 
-*Figure 15 — Exact $d=0$ phase diagrams across walk-off orientations
+*Figure 18 — Exact $d=0$ phase diagrams across walk-off orientations
 ([`plot_orientation_phase_diagrams.py`](../../analysis/fwm/plot_orientation_phase_diagrams.py)),
-in the coordinates of Figure 10. Solid white lines are the sheet edges
-$|\mu|=h/x_\nabla=\{\pi/\sqrt3,\ \pi,\ \sqrt2\pi\}$; dashed is
-$x_\nabla=1$. Panel (b) is panel (a) under the exact remap (10.3.2);
+in the coordinates of Figure 12, with $x_\nabla$ (log) against the signed
+$u_0$ (symlog). Solid white lines are the sheet-edge rays
+$|u_0|=h\,x_\nabla$ with slopes $h=\{\pi/\sqrt3,\ \pi,\ \sqrt2\pi\}$;
+dashed is $x_\nabla=1$. Panel (b) is panel (a) under the exact remap (10.3.2);
 panel (c) is the cusped class with soft sheet edges; panel (d) is
 $\log_{10}$ of the two-leg/equal ratio (black contour: equality), showing
 the sheet-band mismatch as the dominant orientation effect.*
+
+### 10.4 Which orientations the dispersion actually produces
+
+§10.3 treats the walk-off direction $\mathbf c=(\nu_a,\nu_b,-\nu_c)$ as a free
+parameter and classifies the masked density across the width simplex; its
+closing paragraph begins to pin that direction down from the census. This
+section closes the loop. Within a global dispersion model truncated at
+$\beta_3$, the orientation is a deterministic closed-form function of the
+tuple, and — the operative result — **it is pinned to the two-leg cusped class
+exactly on the phase-matching locus**. Orientation and regime are therefore
+correlated rather than independent, and the correlation runs in the direction
+that maximizes the inhomogeneity measured in §10.3.
+
+The geometry of the phase-matching locus is developed separately in
+[`phase_matching_planes.md`](../../analysis/standalone_analytical/phase_matching_planes.md);
+this section uses only its factorization. Every identity below is checked
+symbolically, and every density claim by Monte-Carlo, in
+[`verify_walkoff_orientation.py`](../../analysis/standalone_analytical/verify_walkoff_orientation.py)
+(17 checks).
+
+**Notation.** Write $\beta_2(\omega)=d^2\beta/d\omega^2$ for the local GVD *as
+a function of frequency*, so that $\beta_2^{(j)}=\beta_2(\omega_j)$ in the
+notation of §1.1; in the cubic model $\beta_2(\omega)=\beta_2+\beta_3\omega$ is
+affine. Let $\omega_a,\omega_b$ be the two unconjugated legs, $\omega_c$ the
+conjugated one, and
+
+$$
+\omega_\ell=\omega_a+\omega_b-\omega_c
+$$
+
+the **landing frequency** of the mixing product — the target channel center
+$\omega_t$ displaced by the carrier residual and the in-band offset,
+$\omega_\ell-\omega_t=B(x_a+x_b-x_c+d)/2\pi$ in the variables of §3. Energy
+conservation says the pairs $\{\omega_a,\omega_b\}$ and $\{\omega_c,\omega_\ell\}$
+share a mean, so
+
+$$
+\bar\omega=\frac{\omega_a+\omega_b}{2}=\frac{\omega_c+\omega_\ell}{2},
+\qquad
+\Delta_+=\frac{\omega_a-\omega_b}{2},
+\qquad
+\Delta_-=\frac{\omega_c-\omega_\ell}{2}
+$$
+
+are complete coordinates. (These are $S$, $p$, $q$ in the companion note.) The
+warning of §3 applies: the $\nu_i$ of the geometry scripts is an optical
+frequency, not the walk-off $\nu_j$ used here.
+
+**Step 1: the walk-off vector is a gradient, and the frame convention is
+forced.** §1.1 already records $x_\nabla=LB\lVert\nabla\Delta\beta\rVert_2$, so
+the identification of $\mathbf c$ with a gradient is not new; what follows is
+its evaluation in closed form. Let each leg move within its own channel,
+$\omega_j\mapsto\omega_j+\xi_j$. The landing frequency is *not* free — it
+follows the legs, $\omega_\ell\mapsto\omega_\ell+(\xi_a+\xi_b-\xi_c)$ — so the
+chain rule gives
+
+$$
+\frac{\partial\,\Delta\beta}{\partial\xi_a}=\beta_1(\omega_a)-\beta_1(\omega_\ell),
+\qquad
+\frac{\partial\,\Delta\beta}{\partial\xi_b}=\beta_1(\omega_b)-\beta_1(\omega_\ell),
+\qquad
+\frac{\partial\,\Delta\beta}{\partial\xi_c}=-\bigl[\beta_1(\omega_c)-\beta_1(\omega_\ell)\bigr].
+\tag{10.4.1}
+$$
+
+Writing $\nu_j=\Delta\beta_1^{(j)}BL$ as in §3, this is exactly
+$\nabla\Delta\beta\propto(\nu_a,\nu_b,-\nu_c)=\mathbf c$. Two conventions that
+§3 and §10.3 *state* are here *derived*: the minus sign on the third slot is
+the chain rule through the conjugation, and the absence of a $\nu_t$ term is
+the statement that differentiation naturally produces walk-offs referred to
+the landing frequency. The frame-invariance remark of §4 —
+$\nu_j\mapsto\nu_j-\nu_t$ plus a shift of $u_0$ — is the change from this
+landing frame to the target-centered one; both are used below and the
+difference matters at (10.4.6).
+
+**Step 2: the midpoint law.** The factorization of the companion note reads,
+in these coordinates,
+
+$$
+\Delta\beta=\bigl(\Delta_+^2-\Delta_-^2\bigr)\,\beta_2(\bar\omega).
+\tag{10.4.2}
+$$
+
+For the walk-offs there is an equally compact statement. Since $\beta_2$ is
+affine in the cubic model, the midpoint rule for a difference of $\beta_1$ is
+*exact*, not approximate:
+
+$$
+\boxed{\;
+\nu_j=\bigl(\omega_j-\omega_\ell\bigr)\;
+\beta_2\!\left(\frac{\omega_j+\omega_\ell}{2}\right)BL\;}
+\tag{10.4.3}
+$$
+
+— each leg's walk-off is its frequency separation from the landing frequency
+times the local GVD *at the midpoint of the two*. This is the whole content of
+the orientation problem in one line. Reading it out on the three legs:
+
+$$
+\nu_a=\Delta_{+-}\,\beta_2\!\left(\bar\omega+\tfrac{\Delta_+-\Delta_-}{2}\right),
+\quad
+\nu_b=-\Delta_{-+}\,\beta_2\!\left(\bar\omega-\tfrac{\Delta_++\Delta_-}{2}\right),
+\quad
+\nu_c=2\Delta_-\,\beta_2(\bar\omega),
+$$
+
+with $\Delta_{+-}=\Delta_++\Delta_-$ and $\Delta_{-+}=\Delta_+-\Delta_-$, all
+times $BL$. Here $\nu_c$ carries no separate $\beta_3$ correction: leg $c$
+and the landing frequency are symmetric about $\bar\omega$, so their midpoint
+*is* $\bar\omega$.
+
+**Step 3: the orientation on the phase-matching locus.** By (10.4.2),
+$\Delta\beta=0$ splits into $\Delta_+=\Delta_-$ (i.e. $\omega_a=\omega_c$),
+$\Delta_+=-\Delta_-$ ($\omega_b=\omega_c$), and the sheet
+$\beta_2(\bar\omega)=0$. Substituting each into the midpoint law:
+
+| surface | $(\nu_a,\nu_b,\nu_c)\propto$ | width split | $\cos(\mathbf c,\mathbf c_m)$ |
+|---|---|---|---|
+| $P_1$: $\omega_a=\omega_c$ | $(1,0,1)$ | $(w,0,w)$ | $\sqrt{2/3}$ |
+| $P_2$: $\omega_b=\omega_c$ | $(0,1,1)$ | $(0,w,w)$ | $\sqrt{2/3}$ |
+| $Q$: $\beta_2(\bar\omega)=0$ | $(1,1,0)$ | $(w,w,0)$ | $\sqrt{2/3}$ |
+
+with, on the sheet, the closed value
+
+$$
+\nu_a=\nu_b=\tfrac12\beta_3\,(\omega_a-\omega_\ell)(\omega_\ell-\omega_b)\,BL,
+\qquad \nu_c=0 .
+\tag{10.4.4}
+$$
+
+The $Q$ row is literally the $(w,w,0)$ two-leg direction of §10.3. The other
+two are *the same class*, not merely directions with the same correlation: the
+group of signed coordinate permutations preserving both the cube $[-\pi,\pi]^3$
+and the mask normal $\mathbf c_m=(1,1,-1)$ has 12 elements, and $(1,0,-1)$ and
+$(0,1,-1)$ both lie in the orbit of $(1,1,0)$ — for instance
+$(x_a,x_b,x_c)\mapsto(x_a,-x_c,-x_b)$ fixes $\mathbf c_m$ and carries the first
+to the third. Since $\rho_{\mathbf c,d}$ depends only on the pair
+$(\mathbf c,D_d)$, the masked densities coincide identically. Monte-Carlo
+confirms it: $\max|\rho-\rho_Q|$ is $0.010$ and $0.008$ for $P_1,P_2$ —
+sampling noise — against $0.348$ for the equal split and $0.508$ for one leg.
+
+The correlation $\sqrt{2/3}$ is *not* what does the work here, and §10.3 warns
+as much: the one-leg direction has the least correlation but shares the
+equal-split shape. The orbit argument is what establishes the identification.
+
+**Step 4: physical reading — the sheet is a group-velocity coincidence.** From
+the midpoint law, $\beta_1(\omega_a)-\beta_1(\omega_b)=2\Delta_+\beta_2(\bar\omega)BL$.
+So on $Q$ the two unconjugated legs **share a group velocity**, and
+simultaneously $\nu_c=0$ makes leg $c$ frozen to the landing frequency. In the
+collision picture of §2.1, a phase-matched non-degenerate tuple is one where
+two legs slide together while the third rides with the target — which is
+precisely the geometry §10.3 names "two far channels at nearly the same
+frequency (a quasi-degenerate-pump geometry)". This is the sharp form of the
+closing remark of §10.3 that near the ZDW "distant channels can share a group
+velocity": that locus *is* the phase-matching sheet.
+
+**Step 5: the $q_{\rm res}=0$ plane and its $\beta_3$ tilt.** §10.3 states
+that with $\beta_1$ affine the census puts the $q_{\rm res}=0$ population on
+the plane $\nu_c=\nu_a+\nu_b$. The exact statement, in the target-centered
+frame that sentence uses, is
+
+$$
+\nu_a+\nu_b-\nu_c
+=\underbrace{\frac{\beta_3}{\beta_2(\bar\omega)}\,u_0}_{\text{phase-matching tilt}}
+\;+\;\underbrace{\bigl[\beta_1(\omega_\ell)-\beta_1(\omega_t)\bigr]BL}_{\text{carrier residual}} .
+\tag{10.4.5}
+$$
+
+Both terms are exact. The second reduces at $\beta_3=0$ to
+$\beta_2\,(\omega_\ell-\omega_t)BL\propto q_{\rm res}\Delta f$, recovering
+§10.3's statement and its plane. The first is new and is the point: the
+departure from that plane carries a component **strictly proportional to the
+center mismatch $u_0$**, with the ratio $\beta_3/\beta_2(\bar\omega)$ set only
+by where the pump mean sits relative to the ZDW. Orientation and regime are
+the same variable seen twice.
+
+$$
+\frac{\nu_a+\nu_b-\nu_c}{u_0}\bigg|_{\text{landing frame}}
+=\frac{B\beta_3}{\beta_2(\bar\omega)}
+\tag{10.4.6}
+$$
+
+**Consequences for §10.3's conclusions.** Four, in order of practical weight.
+
+1. *The orientation is not a nuisance degree of freedom.* §10.3 notes that a
+   generic direction has two orientation dof and that one alignment angle
+   cannot determine the density shape. That remains true as a statement about
+   the general framework, but the dispersion does not deliver generic
+   directions: (10.4.3) computes $\mathbf c$ per tuple in closed form. It is
+   cheaper to evaluate than to classify.
+
+2. *The largest inhomogeneity is systematically populated, not rare.* Figure 18
+   identifies the dominant orientation effect as an order-of-magnitude excess
+   in the wedge $\pi x_\nabla/\sqrt3<|u_0|<\sqrt2\pi\,x_\nabla$, where a
+   two-leg tuple is still phase-matched while an equal-split tuple of the same
+   $(x_\nabla,u_0)$ is already gapped. Step 3 says the sheet-regime tuples *are* the two-leg ones. Using
+   the equal-split diagram for them therefore biases low, and does so exactly
+   where the mass concentrates — this is the same failure mode as the cheap
+   model of §6, which §10.3 already locates at the near-ZDW tuples.
+
+3. *The natural stratification variable is $\beta_2(\bar\omega)$*, the local
+   GVD at the pump mean — distance to the sheet — not an orientation angle.
+   It controls the interpolation: away from $Q$ the walk-off vector is
+   $\mathbf c=\beta_2(\bar\omega)\,(\ldots)+\tfrac12\beta_3(\Delta_+^2-\Delta_-^2)(1,1,0)$,
+   so the relative departure from the cusped limit is governed by
+   $\beta_2(\bar\omega)$ alone at fixed splittings.
+
+4. *The fringe mechanism changes with it.* Per (10.3.4), the cusped class has
+   smooth $\simeq6/h^2$ contrast where the parabolic class has oscillatory
+   $\mathcal O(h^{-1})$. Near-sheet tuples therefore have qualitatively
+   different gapped-fringe statistics from the equal-split default, one power
+   faster in decay and without the $|\sin h|$ modulation.
+
+**Scope and limits.** (i) The closed forms are the cubic global model. With
+$\beta_4$ the sheet $Q$ bends into a quadric and (10.4.3) acquires an
+$\mathcal O(\beta_4)$ correction, but $P_1$ and $P_2$ survive exactly at every
+dispersion order — they follow from the pair structure of $\Delta\beta$ alone,
+independently of $\beta$. (ii) $\mathbf c$ is the first-order coefficient
+vector; the in-channel quadratic terms $q_j$ of §3, dropped in §4 and measured
+separately in S2 (§11), are untouched by this analysis. (iii) The effect is $\beta_3$-driven: at
+$\beta_3=0$ there is no ZDW, $Q$ does not exist, and by (10.4.4)
+$\lVert\mathbf c\rVert\to0$ on it. (iv) $P_1$ and $P_2$ require two legs to
+coincide in frequency, which on a WDM grid means a repeated channel index —
+they are the XPM sector of §12, not FWM tuples. For genuine FWM the operative
+surface is $Q$ alone, and the statement of Step 3 reduces to: *phase-matched
+non-degenerate tuples carry the cusped two-leg orientation.*
+
+#### 10.4.1 The zero-phase plane normals $\mathbf u_1,\mathbf u_2,\mathbf u_3$ and their phase diagrams
+
+§10.3 treated the one-, two-, and three-leg splits as *variants* of the regime
+structure, chosen to span the width simplex. Step 3 above removes the choice:
+the dispersion delivers three specific surfaces, and the object that
+characterizes each is its **unit normal**. Because the surfaces are level sets
+of $\Delta\beta$, that normal *is* the walk-off gradient $\nabla\Delta\beta$ —
+so a single vector per plane serves both roles, and a tuple sitting on the
+locus has $\mathbf c=x_\nabla\mathbf u_i$ exactly.
+
+**Convention.** The normals are most naturally written in the coordinates of
+the companion note
+([`phase_matching_planes.md`](../../analysis/standalone_analytical/phase_matching_planes.md)),
+which uses
+
+$$
+\omega_1-\omega_2+\omega_3=\omega_4,
+\qquad
+\nu_j=\omega_j-\omega_{\rm COI},
+$$
+
+so that legs $1$ and $3$ are the unconjugated pumps, leg $2$ is the conjugated
+one, and $(\nu_1,\nu_2,\nu_3)$ is a complete unconstrained coordinate system.
+The frequency-matching slab is $|\nu_1-\nu_2+\nu_3|<\pi$, i.e. the mask normal
+is $\mathbf m=(1,-1,1)$. In that convention
+
+$$
+\boxed{\;
+\mathbf u_1=\frac{1}{\sqrt2}(1,-1,0),
+\qquad
+\mathbf u_2=\frac{1}{\sqrt2}(0,1,-1),
+\qquad
+\mathbf u_3=\frac{1}{\sqrt2}(1,0,1)\;}
+\tag{10.4.7}
+$$
+
+are the unit normals of $P_1$ ($\nu_1=\nu_2$), $P_2$ ($\nu_2=\nu_3$) and $Q$
+($\nu_1+\nu_3=2\nu_{\rm ZDF}$) respectively. Note the ordering: the conjugated
+leg occupies the **middle** slot, so translating to the $(x_a,x_b,x_c)$
+convention of §§10.2–10.3 is the slot permutation $(1,2,3)\mapsto(a,c,b)$,
+under which $\mathbf m\mapsto(1,1,-1)=\mathbf n$ and
+
+$$
+\mathbf u_1\mapsto\tfrac{1}{\sqrt2}(1,0,-1),
+\qquad
+\mathbf u_2\mapsto\tfrac{1}{\sqrt2}(0,-1,1),
+\qquad
+\mathbf u_3\mapsto\tfrac{1}{\sqrt2}(1,1,0).
+$$
+
+Each is a unit vector, $\lVert\mathbf u_i\rVert_2=1$, which is what makes
+$x_\nabla$ the scale factor; they further share
+$\lVert\mathbf u_i\rVert_1=\sqrt2$ and
+$|\cos(\mathbf u_i,\mathbf m)|=\sqrt{2/3}$.
+
+**Why the three masked densities coincide at $d=0$.** The mechanism is
+sharper than the orbit argument of Step 3, and it is worth stating because it
+also predicts where the three *stop* coinciding. Each $\mathbf u_i$ has
+exactly one **zero slot**, and the mask normal has $\pm1$ in *every* slot.
+Hence the leg absent from the mismatch always enters the mask linearly with
+unit coefficient, and — being uniform and otherwise unconstrained — it
+contributes the same acceptance factor whichever leg it happens to be. Writing
+$t$ for the unit-scale mismatch ($v=x_\nabla t$) and $S$ for the mask form,
+
+$$
+S=(\mathbf m\cdot\mathbf u_i)\,t=\varepsilon_i\sqrt2\,t,
+\qquad
+\varepsilon_1=\varepsilon_3=+1,
+\quad
+\varepsilon_2=-1,
+\tag{10.4.8a}
+$$
+
+and the masked density of $t$ factorizes into the triangular law of the two
+active legs times the free leg's acceptance,
+
+$$
+\rho_d(t)=
+\underbrace{\frac{\sqrt2\left(2\pi-\sqrt2\,|t|\right)}{4\pi^2}}_{\text{active pair}}
+\cdot
+\underbrace{\frac{\max\!\left(0,\;2\pi-\left|\varepsilon_i\sqrt2\,t+d\right|\right)}{2\pi}}_{\text{free third leg}},
+\qquad |t|\le h_1=\sqrt2\,\pi .
+\tag{10.4.8b}
+$$
+
+At $d=0$ the sign $\varepsilon_i$ drops out of $|\varepsilon_i\sqrt2 t|$, the
+two factors combine, and all three collapse onto the single cusped law of
+(10.3.1),
+
+$$
+\rho_{\mathbf u}(v)=\frac{(h-|v|)^2}{h^3},
+\qquad
+|v|<h,
+\qquad
+h=\sqrt2\,\pi x_\nabla ,
+\tag{10.4.8}
+$$
+
+with $\int\rho_{\mathbf u}=A(0)=2/3$. This is exact, not approximate:
+evaluating (10.4.8b) numerically from each $\mathbf u_i$ separately — with no
+shared formula assumed — gives densities that agree **bit for bit**, and match
+(10.4.8) to $2.5\times10^{-4}$ relative (quadrature discretization). Direct
+$3$-D masked Monte-Carlo over the cube confirms the efficiencies agree to
+$\le3\times10^{-3}$, i.e. to sampling noise.
+
+**A structural consequence: the mask costs no support.** The unmasked
+half-range is $W=\pi\lVert\mathbf c\rVert_1=\sqrt2\,\pi x_\nabla$, so
+
+$$
+\boxed{\;h=W\;}
+$$
+
+— for the directions the dispersion actually produces, the output-support mask
+does **not** shrink the reachable mismatch interval at all. Contrast the equal
+split, where $h=W/3$. The reason is visible in (10.4.7): each $\mathbf u_i$ has
+a zero slot, and the corresponding frozen leg is free to absorb whatever the
+mask demands, so every value of $v$ remains attainable. The mask acts only on
+the *shape*, replacing the hard-edged parabola of §10.2 by a density that
+vanishes quadratically at $\pm h$. Equivalently, the certified outer interval
+$I_{\rm out}$ of §10.3 is **exact** here: $H_M=\sqrt2\pi x_\nabla=W$.
+
+**Region demarcation lines.** Substituting (10.4.8) into the four general
+mechanisms of §10.3 — with $\bar v=0$ and the accepted variance
+
+$$
+\sigma_v^2=\frac{M_2}{A(0)}=\frac{h^2}{10}
+\qquad\text{(cusped)},
+\qquad\text{vs}\qquad
+\sigma_v^2=\frac{3h^2}{10}
+\qquad\text{(parabolic)}
+$$
+
+— gives demarcations that are again all straight lines in
+$(x_\nabla,|u_0|)$:
+
+$$
+\begin{aligned}
+\text{plateau edge:}\quad &|u_0|+\sqrt2\,\pi x_\nabla=\pi ,\\
+\text{sheet/gap ray:}\quad &|u_0|=\sqrt2\,\pi x_\nabla \;(=W),\\
+\text{coherence line:}\quad &x_\nabla=\frac{\sqrt5}{\pi}\simeq0.712 .
+\end{aligned}
+\tag{10.4.9}
+$$
+
+The coherence line deserves a word, because §10.2 fixed it by the convention
+$x_\nabla=1$, which is equal-split specific. The orientation-independent
+statement is that the gapped fringes survive while the *accepted phase spread*
+is under one radian, $\sigma_v\lesssim1$. That criterion reproduces the §10.2
+line to within $0.7\%$ — for the equal split $\sigma_v=\pi x_\nabla/\sqrt{10}$,
+so $\sigma_v=1$ at $x_\nabla=\sqrt{10}/\pi=1.0066$ — and generalizes without a
+new convention. For the $\mathbf u$ class $\sigma_v=\pi x_\nabla/\sqrt5$, giving
+(10.4.9).
+
+**General $d$: where the three planes separate.** The three coincide at $d=0$
+only. As soon as the support window is shifted, the sign $\varepsilon_i$ of
+(10.4.8a) survives in $|\varepsilon_i\sqrt2\,t+d|$ and the diagrams split into
+two classes. The reachable set of $t$ is the intersection of the cube support
+with the shifted mask,
+
+$$
+t\in
+\left[\frac{-2\pi-d}{\varepsilon_i\sqrt2},\;\frac{2\pi-d}{\varepsilon_i\sqrt2}\right]
+\cap\left[-h_1,\,h_1\right]
+\equiv[t_-^{(i)},\,t_+^{(i)}],
+\tag{10.4.10}
+$$
+
+and, since phase matching needs $-u_0/x_\nabla$ inside it, the sheet wedge is
+bounded by the two **rays**
+
+$$
+u_0=-t_\mp^{(i)}\,x_\nabla .
+\tag{10.4.11}
+$$
+
+At $d=0$, $t_\pm=\pm h_1$ for every $i$ and (10.4.11) is the symmetric wedge of
+(10.4.9). At $d\ne0$ the wedge tilts, and because
+$\varepsilon_1=\varepsilon_3=+1$ while $\varepsilon_2=-1$ it tilts the *other
+way* for $P_2$. The exact statement is a reflection:
+
+$$
+\boxed{\;
+E_{\mathbf u_1}=E_{\mathbf u_3},
+\qquad
+E_{\mathbf u_2}(x_\nabla,u_0;d)=E_{\mathbf u_1}(x_\nabla,-u_0;d)
+\;}
+\tag{10.4.12}
+$$
+
+verified to $\le8\times10^{-4}$ (Monte-Carlo noise). This is not a small
+effect: at $d=\pi$, $x_\nabla=10$, $u_0=+20$ the two classes differ by a factor
+of $12$ ($0.070$ against $0.0058$). So the correct reading of "the dispersion
+pins the orientation" is that it pins it to **two** distinguishable
+diagrams — a signed pair — not one, and which of them applies is decided by
+*which* of the two XPM planes, or the sheet, the tuple sits on. This is the
+same signed-$u_0$ structure as §10.2.8, arising here from the plane geometry
+rather than from the mask translation alone; note also that the accepted mass
+is common to all three and reproduces the $A(d)$ of (10.2.8.2) exactly —
+$2/3$, $23/48$, $1/6$, $1/48$ at $d/\pi=0,1,2,3$ — so the split is entirely in
+the *shape*, never in the acceptance.
+
+**Region laws.** With $h=\sqrt2\pi x_\nabla$,
+
+| Region | Domain | Law for $\mathbf u_1,\mathbf u_2,\mathbf u_3$ | vs equal split |
+|---|---|---|---|
+| 1. plateau | $\lvert u_0\rvert+\sqrt2\pi x_\nabla\lesssim\pi$ | $\dfrac23\left[1-\dfrac{u_0^2+h^2/10}{12}\right]$ | same height $A(0)$, larger curvature |
+| 2. sheet | $\lvert u_0\rvert<\sqrt2\pi x_\nabla$, $x_\nabla\gg\sqrt2$ | $\dfrac{2\pi(h-\lvert u_0\rvert)^2}{h^3}=\dfrac{\sqrt2}{x_\nabla}\left(1-\dfrac{\lvert u_0\rvert}{\sqrt2\pi x_\nabla}\right)^2$ | $2.45\times$ wider, **soft** edge |
+| 3. gapped, dephased | $\lvert u_0\rvert>\sqrt2\pi x_\nabla$, $x_\nabla\gtrsim\sqrt5/\pi$ | $\dfrac{4}{3u_0^2}$ | **identical** |
+| 4. gapped, coherent | $x_\nabla\lesssim\sqrt5/\pi$ | $\dfrac23\hat K(u_0)+\dfrac{h^2}{30}\hat K''(u_0)$ | identical leading term |
+
+Three of the four laws are orientation-blind at leading order. Regions 3 and 4
+depend only on $|u_0|$, and both are *exactly* the equal-split laws — because
+the mask acceptance $A(0)=2/3$ and the accepted mean $\bar v=0$ are
+orientation-independent at $d=0$. Region 1 has the same plateau height and
+differs only in curvature. **The entire orientation effect is region 2**: the
+sheet is a factor $\sqrt2\pi/(\pi/\sqrt3)=\sqrt6\simeq2.449$ wider in $|u_0|$,
+its on-axis height is $\sqrt2/x_\nabla$ against $3\sqrt3/(4x_\nabla)$ — only
+$8.9\%$ higher — and it fades quadratically to zero at its edge instead of
+dropping to $2/3$ of peak and cutting off. This is the quantitative form of
+§10.3's statement that the split controls *how* the accepted noise is
+distributed in coherence, not how much is accepted, and it is the mechanism
+behind consequence 2 above: the excess lives in the wedge between the two
+sheet edges, which is exactly where §10.4 says the population sits.
+
+![Phase diagrams of the three zero-phase plane normals](_static/lorenzi-fast/dispersion_direction_phase_diagram.png)
+
+*Figure 19 — The three phase diagrams, one per zero-phase plane
+([`analysis/fwm/plot_dispersion_direction_phase_diagram.py`](../../analysis/fwm/plot_dispersion_direction_phase_diagram.py)),
+over $x_\nabla$ (log) against the **signed** $u_0$ (symlog) — the signed
+ordinate is necessary, since (10.4.12) is a reflection in it. Each panel is
+computed independently from its own normal (10.4.7) through (10.4.8b); no
+shared density is assumed. Solid white lines are the sheet-wedge rays
+(10.4.11), dashed is the coherence line $\sigma_v=1$. **Top row, $d=0$:**
+$\mathbf u_1$, $\mathbf u_2$, $\mathbf u_3$ are pixel-for-pixel identical, the
+symmetric wedge of slope $\pm\sqrt2\pi$ — this is the coincidence proved
+above. **Bottom row, $d=\pi$:** the wedge tilts, $\mathbf u_1$ and
+$\mathbf u_3$ remaining identical while $\mathbf u_2$ is their mirror image in
+$u_0\mapsto-u_0$. The bright sheet migrates to positive $u_0$ on the $P_1$ and
+$Q$ planes and to negative $u_0$ on $P_2$; at $x_\nabla=10$, $u_0=+20$ the two
+classes differ by a factor $12$.*
+
+**Evaluation note.** The production `linear_tuple_estimate` is *not* used for
+these panels. It converges correctly towards the cusped answer as a leg is
+switched off — within $0.2\%$ once the third component is below $10^{-3}$ of
+the others — but at the exactly degenerate directions (10.4.7) it has a
+removable singularity and returns non-physical output (a negative overflow for
+two of them, exactly zero for the third). Real tuples never sit exactly on the
+locus, so this does not affect production sums; it does mean that (10.4.7)
+cannot be used directly as a synthetic test vector without guarding the zero
+slot. Figure 19 instead integrates (10.4.8b) by Gauss–Legendre quadrature,
+whose integrand is nonnegative and therefore free of the cancellation that
+afflicts the piecewise-primitive evaluator at narrow windows.
+
+### 10.5 When the locally linear phase model stops being adequate
+
+§4 drops the quadratic terms $q_j$ and measures their effect separately in S2
+(§11); the near-ZDW note of §4 establishes by one numerical example that the
+ZDW does not make the channel-local linearization singular. This section
+replaces that example with a general statement, and gives a closed-form
+accuracy law.
+
+The starting point is that **no approximation is needed at all**. For a global
+dispersion model truncated at $\beta_3$, the accumulated phase has an exact
+product form, and everything below is a consequence of it. All claims are
+checked in
+[`verify_linear_phase_validity.py`](../../analysis/standalone_analytical/verify_linear_phase_validity.py)
+(18 checks: symbolic identities, exact moment integrals, Monte-Carlo sizes).
+
+**The exact three-factor phase.** Carrying every in-band offset,
+$\omega_j\mapsto\omega_j+Bx_j$, the factorization of §10.4 applied to the
+*shifted* frequencies gives, with no truncation whatsoever,
+
+$$
+\frac{u}{L}=\bigl(\omega_a-\omega_c\bigr)\,\bigl(\omega_c-\omega_b\bigr)\,
+\beta_2(\bar\omega),
+\qquad
+\bar\omega=\frac{\omega_a+\omega_b}{2},
+\tag{10.5.1}
+$$
+
+and each of the three factors is **exactly affine** in $(x_a,x_b,x_c)$. The
+entire nonlinearity of the phase in the in-band variables is therefore the
+*product structure* — there is no intrinsic curvature beyond it. That single
+observation is the content of this section.
+
+**Reading it additively.** Expanding each of the four $\beta(\cdot)$ about its
+own channel center, the Taylor series *terminates*:
+
+$$
+u=\underbrace{u_0+\nu_ax_a+\nu_bx_b-\nu_cx_c}_{\text{the model of §4}}
++\underbrace{q_ax_a^2+q_bx_b^2-q_cx_c^2-q_tx_d^2}_{\text{the }q_j\text{ terms of §3}}
++\underbrace{\frac{\beta_3B^3L}{6}\bigl(x_a^3+x_b^3-x_c^3-x_d^3\bigr)}_{\text{one universal cubic term}} .
+\tag{10.5.2}
+$$
+
+There is no quartic or higher remainder: (10.5.2) is exact. The cubic
+coefficient is a single global constant, the same for all four legs, because
+$\beta_3$ is a global constant. Moreover the four quadratic terms are not four
+independent objects — when the four local GVDs are near-equal,
+$q_j\simeq\bar q$, they collapse (at $d=0$) to one product:
+
+$$
+q_ax_a^2+q_bx_b^2-q_cx_c^2-q_tx_d^2
+\;\longrightarrow\;
+-2\bar q\,(x_a-x_c)(x_b-x_c).
+\tag{10.5.3}
+$$
+
+**Reading it multiplicatively.** Since (10.5.1) is a product of three affine
+factors, write each as its center value times a fractional excursion:
+
+$$
+u=u_0\,(1+\varepsilon_P)(1+\varepsilon_Q)(1+\varepsilon_G),
+\qquad
+\begin{aligned}
+\varepsilon_P&=\frac{B(x_a-x_c)}{\omega_a-\omega_c},\\
+\varepsilon_Q&=\frac{B(x_b-x_c)}{\omega_b-\omega_c},\\
+\varepsilon_G&=\frac{B(x_a+x_b)}{2(\bar\omega-\omega_{\rm ZDW})}.
+\end{aligned}
+\tag{10.5.4}
+$$
+
+The linear model of §4 is exactly the first-order truncation
+$u\simeq u_0(1+\varepsilon_P+\varepsilon_Q+\varepsilon_G)$; the omitted part is
+exactly the three pair products plus the triple product. This form makes the
+failure modes visible at a glance, and connects them to §10.4: **each
+excursion diverges on one of the three phase-matching surfaces** —
+$\varepsilon_P$ on $P_1$ ($\omega_a=\omega_c$), $\varepsilon_Q$ on $P_2$
+($\omega_b=\omega_c$), $\varepsilon_G$ on the sheet $Q$
+($\beta_2(\bar\omega)=0$).
+
+**The accuracy law.** The dominant omitted term is
+$u_0\varepsilon_P\varepsilon_Q$, and in that ratio $\beta_2(\bar\omega)$
+*cancels*: the leading relative error is pure grid geometry. Writing $n_j$ for
+channel indices, $\Delta n_{ac}=n_a-n_c$, $\Delta n_{cb}=n_c-n_b$ and
+$r=\Delta f/B$,
+
+$$
+\frac{u-u_{\rm lin}}{u_0}\;\simeq\;\varepsilon_P\varepsilon_Q
+=\frac{(x_a-x_c)(x_c-x_b)}{4\pi^2\,r^2\,\Delta n_{ac}\Delta n_{cb}} .
+\tag{10.5.5}
+$$
+
+For the rectangular-Nyquist model $x_j\sim\mathcal U(-\pi,\pi)$ the three
+moments of $(x_a-x_c)(x_c-x_b)$ are exactly $-\pi^2/3$ and $8\pi^4/15$, giving
+variance $\tfrac{19}{45}\pi^4$ and hence closed-form constants:
+
+$$
+\boxed{
+\;\text{bias}=\frac{-1}{12\,r^2\Delta n_{ac}\Delta n_{cb}},\quad
+\text{std}=\frac{\sqrt{19/45}}{4\,r^2|\Delta n_{ac}\Delta n_{cb}|},\quad
+\text{rms}=\frac{\sqrt{1/30}}{r^2|\Delta n_{ac}\Delta n_{cb}|}\;}
+\tag{10.5.6}
+$$
+
+i.e. prefactors $0.0833$, $0.1624$, $0.1826$. The linear model therefore
+carries a **systematic bias**, not merely a spread: the mean of
+$(x_a-x_c)(x_c-x_b)$ is nonzero because both factors share $x_c$. All three
+constants are independent of $\beta_2$, $\beta_3$, $L$ and $B$ — only the grid
+ratio and the index separations enter. Against exact Monte-Carlo at 100 km,
+24.5 Gbaud, $r=1.0204$, the std law is accurate to $1\%$ up to
+$|\Delta n_{ac}\Delta n_{cb}|\sim10^2$, to $4\%$ at $7.5\times10^3$, and
+degrades to a factor $1.24$ at $4.8\times10^5$ (legs spread over tens of THz),
+where the $\varepsilon_G$ cross terms — the legs no longer sharing a local GVD —
+contribute the balance.
+
+| $\lvert\Delta n_{ac}\Delta n_{cb}\rvert$ | 1 | 2 | 25 | $10^3$ | $10^5$ |
+|---|---|---|---|---|---|
+| relative std | $16\%$ | $7.8\%$ | $0.62\%$ | $1.6\times10^{-4}$ | $1.6\times10^{-6}$ |
+
+**Why the estimator survives: the model is self-protecting.** In *absolute*
+radians the violation is not small. The omitted quadratic phase is
+$\sim\beta_2(\bar\omega)B^2L$ per unit of $(x_a-x_c)(x_c-x_b)$, which for a
+C-band tuple at 100 km and 24.5 Gbaud gives $\mathrm{std}|u-u_{\rm lin}|\approx
+8\text{–}9$ rad — essentially the intra-channel dispersive phase
+$\tfrac12\beta_2(\pi B)^2L\approx6$ rad, and nearly the same for every tuple.
+Absolute radians, however, only matter where $\hat K$ varies on a $\sim1$ rad
+scale, i.e. the coherent and sheet regimes. Three facts close the loop.
+
+1. *The sheet is unreachable away from the ZDW.* On the grid,
+   $|u_0|=L|\beta_2(\bar\omega)|(2\pi\Delta f)^2|\Delta n_{ac}\Delta n_{cb}|$,
+   so the smallest attainable $|u_0|$ in the C band — nearest-neighbour indices —
+   is $52$ rad. No C-band tuple is anywhere near phase matching.
+2. *The only route to $|u_0|\lesssim1$ is $\beta_2(\bar\omega)\to0$*, i.e. the
+   pump mean at the ZDW — which is precisely the surface $Q$ of §10.4.
+3. *The dominant error term carries the same factor.* Its size is
+   $L\beta_2(\bar\omega)B^2(x_a-x_c)(x_c-x_b)$, proportional to
+   $\beta_2(\bar\omega)$, so it vanishes on exactly the surface where absolute
+   accuracy becomes necessary.
+
+Numerically: moving the pump mean onto the ZDW drops $\mathrm{std}|u-u_{\rm lin}|$
+from $8.9$ rad to $0.39$ rad, and putting all three legs there drops it to
+$0.008$ rad. This is the structural version of the near-ZDW note of §4: the
+$1.2\times10^{-3}$ rad quoted there is small *because* $\beta_2\simeq0$ at that
+channel, not incidentally. Deep in the gapped regime, where the absolute error
+is largest, $\hat K\sim2/u^2$ varies on the scale $|u|$ itself, so the relevant
+figure is (10.5.6) — parts in $10^4$ or better for any tuple with
+well-separated indices.
+
+**Where it does degrade.** Two regimes, both real.
+
+* *Near-index tuples.* At $|\Delta n_{ac}|=|\Delta n_{cb}|=1$ the relative std
+  is $16\%$ and the bias $-8\%$; with $\hat K\sim2/u^2$ these roughly double in
+  the efficiency. This is the geometry adjacent to the XPM planes $P_1,P_2$, and
+  it is the quantitative reason the $q_j$ padding $P_q$ of §9 cannot be
+  dropped for compact tuples.
+* *Wide-span UWB tuples.* Once the legs span tens of THz the
+  $\varepsilon_P\varepsilon_Q$ term no longer accounts for the whole error —
+  at $|\Delta n_{ac}\Delta n_{cb}|=4.8\times10^5$ the measured std exceeds
+  (10.5.6) by a factor $1.24$ — because the $\varepsilon_G$ cross terms grow
+  with the leg separation. The relative error is nonetheless $4\times10^{-7}$
+  there: the growth is far slower than the $1/|\Delta n_{ac}\Delta n_{cb}|$
+  decay it rides on.
+
+**Scope.** (i) The termination at cubic order and the cancellation in (10.5.5)
+are specific to a global model truncated at $\beta_3$; with $\beta_4$ the
+expansion runs to quartic order and $\beta_2(\bar\omega)$ no longer cancels
+exactly, though the near-ZDW argument survives because the leading term still
+carries $\beta_2(\bar\omega)$. (ii) The constants in (10.5.6) assume the
+rectangular-Nyquist uniform model for $x_j$; a shaped spectrum changes the three
+prefactors but not the $1/(r^2|\Delta n_{ac}\Delta n_{cb}|)$ law, which is
+geometric. (iii) The statement is about the phase model only; the mask and
+regime errors of S1+S2 are separate and are not addressed here.
+
+### 10.6 An additional effect: a decaying power profile
+
+Everything above assumes the **flat** longitudinal power profile of §2,
+$\alpha=0$, for which the link kernel is $\hat K(u)=4\sin^2(u/2)/u^2$. That is
+a modelling choice, not a property of the method, and it is the one remaining
+assumption of §§4–10 that changes the *kernel* rather than the mask or the
+density. This section records what relaxing it does to the phase diagram. It
+is a scoping result, not a change to the production path: the estimator still
+evaluates $\int\hat K(u_0+v)\rho(v)\,dv$ with $\alpha=0$.
+
+**The lossy kernel.** For an arbitrary longitudinal profile the kernel is the
+squared Fourier transform of the field amplitude along the span (§2 and the
+open extension listed at the end of §13). For an exponential profile, amplitude
+$e^{-az}$ over the normalized span $z\in[0,1]$ with
+
+$$
+a=\frac{\alpha L}{2}
+$$
+
+the accumulated **amplitude** decay in nepers, this is
+
+$$
+\boxed{\;
+K_a(u)=\left|\int_0^1 e^{-az}e^{iuz}\,dz\right|^2
+=\frac{1-2e^{-a}\cos u+e^{-2a}}{u^2+a^2}\;}
+\tag{10.6.1}
+$$
+
+— the standard lossy FWM efficiency. Two structural remarks. First,
+$K_a\to\hat K$ as $a\to0$, so the whole of §10.2 is the $a=0$ edge of a
+one-parameter family. Second, and more usefully, **the loss is an imaginary
+part of the mismatch**: $K_a(u)$ is the flat-profile kernel continued to
+$u\mapsto u+ia$. Every regime statement of §10.2 can therefore be re-read as a
+statement about a complex $u$, with $a$ controlling how far off the real axis
+the kernel is evaluated — which is why the effects below are all *smoothing*
+effects.
+
+Two slices of that family are worth looking at, and Figure 20 shows both: the
+diagonal $a=|u_0|$ (top row) and a fixed, physical $a$ (bottom row). In both,
+the mask and the density are untouched — only the kernel changes — so each map
+is directly comparable with Figure 12 and the differences are the effect of
+the profile alone.
+
+**The diagnostic cut $a=|u_0|$.** Here the accumulated decay is set equal to
+the accumulated center mismatch at every point of the map,
+$\alpha L=|\Delta\beta_0|L$. It is the natural one-parameter cut, because
+$\alpha$ and $\Delta\beta$ enter (10.6.1) as the real and imaginary parts of
+the same complex propagation constant, so this diagonal is where loss and
+dephasing terminate the interaction at the same scale.
+
+Three things change, and the four regions collapse to three.
+
+*(i) The fringes disappear.* The oscillatory part of (10.6.1) carries a factor
+$e^{-a}$, so the fringe contrast of §10.2.6 is replaced by the closed form
+
+$$
+\text{contrast}=\frac{2e^{-a}}{1+e^{-2a}}=\operatorname{sech}(a)
+=\operatorname{sech}(|u_0|).
+\tag{10.6.2}
+$$
+
+At the first lossless null $u_0=2\pi$ this is $3.7\times10^{-3}$. The
+region-4 fringes are therefore gone, the coherence line $x_\nabla=1$ ceases to
+separate anything, and regions 3 and 4 merge.
+
+*(ii) The plateau edge becomes horizontal.* For a window narrow on the kernel
+scale the kernel is constant across it and
+
+$$
+E=\tfrac23\,K_{u_0}(u_0)
+=\frac23\cdot\frac{1-2e^{-u_0}\cos u_0+e^{-2u_0}}{2u_0^2},
+\tag{10.6.3}
+$$
+
+a single law that is $2/3$ as $u_0\to0$ and $1/(3u_0^2)$ at large $u_0$,
+covering the old regions 1, 3 and 4 at once. The lossless plateau therefore
+survives only while $K_{u_0}(u_0)\gtrsim\tfrac12$, i.e.
+
+$$
+|u_0|\lesssim0.694 ,
+$$
+
+a **horizontal** cut in $|u_0|$ alone, replacing the slanted lossless edge
+$|u_0|+\pi x_\nabla/\sqrt3=\pi$ of §10.2.2. With loss it is the decay, not the
+window width, that ends the coherent build-up.
+
+*(iii) The gapped tail loses exactly a factor four, and the sheet acquires the
+effective-length ratio.* In the gap the pole moves from $u^2$ to $u^2+u_0^2$,
+so
+
+$$
+\frac{4}{3u_0^2}\;\longrightarrow\;\frac{1}{3u_0^2}
+\qquad\text{(measured suppression }0.2492\text{ against }1/4).
+\tag{10.6.4}
+$$
+
+On the sheet the delta-limit weight is no longer $2\pi$. By Parseval,
+
+$$
+\int_{-\infty}^{\infty}K_a(u)\,du
+=2\pi\int_0^1 e^{-2az}\,dz
+=2\pi\,\frac{1-e^{-2a}}{2a}
+=2\pi\,\frac{L_{\rm eff}}{L},
+$$
+
+so the phase-matched sheet is reduced by **exactly the effective-length
+ratio**,
+
+$$
+E_{\rm sheet}=2\pi\,\frac{L_{\rm eff}}{L}\,\rho(-u_0)
+\;\xrightarrow[\;|u_0|\gg1\;]{}\;
+\frac{3\sqrt3}{8\,|u_0|\,x_\nabla}.
+\tag{10.6.5}
+$$
+
+The factor is $1$ at $a=0$, recovering §10.2.3, and $\sim1/(2|u_0|)$ once the
+span is many attenuation lengths. The qualitative consequence is that the
+sheet, flat in $u_0$ in the lossless map, now **decays along both axes**.
+
+**The physically relevant slice: constant $a$.** On a real span $a$ is a
+number fixed by the fiber, not a function of the tuple: $100$ km at
+$0.2$ dB/km is $\alpha L=4.61$ Np in power, so $a=2.30$. Holding $a$ fixed
+gives a qualitatively *different* answer from the diagonal cut, and it is the
+one to use for a link budget. The general laws are
+
+$$
+\begin{aligned}
+\text{plateau:}\quad &\tfrac23K_a(0)=\tfrac23\frac{(1-e^{-a})^2}{a^2}, \\
+\text{sheet:}\quad &2\pi\frac{L_{\rm eff}}{L}\rho(-u_0), \\
+\text{gapped, fringe-averaged:}\quad
+&\frac23\,\frac{1+e^{-2a}}{u_0^2+a^2}
+\;\xrightarrow[\;|u_0|\gg a\;]{}\;
+\frac{4}{3u_0^2}\cdot\frac{1+e^{-2a}}{2},
+\end{aligned}
+\tag{10.6.6}
+$$
+
+with coherent fringes of contrast $\operatorname{sech}(a)$ retained for
+$x_\nabla\lesssim1$. Every region of §10.2 therefore **survives**, each
+rescaled by its own constant: at $a=2.30$ the plateau falls
+$2/3\to0.102$, the sheet is multiplied by $L_{\rm eff}/L=0.215$ (measured
+$0.2147$), the gapped tail by $(1+e^{-2a})/2=0.505$ (measured $0.4986$), and
+the fringes survive at $\operatorname{sech}(2.30)=0.198$ contrast rather than
+being erased. The four-region structure of Figure 12 is intact; only its
+levels move, and they move *differently* in each region — which is exactly why
+loss cannot be absorbed into a single overall efficiency factor.
+
+| Region | Lossless (§10.2) | $a=\lvert u_0\rvert$ (diagonal cut) | $a$ constant ($=2.30$) |
+|---|---|---|---|
+| 1. plateau | $2/3$ for $\lvert u_0\rvert+\pi x_\nabla/\sqrt3\lesssim\pi$ | $2/3$, edge now **horizontal** at $\lvert u_0\rvert\simeq0.69$ | $\tfrac23K_a(0)=0.102$, lossless edge shape |
+| 2. sheet | $\dfrac{3\sqrt3}{4x_\nabla}\left(1-\dfrac{u_0^2}{\pi^2x_\nabla^2}\right)$ | $2\pi\dfrac{L_{\rm eff}}{L}\rho(-u_0)\to\dfrac{3\sqrt3}{8\lvert u_0\rvert x_\nabla}$, decays in $u_0$ too | same $\times\,L_{\rm eff}/L=0.215$, still flat in $u_0$ |
+| 3. gapped, dephased | $\dfrac{4}{3u_0^2}$ | $\dfrac{1}{3u_0^2}$ (factor $1/4$) | $\times\,(1+e^{-2a})/2=0.505$ |
+| 4. gapped, coherent | $\tfrac23\hat K(u_0)$, full-contrast fringes | merged into region 3, fringes erased | survives, contrast $\operatorname{sech}(a)=0.198$ |
+
+![Phase diagram with a decaying power profile](_static/lorenzi-fast/lossy_phase_diagram.png)
+
+*Figure 20 — The equal-split, $d=0$ phase diagram with an exponentially
+decaying power profile
+([`analysis/fwm/plot_lossy_phase_diagram.py`](../../analysis/fwm/plot_lossy_phase_diagram.py)),
+in the $(x_\nabla,|u_0|)$ coordinates of §4.1. **Top row** is the diagonal cut
+$a=|u_0|$, **bottom row** a real span, $a=2.30$. (a, d) the exact model; solid
+white lines are the sheet/gap ray $|u_0|=\pi x_\nabla/\sqrt3$, unchanged by
+loss, and — for the diagonal cut only — the loss-limited plateau edge
+$|u_0|=0.69$; the dotted curve is the lossless plateau edge of Figure 12, and
+the dashed vertical is the coherence line $x_\nabla=1$, which is meaningless in
+the top row (no fringes) but still separates regions 3 and 4 in the bottom.
+(b, e) ratio to the closed form of the table: median $|\log_{10}|$ over the
+region interiors is $0.0002$–$0.0113$ for the diagonal cut and
+$0.0001$–$0.0038$ for the constant-$a$ slice, the residual being the crossover
+strip at the sheet edge where the closed form steps. (c, f) the ratio to the
+lossless Figure 12, i.e. the effect of the profile. In the top row the
+horizontal striping at small $x_\nabla$ is the lossless fringe pattern being
+erased and the uniform $\simeq-0.6$ dex over the gap is the factor-four
+suppression (10.6.4); in the bottom row the striping persists — the fringes are
+damped, not removed — and the gap sits at a uniform $\simeq-0.3$ dex, the
+$0.505$ of (10.6.6).*
+
+**Scope.** (i) This is a single-span statement; multispan coherent
+accumulation is outside the model of §2 throughout. (ii) The two rows of
+Figure 20 are different cuts through the same $(x_\nabla,|u_0|,a)$ family and
+answer different questions: $a=|u_0|$ is a diagnostic diagonal that isolates
+what happens when loss and dephasing terminate the interaction at the same
+scale, while constant $a$ is what a real link does. Only the latter should be
+used for a budget. (iii) Nothing here changes the
+mask, the density, or the orientation analysis of §§5–10.4: loss acts only
+through the kernel, so §10.3's four mechanisms and §10.4.1's plane normals
+carry over with $\hat K$ replaced by $K_a$. (iv) Implementing the non-flat
+profile in production is the open extension listed at the end of §13 — the kernel is
+$|\widehat{\rho_{\rm amp}}|^2$ for any profile, so ISRS-shaped or
+distributed-amplification profiles enter the same way, without touching the
+$\rho_{\mathbf c,d}$ machinery.
 
 ## 11. Validation gates (S2, S4) and production status (S5)
 
@@ -2763,7 +4726,8 @@ $$
 (N\,T^2\!/L^2)_{\rm XPM}(\nu) = 2\int_0^1 (1-t)\,H(\nu t)\,dt
 $$
 
-([`_xpm_mass_transform`](../../src/pynlin/methods/td/fast_nlin.py),
+(Figure 21;
+[`_xpm_mass_transform`](../../src/pynlin/methods/td/fast_nlin.py),
 [`xpm_fast_batch`](../../src/pynlin/methods/td/fast_nlin.py); the smooth
 $1/(\pi\nu t)^2$ tail is integrated analytically). Substituting $\theta = \nu t$
 and using $\int_0^\infty H = \tfrac12$ gives the **sheet limit** (the
@@ -2783,7 +4747,7 @@ with the **Dar collision count**, $|\nu| = L\,B\,|\Delta\beta_1| = L/L_W$.
 The sheet limit $(N\,T^2\!/L^2)_{\rm XPM} \to 1/|\nu| = L_W/L$ is the classic
 leading-order Dar scaling — total XPM per pair decays inversely with the
 number of walked-through symbols, and (per the corrected asymptotics of
-2026-08-24, see [`publication_novelty.md`](publication_novelty.md) Claim A)
+2026-08-24, see [`publication_novelty.md`](stale/publication_novelty.md) Claim A)
 *every* collision sector individually shares this $1/|\nu|$ law at high
 walk-off, the sector ratios tending to constants set by the
 spacing-to-baud ratio $r$ — the earlier fitted $\mp 1/3$ ratio exponents
@@ -2795,10 +4759,13 @@ that note.
 
 ![XPM transform and efficiency](_static/lorenzi-fast/xpm_reduction.png)
 
-*Figure 16 — (a) The exact masked transform $H(\theta)$ with its
-$1/(\pi\theta)^2$ tail. (b) $(N\,T^2\!/L^2)_{\rm XPM}(\nu)$ with the $1/|\nu|$ sheet
-limit. No sampling, no regime dispatch: the XPM side of the fast method is
-exact within the linear model.*
+*Figure 21 — (a) The exact masked transform $H(\theta)$ against $\theta$, with
+its $1/(\pi\theta)^2$ tail (dashed). (b) The pair efficiency
+$(N\,T^2\!/L^2)_{\rm XPM}(\nu)$ against $\nu$, with the $1/|\nu|$ sheet limit
+(dashed). Both axes logarithmic in (b).*
+
+Neither panel involves sampling or regime dispatch: within the linear model
+the XPM side of the method is exact.
 
 ## 13. From interaction efficiencies to channel noise (S6)
 
@@ -2815,7 +4782,7 @@ $$
 
 Every tuple carries its own carrier residual $d_\tau$ inside this expectation.
 There is no additional $d$ operation at the channel level: after each
-$F_\tau$ has been evaluated, simply sum the interactions,
+$F_\tau$ has been evaluated, sum the interactions,
 
 $$
 S_t^{\rm XPM}=\sum_{b\ne t}F_{tb}^{\rm XPM},
@@ -2876,7 +4843,7 @@ $$
 =10\log_{10}{\rm NSR}_{{\rm NLI,fast},t}.
 $$
 
-**Scope of “final.”** This is the final channel-level output of the present
+**Scope of "final".** This is the final channel-level output of the present
 fast XPM + strict-FWM model, not yet the complete noise seen by a receiver.
 The current interaction population omits SCI and degenerate-FWM terms such as
 $a=b$; the displayed formula also assumes equal single-polarization launch
@@ -2890,8 +4857,9 @@ power and polarization conventions; only then should it be called
 Documented extension points: per-channel launch powers, non-Gaussian
 constellations (sector-resolved $X_{hkm}$ moments,
 [`direct_sector_mc.md`](direct_sector_mc.md)), non-flat power profile along
-the span via $\hat K = |\mathcal F[\rho(z)]|^2$ with $\rho(z)$ the normalized
-power profile, and the degenerate-FWM sector $a = b$ (currently in neither
+the span via $\hat K = |\mathcal F[\sqrt{\rho(z)}]|^2$ with $\rho(z)$ the
+normalized *power* profile — the transform is of the field **amplitude**
+$\sqrt{\rho}$, worked out for the exponential case in §10.6 — and the degenerate-FWM sector $a = b$ (currently in neither
 the XPM nor the strict-FWM population).
 
 ## 14. Summary of guarantees
@@ -2902,10 +4870,11 @@ the XPM nor the strict-FWM population).
   **measured** (S2, and the per-tuple sweep here: sub-percent in bulk, below
   $0.1\%$ refined) and, for the far population, **bounded** by a certified
   envelope.
-* Tuple pruning, once S3 lands, is governed by one physical number — the
-  minimum admissible efficiency $\varepsilon$ — with a per-target truncation
-  certificate and the exhaustive calculation as its $\varepsilon \to 0$
-  limit.
+* Tuple pruning is governed by one physical number — the minimum admissible
+  efficiency $\varepsilon$ — with a per-target truncation certificate and the
+  exhaustive calculation as its $\varepsilon \to 0$ limit. S3 v1 (§9.1)
+  applies this after enumeration; the direct geometric enumeration of §9.2
+  and §15.2 is not implemented.
 * The one operation with no certificate is interferer decimation; it is
   banned from physical conclusions and should be restructured to thin targets
   only.
@@ -2997,10 +4966,9 @@ $\Delta\omega_a + \Delta\omega_b = 2(\omega_{\rm ZDW} - \omega_t)$) — these li
 precisely the bright zero-sum families ("isles") of the S0 census and the
 per-band structure of §10.1's O-vs-C comparison.
 
-The proposal: **instead of enumerating all $\mathcal O(N^2)$ tuples and
-filtering, construct the survivor set directly as a tube around the
-stationary lines.** The $\varepsilon$-selection of §9 already *is* this tube
-in disguise, but the current mask-aware selector is not a function of
+The computational objective is to avoid enumerating all $\mathcal O(N^2)$
+ordered pairs before filtering. The $\varepsilon$-selection of §9 defines the
+relevant tube, but the current mask-aware selector is not a function of
 $(u_0,W)$ alone. With $g_q=\max(g_{\rm mask}-P_q,0)$, keep iff
 $A(d)\ge\varepsilon$ and $g_q\le2\sqrt{A(d)/\varepsilon}$, i.e.
 
@@ -3015,7 +4983,12 @@ support shift, acceptance, and quadratic padding along each row. The earlier
 claim that monotonicity of $u_0$ alone permits bisection does not establish
 monotonicity of this complete predicate. Direct sub-quadratic enumeration
 therefore remains a proposal requiring a separate proof or algorithm; v1
-still enumerates all support-surviving tuples before selection.
+still enumerates all support-surviving tuples before selection. Section 9.2
+gives a certificate-preserving route based on adaptive lattice blocks: reject
+a complete block only from a uniform upper bound on all its tuple efficiencies,
+and add the block-count-weighted bound to the discarded certificate. The
+stationary lines guide the initial partition and refinement, while the block
+bound, rather than proximity to those lines alone, establishes completeness.
 
 ### 15.3 Historical v1 gate measurements (2026-08-24)
 
@@ -3083,3 +5056,434 @@ is a production path whose per-target cost is dominated by rasterizing a
 1-D contour — plausibly milliseconds — with every discarded contribution
 covered by the $\varepsilon$ certificate and every kept contribution by a
 measured error budget.
+
+## 16. Extending the kernel and the phase (proposed)
+
+Two modelling restrictions remain between §§4–13 and a realistic link: the
+**flat longitudinal power profile** ($\alpha = 0$, single span, no Raman
+tilt), scoped in §10.6 but never taken into the production path, and the
+**in-channel curvature** $q_j$, which §9 carries only as the certificate
+padding $P_q$ and which no evaluator puts into the returned value. This
+section records what each is worth, how they interact, and the
+representation in which both are cheap. It is a design record, not an
+implemented change.
+
+### 16.1 What each restriction costs
+
+Measured by the fast-vs-MC campaign of 2026-08-31
+([`analysis/fwm/fast_mc_validation_campaign.py`](../../analysis/fwm/fast_mc_validation_campaign.py),
+figures under `media/lorenzi-fast/campaign_summary_*`). Define the
+**far-dispatch margin**
+
+$$
+\mathcal M = \frac{\lvert u_0\rvert}{\texttt{FAR\_MARGIN\_FACTOR}\cdot W + \texttt{FAR\_MARGIN\_OFFSET}}
+= \frac{\lvert u_0\rvert}{3W + 3000},
+$$
+
+so that $\mathcal M = 1$ is exactly where `analytic_tuple_values` switches to
+the far closed form and $\mathcal M \to 0$ is the phase-matched interior.
+
+The controlling parameter for both effects below is the in-channel
+quadratic strength $L/L_D = \lvert\beta_2\rvert B^2 L$ — twice the target's
+$\lvert q_t\rvert$ — which for the OESCLU study config
+(`input/studies.toml`: SMF-28, $L = 100$ km, $B = 24.5$ GBaud, 25 GHz pitch,
+2284 channels) runs over two orders of magnitude across the comb:
+
+| band | channels | wavelength [nm] | $L/L_D$ min | median | max |
+|---|---|---|---|---|---|
+| O | 657 | 1265.6–1359.8 | 0.000 | 0.111 | 0.223 |
+| E | 602 | 1360.2–1459.7 | 0.225 | 0.466 | 0.738 |
+| S | 374 | 1460.3–1529.7 | 0.741 | 0.929 | 1.135 |
+| C | 174 | 1530.1–1564.7 | 1.137 | 1.239 | 1.345 |
+| L | 281 | 1565.3–1624.7 | 1.349 | 1.532 | 1.730 |
+| U | 196 | 1625.1–1669.2 | 1.733 | 1.880 | 2.035 |
+
+The zero-dispersion channel (index 344, 1313.3 nm, 228.28 THz) has
+$L/L_D = 2\times10^{-4}$; the comb spans $L/L_D \in [2\times10^{-4}, 2.04]$.
+Per-band *distributions* of $L/L_D$ and $L/L_W$ for an arbitrary config are
+produced by
+[`analysis/plot_band_histograms.py`](../../analysis/plot_band_histograms.py).
+
+Since $L/L_D \propto B^2$, a symbol-rate change moves the whole comb by a
+fixed factor. At 100 GBaud on a 102 GHz grid — same fiber, same span, same
+ITU band anchors, same spacing-to-baud ratio $r = 1.02$, 561 channels
+([`input/studies_100gbd.toml`](../../input/studies_100gbd.toml)) — the table
+scales by $(100/24.5)^2 = 16.7$:
+
+| band | channels | wavelength [nm] | $L/L_D$ min | median | max |
+|---|---|---|---|---|---|
+| O | 161 | 1265.8–1359.5 | 0.005 | 1.837 | 3.684 |
+| E | 148 | 1360.1–1459.4 | 3.735 | 7.738 | 12.262 |
+| S | 92 | 1460.1–1529.2 | 12.328 | 15.448 | 18.851 |
+| C | 43 | 1530.0–1564.2 | 18.929 | 20.610 | 22.366 |
+| L | 70 | 1565.0–1624.7 | 22.451 | 25.517 | 28.825 |
+| U | 47 | 1625.6–1668.1 | 28.925 | 31.285 | 33.775 |
+
+ZDW channel (index 84): $L/L_D = 4.6\times10^{-3}$; the comb spans
+$[4.6\times10^{-3}, 33.8]$. Every band above O sits at $L/L_D > 1$, and C–U
+at $L/L_D > 18$ — a regime the $q_j = 0$ evaluators have never been tested in.
+The XPM consequence is quantified at the end of this subsection; note however
+that the *walk-off* scales with $B^2$ as well, so the operating point moves
+diagonally rather than vertically across the $(\nu, L/L_D)$ error surface of
+§16.6.
+
+Dropping $q_j$ from the value costs, per tuple, a median of $0.06\%$ over the
+whole sampled population but is concentrated entirely at $\mathcal M \lesssim
+0.1$: the tuples with quadratic error above $2\%$ (median $3.9\%$, maximum
+$10.8\%$) all lie in $\mathcal M \in [0,0.06]$, and their *model* error is
+$0.09\%$. The concentration is a property of the kernel: at $\mathcal M \to
+0$ the phase-matched point lies inside the support and $\hat K$ is at its
+maximum, so a quadratic phase displaces a stationary point; at large
+$\mathcal M$ the kernel is in its $4/u^2$ tail, where the same shift
+perturbs an already small number. Because that interior contains few tuples
+but most of the mass, the channel-level effect is not small:
+
+| target | $L/L_D = \lvert\beta_2\rvert B^2 L$ | $\mathcal M<0.1$: tuples / mass share | channel-sum effect of dropping $q_j$ |
+|---|---|---|---|
+| ZDW channel | 0.000 | 24 894 / 0.9998 | $-0.010\%$ |
+| C | 1.216 | 140 / 0.7224 | $+2.353\%$ |
+| U | 1.825 | 76 / 0.6185 | $+2.278\%$ |
+
+For XPM the same term is the *only* error source: the §12 closed form
+reproduces the linear-model reference to $\le 0.03\%$ over eight decades of
+$\nu$ and four of $L/L_D$, with no $L/L_D$ dependence. Since the pair
+efficiency falls as $1/\lvert\nu\rvert$, the near neighbours dominate
+$S_t^{\rm XPM}$ and the residual propagates to the channel sum: re-evaluating
+every pair with $\lvert\nu\rvert < 200$ against a converged reference moves
+it by the amounts tabulated below — monotone in $L/L_D$, and moving the sum in
+the *opposite* direction to the FWM effect above.
+
+| target band | 24.5 GBaud: $L/L_D$ / effect | 100 GBaud: $L/L_D$ / $\nu_{\rm NN}$ / effect |
+|---|---|---|
+| ZDW | 0.000 / $-0.013\%$ | 0.005 / 0.0 / $-0.073\%$ |
+| O | 0.011 / $-0.011\%$ | 0.188 / 1.2 / $-0.214\%$ |
+| E | 0.466 / $-0.751\%$ | 7.767 / 49.8 / $-3.736\%$ |
+| S | 0.930 / $-1.406\%$ | 15.484 / 99.2 / $-4.089\%$ |
+| C | 1.240 / $-1.721\%$ | 20.610 / 132.1 / $-4.332\%$ |
+| L | 1.532 / $-1.938\%$ | 25.564 / 163.8 / $-4.489\%$ |
+| U | 1.881 / $-2.290\%$ | 31.285 / 200.5 / $-4.968\%$ |
+
+One target per band (the band's middle channel), all pairs with
+$\lvert\nu\rvert$ below the cut re-evaluated against a convergence-checked
+reference (cut 200 at 24.5 GBaud, 8000 at 100 GBaud). The untouched tail
+carries $\le0.2\%$ of $S_t^{\rm XPM}$ at 24.5 GBaud and $4.5$–$32\%$ at 100
+GBaud; spot checks there give per-pair deviations of $0.1$–$0.7\%$ against a
+$2^{23}$-point reference, so the 100 GBaud figures are mild underestimates.
+Beyond $\nu \approx 10^4$ the reference itself is not converged at affordable
+budgets and no statement is made.
+
+**A factor 16.7 in $L/L_D$ buys only a factor $\sim2$ in error**, because
+$\nu_{\rm NN} = 2\pi r\,(L/L_D)$ grows with $B^2$ too: the near-neighbour pairs
+move to larger walk-off, where the closed form is better, and the two effects
+partly cancel. The operating point tracks the diagonal $\nu \approx 6.4\,L/L_D$
+of the $(\nu, L/L_D)$ surface rather than a vertical cut through it. This is
+the reason a naive $B^2$ extrapolation of the 24.5 GBaud numbers overstates the
+100 GBaud penalty by roughly eightfold.
+
+### 16.2 The separation, and exactly how far it goes
+
+Write the per-tuple efficiency as a one-dimensional integral against the
+masked law of the mismatch,
+
+$$
+N\,T^2\!/L^2 = \mathbb E\big[\hat K(u)\,\mathbf 1_{\rm mask}\big]
+= \int \hat K(v)\, p(v)\,dv,
+\qquad
+p(v) = \rho_{\mathbf w}(v - u_0)\,A_{\rm cond}(v - u_0)
+$$
+
+in the linear model. In this form the two extensions act on different
+factors: **the profile changes the function $\hat K$; the curvature changes
+the law $p$**, because $q_j$ enters only through the map
+$x \mapsto u(x) = u_0 + \sum_j \nu_j x_j + \sum_j q_j x_j^2$ whose pushforward
+$p$ is. The mask, $A_{\rm cond}$, the orientation analysis of §10.3–10.4 and
+the tube certificate of §9 depend on neither.
+
+**This is a statement about representation, not about independence, and it is
+easy to over-read.** Three qualifications, all of which constrain the
+implementation:
+
+1. *The curvature does enter the kernel's argument.* $\hat K$ is unchanged as
+   a **function**; $\hat K(u(x))$ is not. Saying the kernel is untouched is
+   only meaningful in the pushforward form above, where every appearance of
+   $q_j$ has been collected into $p$. Any formulation that keeps the
+   $x$-integral explicit will see the curvature inside the kernel.
+
+2. *The closed-form evaluators mix the two.* The far model rests on
+   $\mathbb E[\cos u] = \cos u_0 \prod_j \operatorname{sinc}(w_j)$, which uses
+   both the single-harmonic structure of the flat kernel *and* the linearity
+   of $u$. A general profile replaces the single $\cos u$ by a finite set of
+   harmonics with $u$-dependent envelopes (§16.3), and the curvature replaces
+   each $\operatorname{sinc}$ by a Fresnel factor (§16.4). The two extensions
+   therefore **cannot be composed as independent multiplicative corrections**
+   to the present closed forms: each profile-induced harmonic would have to be
+   averaged under the curved law. **This coupling is an artifact of working in
+   $u$-space and dissolves in the lag representation of §16.4**; it is a
+   reason to change representation, not an obstacle.
+
+3. *The tolerance is set by the kernel.* Whether $q_j$ may be dropped is
+   governed by the curvature-induced spread in $u$, of order
+   $\pi^2\sum_j\lvert q_j\rvert$, measured against the scale on which
+   $\hat K$ varies — and that scale is a property of the profile. A kernel
+   with finer structure (many coherent spans) would tighten the $\mathcal M$
+   threshold; a smoother one (strong loss) would relax it. §16.6 measures how
+   large this coupling actually is.
+
+One case breaks the separation outright rather than qualifying it: a profile
+that varies across a single channel bandwidth, $A = A(s; x)$, as ISRS gain
+formally does. Then $\hat K$ is no longer a fixed function of $u$ and the
+reduction to a one-dimensional integral fails. The tilt across $B = 24.5$ GHz
+against the $\sim13$ THz Raman scale is $\sim2\times10^{-3}$, so this is a
+second-order effect here, but it is the assumption that would have to be
+revisited first for a wideband Raman link.
+
+### 16.3 Power profile: polynomial in the amplitude, Legendre basis
+
+The kernel is the squared transform of the field **amplitude** along the span
+(§10.6, and the extension point at the end of §13),
+$\hat K(u) = \lvert\int_0^1 A(s)e^{ius}ds\rvert^2$ with $A = \sqrt{\rho}$ and
+$\rho$ the normalized *power* profile. Expand the amplitude — not the power —
+in shifted Legendre polynomials, $A(s) = \sum_n a_n P_n(2s-1)$. The Rayleigh
+expansion of a plane wave gives, exactly,
+
+$$
+\int_0^1 P_n(2s-1)\,e^{ius}\,ds = e^{iu/2}\, i^n j_n(u/2)
+\qquad\Longrightarrow\qquad
+\boxed{\;\hat K(u) = \Big\lvert \sum_n a_n\, i^n j_n(u/2) \Big\rvert^2\;}
+\tag{16.3.1}
+$$
+
+with $j_n$ the spherical Bessel functions. Four properties, all verified
+numerically:
+
+* **Order 0 is the present kernel.** $a_0 = 1$ gives
+  $j_0(u/2)^2 = 4\sin^2(u/2)/u^2$, reproducing §2's $\hat K$ to machine
+  precision at every $u$ tested. The whole of §§4–13 is the $N=0$ member of
+  (16.3.1).
+* **A polynomial amplitude is exact, not approximated.** A cubic amplitude is
+  reproduced at $N=3$ to $6\times10^{-10}$ (the quadrature floor) with no
+  further gain from higher $N$. A degree-$N$ polynomial amplitude yields a
+  kernel that is a *finite* bilinear form in $j_0\ldots j_N$.
+* **Exponential loss converges geometrically.** With $a = \alpha L/2$:
+  $N=4$ gives $3.0\times10^{-3}$ and $N=8$ gives $1.1\times10^{-7}$ at
+  $a=2.3$ (SMF, 100 km); $N=8$ gives $3.3\times10^{-5}$ at $a=5$. The limit
+  agrees with the closed form (10.6.1) to $4\times10^{-12}$.
+* **The certificate survives with one constant.**
+  $\hat K(u) \le 4\big(\sum_n \lvert a_n\rvert\big)^2/u^2$ (attained ratios
+  $0.30$ for the exponential profile, $0.78$ for a tilted one), so the §9
+  envelope $\min(1, 4/g^2)$ becomes
+  $\min\big(\hat K_{\max},\, 4(\sum_n\lvert a_n\rvert)^2/g^2\big)$ and the
+  $\varepsilon$-tube reasoning is unchanged in structure.
+
+Because every $j_n$ is an elementary combination of $\sin u$, $\cos u$ and
+powers of $1/u$, the products $j_n j_m$ expand into exactly the primitive
+types §10.2 and the far model already integrate (sine and cosine integrals):
+the asymptotics extend term by term rather than needing re-derivation.
+
+Two implementation notes.
+
+*The square-root trap.* Published ISRS-GN work fits the **power** profile;
+$\sqrt{\text{polynomial}}$ is not a polynomial, so a polynomial fit of $\rho$
+does not give a finite (16.3.1). Fit $A$, or $\log A$, and the exactness is
+preserved.
+
+*Four profiles per tuple.* The amplitude relevant to a strict tuple is
+$f_a f_b f_c\, f_t(1)/f_t(s)$ — the product-and-ratio structure that appears
+as $f_B/f_A$ in the coupled equations of the JLT collision model. Expanding
+$\log f_j$ once per channel makes the per-tuple effective profile a **vector
+sum** of coefficient vectors; one exponentiation on $\sim16$ Gauss nodes
+recovers its Legendre coefficients. That is $O(1)$ per tuple against an
+$O(N^3)$-scale tuple count, so the profile never re-enters the tuple loop as
+an integral. This is the structural difference from the time-domain collision
+form $X_{0,m,m} = \int dz\, f_B(z)\int dt\,\lvert g^{(0)}\rvert^2
+\lvert g^{(0)}\rvert^2$, where the profile is coupled to the pulse shape and
+the collision index and every (pair, $m$) needs a fresh two-dimensional
+numerical integral.
+
+### 16.4 Lag space: the representation in which the two extensions commute
+
+The kernel is a squared transform, so by the autocorrelation theorem it is
+*always* the transform of the amplitude autocorrelation, whatever the profile:
+
+$$
+R_A(t) = \int A(s)\,A(s-t)\,ds \quad\text{on } t\in[-1,1],
+\qquad
+\hat K(u) = \int_{-1}^{1} R_A(t)\,e^{iut}\,dt
+= 2\,\mathrm{Re}\!\int_0^1 R_A(t)\,e^{iut}\,dt .
+\tag{16.4.1}
+$$
+
+Verified to $2\times10^{-7}$ (nested-quadrature limited) for the flat,
+exponential and cubic-tilt profiles, splitting the $t$ integral at the kink at
+$t=0$. For the flat profile $R_A(t) = 1-\lvert t\rvert$ — the triangle weight
+§4 already carries — and $R_A(0) = \int_0^1 A^2 ds = L_{\rm eff}/L$.
+
+Substituting (16.4.1) into the definition and exchanging the order of
+integration gives the master form
+
+$$
+\boxed{\;
+N\,T^2\!/L^2 = 2\,\mathrm{Re}\!\int_0^1 R_A(t)\,\Psi(t)\,dt,
+\qquad
+\Psi(t) = \mathbb E\big[e^{iut}\,\mathbf 1_{\rm mask}\big] .
+\;}
+\tag{16.4.2}
+$$
+
+**In this representation the two extensions do not merely act on different
+factors — they multiply.** The profile enters only through $R_A$, a real, even,
+compactly supported weight; the curvature enters only through $\Psi$, which by
+§16.5 remains a product of closed-form per-leg factors. The qualification of
+§16.2(2) therefore does not survive the change of representation: it was a
+property of having derived the far model in $u$-space against one specific
+kernel, where a general profile turns the single harmonic $\cos u$ into many.
+In lag space there is one weight and one characteristic function, and neither
+knows about the other.
+
+**Why this does not resurrect the route abandoned in §4.** The oscillatory
+cancellation that killed the $t$-space integral is a *large-$\mathcal M$*
+pathology: there the integrand has amplitude $O(1)$, oscillates $\sim\lvert
+u_0\rvert$ times over $t\in[0,1]$, and the answer is $O(4/u_0^2)$ — the result
+is a near-total cancellation. In the region where the curvature is needed the
+per-leg factors decay as $\prod_j 1/(w_j t)$ and confine the integrand to
+$t \lesssim 1/W$, over which the phase $u_0 t \lesssim \lvert u_0\rvert/W$ is a
+few radians. Lag space is well conditioned exactly where $u$-space is not, and
+badly conditioned exactly where the $u$-space asymptotics already hold to
+$\mathcal O((W/u_0)^4)$. The two representations are complementary, and the
+region split of §16.7 assigns each to its own.
+
+### 16.5 In-channel curvature: the mechanism and the per-leg law
+
+The campaign localizes the need to $\mathcal M \lesssim 0.1$ (FWM,
+$O(10^2)$ tuples per target) and $\lvert\nu\rvert \lesssim 200$ (XPM). Those
+tuples already take the quadrature tier, so the constraint is the correctness
+of $p$, not cost.
+
+**The mechanism is support relocation, not broadening.** Of the sampled
+tuples whose quadratic error exceeds $2\%$, the ratio $\lvert u_0\rvert/W$ has
+median $1.020$ (p10 $0.68$, p90 $1.72$), against $1.23$ for the whole
+$\mathcal M<0.1$ stratum and $6.39$ for the sample as a whole. They sit at the
+**support edge of $\rho_{\mathbf w}$**, where the phase-matched point $u=0$ is
+only marginally reachable and the Irwin–Hall density vanishes as
+$(W-\lvert u_0\rvert)^2$. Their median $P_q = \pi^2\sum_j\lvert q_j\rvert$ is
+$8.6$ rad, larger than their distance to that edge — so the quadratic term
+does not perturb the value, it decides whether the phase-matched point lies
+inside the reachable range at all. That is consistent with the observed
+relative errors being large while the affected tuples are individually small.
+
+This has a direct consequence for the fix, and a pleasing internal
+consistency: §9 already pads the certificate by exactly $P_q$ for exactly this
+reason. The certificate knows the curvature moves the edge; the evaluator does
+not. The cheapest correction is therefore to give the evaluator the same
+quantity, exactly rather than as a bound:
+
+1. **Exact support relocation (closed form, $O(1)$).** The range of
+   $\nu_j x + q_j x^2$ over $x\in(-\pi,\pi)$ is the two endpoints
+   $\pm\nu_j\pi + q_j\pi^2$ together with the vertex value at
+   $x = -\nu_j/2q_j$ whenever that lies inside the interval; the target leg
+   contributes the range of $-q_t x_d^2$ over the masked $x_d$. Summing the
+   per-leg ranges gives the exact $[u_{\min}, u_{\max}]$ of the curved model.
+   Re-place the Irwin–Hall support on those endpoints (and, at next order,
+   correct the edge exponent). This addresses the measured mechanism directly
+   and is the natural production candidate.
+
+2. **Per-leg density convolution (reference).** The map
+   $x \mapsto \nu_j x + q_j x^2$ has a closed-form density with an
+   inverse-square-root turning point at $-\nu_j^2/4q_j$; convolve the three
+   numerically on a one-dimensional grid (one short FFT, $\sim10\,\mu$s per
+   tuple) and feed the existing $u$-space quadrature and $A_{\rm cond}$
+   unchanged. At $O(10^2)$ tuples per target this is $\sim1$ ms, negligible
+   against that tier's present $3.9$–$24$ ms per tuple.
+3. **Moment-corrected linear model.** Shift
+   $u_0 \to u_0 + \sum_j q_j \langle x_j^2\rangle$ and inflate $w_j$ to match
+   $\operatorname{Var}[u]$, keeping every closed form. Cheap, and plausibly
+   sufficient for a 3–4% correction — but not to be adopted on argument: the
+   mean shift alone is $\tfrac{\pi^2}{3}\sum_j\lvert q_j\rvert \approx 7$–13
+   rad against $W \sim 5\times10^3$ on the affected tuples, so if the measured
+   effect is instead carried by the broadening or the skew, a mean shift will
+   not reproduce it. Option 2 settles this in one sweep.
+
+The factorization over legs survives the quadratic term, which is what keeps
+all three options one-dimensional. For $x \sim \mathcal U(-\pi,\pi)$,
+
+$$
+\varphi_j(t) = \mathbb E\big[e^{it(\nu_j x + q_j x^2)}\big]
+= \frac{e^{-it\nu_j^2/4q_j}}{2\pi}\,\frac{\sqrt\pi}{2b}
+\Big[\operatorname{erf}(b\,y_2) - \operatorname{erf}(b\,y_1)\Big],
+\qquad
+b = \sqrt{-i t q_j},\quad y_{1,2} = \mp\pi + \frac{\nu_j}{2q_j},
+\tag{16.5.1}
+$$
+
+verified against direct quadrature to $\sim10^{-11}$ for $t \in [0.05, 1]$ over
+the observed $(\nu_j, q_j)$ range; the $\operatorname{sinc}$ of §4 is the
+$q_j \to 0$ limit. The characteristic function of $u$ is therefore still a
+product of three closed-form per-leg factors, and the quadratic term costs no
+extra integration dimension. This does **not** revive the $t$-space route
+abandoned in §4 for oscillatory cancellation — it only shows that the
+factorization is not what is lost there.
+
+### 16.6 How strongly the two extensions actually couple
+
+§16.2(3) predicts that the size of the curvature correction should depend on
+the kernel. Measured directly, on the same $\mathcal M<0.1$ tuples and the
+same $q_j$, by re-evaluating the mass-weighted
+$(\text{linear}-\text{full})/\text{full}$ under five kernels:
+
+| kernel | C band, $\mathcal M<0.1$ (140 tuples) | U band, $\mathcal M<0.1$ (76 tuples) |
+|---|---|---|
+| flat, $\hat K = 4\sin^2(u/2)/u^2$ (present) | $+3.301\%$ | $+3.642\%$ |
+| lossy, $a = \alpha L/2 = 0.5$ | $+3.295\%$ | $+3.646\%$ |
+| lossy, $a = \alpha L/2 = 2.3$ | $+3.206\%$ | $+3.642\%$ |
+| 4 spans, coherent ($\chi_4/16$) | $+3.342\%$ | $+3.764\%$ |
+| 10 spans, coherent ($\chi_{10}/100$) | $+3.166\%$ | $+3.762\%$ |
+
+Across a factor-20 change in the kernel's finest structure ($2\pi$ for one
+span down to $2\pi/10$ for ten) and $\alpha L/2$ from 0 to 2.3, the
+curvature correction moves by at most $4\%$ *of itself* ($3.17$–$3.34\%$ in
+C, $3.64$–$3.76\%$ in U). To the accuracy of this test the correction is a
+property of the map $x \mapsto u(x)$ and the mask, not of the kernel shape.
+
+The coupling is therefore real but weak over the range tested. It does not
+license implementing the extensions as independent multiplicative
+corrections — §16.2(2) still applies at the level of the closed forms — but
+it does mean the $\mathcal M$ threshold established on the lossless
+single-span kernel can be carried into the lossy and few-span cases without
+re-derivation, subject to re-measurement.
+
+### 16.7 Order of work and acceptance criteria
+
+0. Resolve the two campaign defects that are independent of both extensions
+   (last paragraph of this section), or they will contaminate every gate below.
+1. Replace the hard-coded $\hat K = 4\sin^2(u/2)/u^2$ by the amplitude
+   autocorrelation $R_A$ — equivalently the Legendre-coefficient form
+   (16.3.1) — with $R_A(t) = 1-\lvert t\rvert$ reproducing the present numbers
+   bit-for-bit as the regression test. This single change also unlocks loss,
+   ISRS and the multi-span factor $\chi$, and it is the change that makes
+   (16.4.2) available.
+2. Regenerate the far model and the §10.2 primitives for general $\{a_n\}$ —
+   mechanical, same primitive types. Only the $\mathcal M\gtrsim1$ region needs
+   them, and there the curvature is measured negligible, so §16.2(2) does not
+   bite: the interior is handled in lag space instead (§16.4).
+3. Build the lag-space interior evaluator (16.4.2) with the per-leg Fresnel
+   factors (16.5.1) as the *reference* on the $\mathcal M<0.1$ stratum, gated
+   against the campaign's QMC references. Then test the exact support
+   relocation (option 1 of §16.5) against it; adopt it only if it holds.
+4. Revisit `SHEET_CORE_MARGIN`. The sheet closed form currently fires on no
+   tuple of any probe, because the curvature-sensitive population fails
+   $\lvert u_0\rvert < W - 200$ by sitting at $\lvert u_0\rvert/W \approx 1$.
+   The exact curved support of §16.5 is the right quantity to test against
+   instead of the linear $W$. In the interior the sheet form also carries the
+   profile for free: $N\,T^2\!/L^2 \to 2\pi R_A(0)\,\rho_{\mathbf w}(-u_0)\,
+   A_{\rm cond}(0)$ with $R_A(0) = L_{\rm eff}/L$, so the profile collapses to
+   the single effective-length scalar anticipated in §10.6.
+5. Re-run the campaign. The acceptance criteria are the §16.1 channel-sum
+   figures: $-0.01\%$ to $+2.35\%$ (FWM) and $-0.013\%$ to $-2.22\%$ (XPM).
+
+Two findings of the same campaign are independent of both extensions and
+should be resolved first, or they will contaminate the validation: the
+systematic deviation at the far-dispatch boundary $\mathcal M \approx 1$
+(up to $\pm32\%$ per tuple, traced to the unconditional acceptance
+factorization rather than to the phase model) and the regime-2 routing
+discrepancy (up to $+807\%$ per tuple, $+0.95\%$ and $+1.58\%$ on the L- and
+U-band FWM sums).

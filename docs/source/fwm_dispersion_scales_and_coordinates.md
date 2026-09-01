@@ -516,7 +516,9 @@ SMF-28 CSV, restricted so that every configured shifted channel remains inside
 the measured profile.  At every point it computes
 
 - dedicated XPM MC for target $d$ and interferer $d+s_x$;
-- generic FWM MC for $(d,d+s_f,d+s_f,d+2s_f)$.
+- generic FWM MC for $(d,d+s_f,d+s_f,d+2s_f)$;
+- the linear-phase Fast efficiency for that same explicit repeated-pump tuple,
+  both with resolved fringes and with the upper-envelope policy.
 
 Both calculations use the TOML baud rate, 25 GHz channel grid, fiber length,
 attenuation setting, and local measured-profile coefficients through
@@ -534,6 +536,22 @@ $$
 \qquad
 \frac{N_{dabc}T^2}{L^2}.
 $$
+
+The Fast curves already return the latter dimensionless efficiency and need
+no further normalization. They are evaluated through
+`fwm_tuple_variables_for_indices`, which deliberately permits repeated legs;
+they are therefore per-tuple diagnostics and are not taken from the strict-FWM
+channel sum, whose tuple population is pairwise distinct. The resolved Fast
+curve retains the physical linear-model fringes. The upper-envelope curve
+replaces the link power kernel by
+
+$$
+k_{\rm env}(u)=\min\!\left(1,\frac{4}{u^2}\right)
+$$
+
+and is intended as a smooth envelope estimate. The MC curve retains local
+in-channel dispersion through $\beta_4$, so disagreement with either Fast
+curve also includes phase-model order, not only numerical error.
 
 This normalization removes the trivial coherent $L^2$ scale and makes a
 perfectly phase-matched, lossless value approach the passband-support fraction
