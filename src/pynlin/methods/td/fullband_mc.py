@@ -8,7 +8,7 @@ import numpy as np
 
 from pynlin.methods.td.fwm_kernel import FWMChannels
 from pynlin.methods.td.fwm_mc import estimate_fwm_term_sum_dar_mc
-from pynlin.system import System, _interp_with_linear_extrapolation
+from pynlin.system import System
 from pynlin.utils import lambda2nu, nu2lambda
 
 
@@ -95,6 +95,59 @@ def decimated_frequency_grid(system: System, factor: int = 1) -> tuple[np.ndarra
     return indices, freqs[indices]
 
 
+@dataclass(frozen=True)
+class DecimatedSystem:
+    """A decimated grid that preserves spectral density and filling factor.
+
+    Plain channel decimation keeps the band span but divides *both* the
+    filling factor ``B / delta_f`` and the average power density
+    ``P / delta_f`` by the decimation factor, so runs at different decimation
+    describe physically different systems.  FWM in particular is sensitive to
+    the filling factor: it sets the spacing-to-baud ratio ``r``, hence the
+    support acceptance ``A(d)`` and which carrier-residual families exist.
+
+    Holding both invariants under ``delta_f -> k delta_f`` forces
+
+        B -> k B          (constant filling factor B / delta_f)
+        P -> k P          (constant power density P / delta_f)
+
+    which also leaves ``d = 2 pi (f_a + f_b - f_c - f_t) / B`` invariant, so
+    the q_res family structure and the mask geometry are identical across
+    decimations.  The normalized tuple variables (u0, nu, q) then scale
+    together as ``k^2``, a similarity scaling rather than a different problem.
+    """
+
+    factor: int
+    indices: np.ndarray
+    freqs: np.ndarray
+    baud_rate: float
+    launch_power_dbm: float
+    channel_spacing: float
+
+    @property
+    def filling_factor(self) -> float:
+        return self.baud_rate / self.channel_spacing
+
+
+def decimated_system(system: System, factor: int = 1) -> DecimatedSystem:
+    """Decimate the channel grid at constant power density and filling factor.
+
+    See :class:`DecimatedSystem`.  ``factor = 1`` returns the system unchanged.
+    """
+    factor = int(factor)
+    indices, freqs = decimated_frequency_grid(system, factor)
+    spacing = float(np.abs(np.diff(np.sort(freqs))).mean()) if freqs.size > 1 else 0.0
+
+    return DecimatedSystem(
+        factor=factor,
+        indices=indices,
+        freqs=freqs,
+        baud_rate=float(system.pulse.baud_rate) * factor,
+        launch_power_dbm=float(system.launch_power) + 10.0 * np.log10(factor),
+        channel_spacing=spacing,
+    )
+
+
 def effective_area_grid(system: System, freqs: np.ndarray) -> np.ndarray:
     """Return per-frequency effective area in m^2."""
     freqs = np.asarray(freqs, dtype=float).reshape(-1)
@@ -128,26 +181,70 @@ def gamma_grid(system: System, freqs: np.ndarray) -> np.ndarray:
     return gamma_ref * (freqs / freq_ref) * (aeff_ref / aeff)
 
 
-def _beta0_abs_from_fiber(system: System, freqs: np.ndarray, beta1: np.ndarray) -> np.ndarray:
-    beta_profile = getattr(system.fiber, "_beta_profile", None)
-    freq_profile = getattr(system.fiber, "_freq_profile", None)
-    if beta_profile is not None and freq_profile is not None:
-        return _interp_with_linear_extrapolation(
-            np.asarray(freqs, dtype=float),
-            np.asarray(freq_profile, dtype=float),
-            np.asarray(beta_profile[1], dtype=float),
-        )
+def _beta0_from_curvature(
+    freqs: np.ndarray, beta1: np.ndarray, beta2: np.ndarray
+) -> np.ndarray:
+    """Build ``beta0`` whose second derivative reproduces ``beta2`` exactly.
 
+    ``beta0`` is only ever consumed inside energy-conserving four-wave
+    combinations, where the constant and linear parts cancel identically (the
+    combination is a second difference).  What survives is the curvature, so
+    ``beta0`` must be *integrated up* from ``beta2`` rather than interpolated
+    and then differenced.
+
+    Interpolating a tabulated ``beta0`` cannot work: a piecewise-linear
+    interpolant has zero curvature inside every interval, so every tuple whose
+    legs fall within one table cell gets ``u0 = 0`` -- i.e. is reported as
+    perfectly phase matched.  With a fiber profile spaced far more coarsely
+    than the channel grid, that is most of the loud tuples.
+
+    ``beta2`` is a tabulated *value*, so interpolating it is harmless.  The
+    integration below is exact for the piecewise-linear ``beta2`` it is given:
+    one exact trapezoid pass to ``beta1``, then a quadratic-exact pass to
+    ``beta0``.  The anchor value is arbitrary (it cancels) and the anchor slope
+    is taken from ``beta1`` so that shifted (``q_res != 0``) families, whose
+    mismatch does retain a linear term, stay correct.
+    """
     omega = 2.0 * np.pi * np.asarray(freqs, dtype=float)
     order = np.argsort(omega)
-    beta_sorted = np.zeros_like(omega, dtype=float)
-    omega_sorted = omega[order]
-    beta1_sorted = np.asarray(beta1, dtype=float)[order]
-    increments = 0.5 * (beta1_sorted[1:] + beta1_sorted[:-1]) * np.diff(omega_sorted)
-    beta_sorted[1:] = np.cumsum(increments)
+    w = omega[order]
+    b1 = np.asarray(beta1, dtype=float)[order]
+    b2 = np.asarray(beta2, dtype=float)[order]
+
+    if w.size < 2:
+        return np.zeros_like(omega)
+
+    h = np.diff(w)
+
+    # beta1 relative to the anchor: exact for piecewise-linear beta2.
+    slope = np.concatenate([[0.0], np.cumsum(0.5 * h * (b2[:-1] + b2[1:]))])
+
+    # beta0: integrate the now piecewise-quadratic slope exactly on each cell.
+    cell = h * slope[:-1] + 0.5 * h**2 * b2[:-1] + h**2 * (b2[1:] - b2[:-1]) / 6.0
+    curved = np.concatenate([[0.0], np.cumsum(cell)])
+
+    beta_sorted = b1[0] * (w - w[0]) + curved
     beta_abs = np.empty_like(beta_sorted)
     beta_abs[order] = beta_sorted
     return beta_abs
+
+
+def _beta0_abs_from_fiber(
+    system: System,
+    freqs: np.ndarray,
+    beta1: np.ndarray,
+    beta2: np.ndarray | None = None,
+) -> np.ndarray:
+    """Absolute propagation constant on ``freqs``, with faithful curvature.
+
+    See :func:`_beta0_from_curvature` for why this is built from ``beta2``
+    instead of interpolating the fiber's tabulated ``beta0``.
+    """
+    if beta2 is None:
+        _, beta2_grid = system.beta_grids(freqs=np.asarray(freqs, dtype=float))
+        beta2 = np.asarray(beta2_grid[0], dtype=float)
+
+    return _beta0_from_curvature(freqs, beta1, beta2)
 
 
 def _channel_params(

@@ -13,6 +13,7 @@ for path in (REPO_ROOT, REPO_ROOT / "src"):
 from analysis.standalone_numerical.validate_fwm_mc_real_tuples import (
     _polynomial_channels,
     estimate_xpm_sector_ensemble,
+    fast_linear_fwm_efficiencies,
     load_ssfm_xpm_cache,
     physical_tuple_coordinates,
     profile_sweep_targets,
@@ -73,6 +74,32 @@ def test_physical_coordinates_are_derived_without_modifying_channels():
     np.testing.assert_allclose(x_grad, length * baud_rate * expected_norm)
     np.testing.assert_allclose(mu, delta_beta / (baud_rate * expected_norm))
     assert channels.beta0_a == 3.0
+
+
+def test_fast_linear_efficiencies_accept_repeated_pump_tuple():
+    frequencies_hz = 190e12 + np.array([0.0, 25e9, 25e9, 50e9])
+    omega_offset_rad_s = 2.0 * np.pi * (frequencies_hz - frequencies_hz[0])
+    beta2_s2_per_m = np.full(4, 2.0e-27)
+    beta1_s_per_m = beta2_s2_per_m * omega_offset_rad_s
+    beta0_per_m = 0.5 * beta2_s2_per_m * omega_offset_rad_s**2
+
+    resolved, upper_envelope, resolved_time_s, upper_envelope_time_s = (
+        fast_linear_fwm_efficiencies(
+        frequencies_hz=frequencies_hz,
+        beta0_per_m=beta0_per_m,
+        beta1_s_per_m=beta1_s_per_m,
+        beta2_s2_per_m=beta2_s2_per_m,
+        symbol_rate_baud=24.5e9,
+        fiber_length_m=100e3,
+        tuple_indices_dabc=(0, 1, 2, 3),
+        )
+    )
+
+    assert np.isfinite(resolved)
+    assert np.isfinite(upper_envelope)
+    assert 0.0 <= resolved <= upper_envelope <= 2.0 / 3.0
+    assert resolved_time_s > 0.0
+    assert upper_envelope_time_s > 0.0
 
 
 def test_symmetric_degenerate_tuple_is_beta4_sensitive_at_zdw():
